@@ -1,9 +1,13 @@
 # ostt - Open Speech-to-Text
 
-**ostt** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, ostt works seamlessly on Linux and macOS.
+**ostt** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, ostt works seamlessly on **Linux and macOS**.
 
 > [!TIP]
-> **Perfect for Omarchy and Hyprland users!** Configure ostt to run as a floating popup window to record and transcribe in any app. 
+> **Omarchy and Hyprland users!** Configure ostt to run as a floating popup window to record and transcribe in any app. 
+
+<video src="https://github.com/user-attachments/assets/488e16b1-5d9a-4ccb-9aef-1a42d1204018" controls width="600">
+  Your browser does not support the video tag.
+</video>
 
 Configure any supported transcription model, authenticate with your preferred API provider, and access your transcription history anytime—all from an intuitive command-line interface.
 
