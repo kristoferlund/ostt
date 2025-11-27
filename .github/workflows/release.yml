@@ -295,7 +295,6 @@ jobs:
           persist-credentials: true
           repository: "kristoferlund/ostt"
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          ref: main
       # So we have access to the formula
       - name: Fetch homebrew formulae
         uses: actions/download-artifact@v4
@@ -323,7 +322,7 @@ jobs:
             git add "Formula/${filename}"
             git commit -m "${name} ${version}"
           done
-          git push
+          git push origin HEAD:main
 
   announce:
     needs:
