@@ -321,24 +321,12 @@ Contributions are welcome! Please open an issue or submit a pull request.
 
 ## Contributors
 
-<!-- ALL-CONTRIBUTORS-LIST:START - Do not remove or modify this section -->
-<!-- prettier-ignore-start -->
-<!-- markdownlint-disable -->
+<!-- readme: collaborators,contributors -start -->
 <table>
-  <tbody>
-    <tr>
-      <td align="center" valign="top" width="14.28%"><img src="https://avatars.githubusercontent.com/u/9698363?v=4?s=100" width="100px;" alt="Kristofer Lund"/><br /><sub><b>Kristofer Lund</b></sub><br /><a href="https://github.com/kristoferlund/ostt/commits?author=kristoferlund" title="Code">💻</a> <a href="#ideas-kristoferlund" title="Ideas, Planning, & Feedback">🤔</a> <a href="#infra-kristoferlund" title="Infrastructure (Hosting, Build-Tools, etc)">🚇</a></td>
-      <td align="center" valign="top" width="14.28%"><img src="https://avatars.githubusercontent.com/u/1507447?v=4?s=100" width="100px;" alt="Andre Padez"/><br /><sub><b>Andre Padez</b></sub><br /><a href="https://github.com/kristoferlund/ostt/commits?author=andrepadez" title="Code">💻</a></td>
-    </tr>
-  </tbody>
+<tbody>
+</tbody>
 </table>
-
-<!-- markdownlint-restore -->
-<!-- prettier-ignore-end -->
-
-<!-- ALL-CONTRIBUTORS-LIST:END -->
-
-This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification.
+<!-- readme: collaborators,contributors -end -->
 
 ## License
 

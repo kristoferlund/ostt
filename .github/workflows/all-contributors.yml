@@ -1,39 +1,20 @@
 name: All Contributors
 
 on:
-  workflow_dispatch:
-  pull_request:
-    types: [opened, closed, reopened]
-  issues:
-    types: [opened, closed, reopened]
+  push:
+    branches:
+      - main
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  add-contributors:
+  contrib-readme-job:
     runs-on: ubuntu-latest
+    name: A job to automate contrib in readme
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-
-      - name: Install all-contributors CLI
-        run: npm install -g all-contributors-cli
-
-      - name: Add contributors
-        run: all-contributors generate
+      - name: Contribute List
+        uses: akhilmhdh/contributors-readme-action@v2.3.10
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Commit changes
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git diff --exit-code || (git add README.md .all-contributorsrc && git commit -m "docs: update contributors" && git push)
