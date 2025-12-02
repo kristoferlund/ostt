@@ -20,8 +20,6 @@ jobs:
           fetch-depth: 0
 
       - name: Add contributors
-        uses: action-all-contributors/add-contributors@v0.5.1
-        with:
-          commitConvention: conventional
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
-          skipCI: true
+        uses: all-contributors/all-contributors-cli@v6
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
