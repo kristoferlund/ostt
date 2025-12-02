@@ -8,8 +8,15 @@
 # - Second execution: sends SIGUSR1 to trigger transcription, closes window
 
 # --- Configuration -----------------------------------------------------------
-OSTT_BIN="${OSTT_BIN:-$(dirname "$0")/target/debug/ostt}"
-OSTT_BIN="$(cd "$(dirname "$OSTT_BIN")" && pwd)/$(basename "$OSTT_BIN")"  # absolute path
+OSTT_BIN="${OSTT_BIN:-ostt}"
+# If OSTT_BIN is just a command name (not a path), use 'which' to find it
+if [[ "$OSTT_BIN" != */* ]]; then
+    OSTT_BIN="$(which "$OSTT_BIN" 2>/dev/null || echo "$OSTT_BIN")"
+fi
+# Convert to absolute path if it exists
+if [ -e "$OSTT_BIN" ]; then
+    OSTT_BIN="$(cd "$(dirname "$OSTT_BIN")" && pwd)/$(basename "$OSTT_BIN")"
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ALACRITTY_CONFIG="${HOME}/.config/ostt/alacritty-float.toml"

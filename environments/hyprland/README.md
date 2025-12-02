@@ -16,7 +16,7 @@ Add the following to your `~/.config/hypr/hyprland.conf`:
 
 ```hyprland
 # ostt - Speech-to-Text hotkey
-bindd = SUPER, R, exec, bash ~/.local/bin/ostt-float
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float
 
 # Window appearance (optional but recommended)
 windowrule = float, title:ostt
@@ -67,7 +67,7 @@ Change `SUPER, R` to your preferred key combination in `hyprland.conf`:
 
 ```hyprland
 # Example: Use Ctrl+Alt+R instead
-bindd = CTRL_ALT, R, exec, bash ~/.local/bin/ostt-float
+bindd = CTRL_ALT, R, ostt, exec, bash ~/.local/bin/ostt-float
 ```
 
 ## Troubleshooting
