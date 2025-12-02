@@ -20,6 +20,10 @@ pub enum TranscriptionModel {
     DeepgramNova3,
     /// Deepgram Nova 2 model (previous generation)
     DeepgramNova2,
+    /// DeepInfra Whisper Large V3 model
+    DeepInfraWhisperLargeV3,
+    /// DeepInfra Whisper Base model
+    DeepInfraWhisperBase,
 }
 
 impl TranscriptionModel {
@@ -32,6 +36,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova3 | TranscriptionModel::DeepgramNova2 => {
                 TranscriptionProvider::Deepgram
             }
+            TranscriptionModel::DeepInfraWhisperLargeV3
+            | TranscriptionModel::DeepInfraWhisperBase => TranscriptionProvider::DeepInfra,
         }
     }
 
@@ -43,6 +49,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper => "whisper",
             TranscriptionModel::DeepgramNova3 => "nova-3",
             TranscriptionModel::DeepgramNova2 => "nova-2",
+            TranscriptionModel::DeepInfraWhisperLargeV3 => "deepinfra-whisper-large-v3",
+            TranscriptionModel::DeepInfraWhisperBase => "deepinfra-whisper-base",
         }
     }
 
@@ -54,6 +62,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper => "Whisper (legacy)",
             TranscriptionModel::DeepgramNova3 => "Nova 3 (latest, fastest)",
             TranscriptionModel::DeepgramNova2 => "Nova 2 (previous generation)",
+            TranscriptionModel::DeepInfraWhisperLargeV3 => "Whisper Large V3 (best accuracy)",
+            TranscriptionModel::DeepInfraWhisperBase => "Whisper Base (fast, lightweight)",
         }
     }
 
@@ -66,6 +76,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova3 | TranscriptionModel::DeepgramNova2 => {
                 "https://api.deepgram.com/v1/listen"
             }
+            TranscriptionModel::DeepInfraWhisperLargeV3
+            | TranscriptionModel::DeepInfraWhisperBase => "https://api.deepinfra.com/v1/inference",
         }
     }
 
@@ -77,6 +89,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper => "whisper-1",
             TranscriptionModel::DeepgramNova3 => "nova-3",
             TranscriptionModel::DeepgramNova2 => "nova-2",
+            TranscriptionModel::DeepInfraWhisperLargeV3 => "openai/whisper-large-v3",
+            TranscriptionModel::DeepInfraWhisperBase => "openai/whisper-base",
         }
     }
 
@@ -88,6 +102,8 @@ impl TranscriptionModel {
             "whisper" => Some(TranscriptionModel::Whisper),
             "nova-3" => Some(TranscriptionModel::DeepgramNova3),
             "nova-2" => Some(TranscriptionModel::DeepgramNova2),
+            "deepinfra-whisper-large-v3" => Some(TranscriptionModel::DeepInfraWhisperLargeV3),
+            "deepinfra-whisper-base" => Some(TranscriptionModel::DeepInfraWhisperBase),
             _ => None,
         }
     }
@@ -100,6 +116,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper,
             TranscriptionModel::DeepgramNova3,
             TranscriptionModel::DeepgramNova2,
+            TranscriptionModel::DeepInfraWhisperLargeV3,
+            TranscriptionModel::DeepInfraWhisperBase,
         ]
     }
 
