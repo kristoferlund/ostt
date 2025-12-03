@@ -20,6 +20,10 @@ pub enum TranscriptionModel {
     DeepgramNova3,
     /// Deepgram Nova 2 model (previous generation)
     DeepgramNova2,
+    /// Parakeet TDT 0.6B v2 model (local, English-only, offline)
+    ParakeetTdtV2,
+    /// Parakeet TDT 0.6B v3 model (local, 25 European languages, offline)
+    ParakeetTdtV3,
 }
 
 impl TranscriptionModel {
@@ -32,6 +36,9 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova3 | TranscriptionModel::DeepgramNova2 => {
                 TranscriptionProvider::Deepgram
             }
+            TranscriptionModel::ParakeetTdtV2 | TranscriptionModel::ParakeetTdtV3 => {
+                TranscriptionProvider::Parakeet
+            }
         }
     }
 
@@ -43,6 +50,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper => "whisper",
             TranscriptionModel::DeepgramNova3 => "nova-3",
             TranscriptionModel::DeepgramNova2 => "nova-2",
+            TranscriptionModel::ParakeetTdtV2 => "parakeet-tdt-v2",
+            TranscriptionModel::ParakeetTdtV3 => "parakeet-tdt-v3",
         }
     }
 
@@ -54,6 +63,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper => "Whisper (legacy)",
             TranscriptionModel::DeepgramNova3 => "Nova 3 (latest, fastest)",
             TranscriptionModel::DeepgramNova2 => "Nova 2 (previous generation)",
+            TranscriptionModel::ParakeetTdtV2 => "Parakeet TDT v2 (English, offline, ~600MB)",
+            TranscriptionModel::ParakeetTdtV3 => "Parakeet TDT v3 (25 languages, offline, ~2GB)",
         }
     }
 
@@ -66,6 +77,9 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova3 | TranscriptionModel::DeepgramNova2 => {
                 "https://api.deepgram.com/v1/listen"
             }
+            TranscriptionModel::ParakeetTdtV2 | TranscriptionModel::ParakeetTdtV3 => {
+                "local" // Local inference, no API endpoint
+            }
         }
     }
 
@@ -77,6 +91,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper => "whisper-1",
             TranscriptionModel::DeepgramNova3 => "nova-3",
             TranscriptionModel::DeepgramNova2 => "nova-2",
+            TranscriptionModel::ParakeetTdtV2 => "parakeet-tdt-0.6b-v2",
+            TranscriptionModel::ParakeetTdtV3 => "parakeet-tdt-0.6b-v3",
         }
     }
 
@@ -88,6 +104,8 @@ impl TranscriptionModel {
             "whisper" => Some(TranscriptionModel::Whisper),
             "nova-3" => Some(TranscriptionModel::DeepgramNova3),
             "nova-2" => Some(TranscriptionModel::DeepgramNova2),
+            "parakeet-tdt-v2" => Some(TranscriptionModel::ParakeetTdtV2),
+            "parakeet-tdt-v3" => Some(TranscriptionModel::ParakeetTdtV3),
             _ => None,
         }
     }
@@ -100,6 +118,8 @@ impl TranscriptionModel {
             TranscriptionModel::Whisper,
             TranscriptionModel::DeepgramNova3,
             TranscriptionModel::DeepgramNova2,
+            TranscriptionModel::ParakeetTdtV2,
+            TranscriptionModel::ParakeetTdtV3,
         ]
     }
 

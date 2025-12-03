@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub enum TranscriptionProvider {
     OpenAI,
     Deepgram,
+    /// Local Parakeet model (offline, no API required)
+    Parakeet,
 }
 
 impl TranscriptionProvider {
@@ -17,6 +19,7 @@ impl TranscriptionProvider {
         match self {
             TranscriptionProvider::OpenAI => "openai",
             TranscriptionProvider::Deepgram => "deepgram",
+            TranscriptionProvider::Parakeet => "parakeet",
         }
     }
 
@@ -24,6 +27,7 @@ impl TranscriptionProvider {
         match self {
             TranscriptionProvider::OpenAI => "OpenAI",
             TranscriptionProvider::Deepgram => "Deepgram",
+            TranscriptionProvider::Parakeet => "Parakeet (Local)",
         }
     }
 
@@ -31,6 +35,7 @@ impl TranscriptionProvider {
         match id {
             "openai" => Some(TranscriptionProvider::OpenAI),
             "deepgram" => Some(TranscriptionProvider::Deepgram),
+            "parakeet" => Some(TranscriptionProvider::Parakeet),
             _ => None,
         }
     }
@@ -39,6 +44,7 @@ impl TranscriptionProvider {
         &[
             TranscriptionProvider::OpenAI,
             TranscriptionProvider::Deepgram,
+            TranscriptionProvider::Parakeet,
         ]
     }
 }

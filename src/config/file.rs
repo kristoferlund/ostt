@@ -103,6 +103,22 @@ pub struct OpenAiConfig {
     // Add here as OpenAI features become configurable
 }
 
+/// Parakeet local model configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParakeetConfig {
+    /// Use GPU acceleration if available (requires CUDA/ROCm)
+    #[serde(default)]
+    pub use_gpu: bool,
+}
+
+impl Default for ParakeetConfig {
+    fn default() -> Self {
+        Self {
+            use_gpu: false,
+        }
+    }
+}
+
 /// Provider-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProviderConfig {
@@ -112,6 +128,9 @@ pub enum ProviderConfig {
     /// OpenAI provider configuration
     #[serde(rename = "openai")]
     OpenAi(OpenAiConfig),
+    /// Parakeet local model configuration
+    #[serde(rename = "parakeet")]
+    Parakeet(ParakeetConfig),
 }
 
 /// All provider configurations
@@ -121,6 +140,8 @@ pub struct ProvidersConfig {
     pub deepgram: DeepgramConfig,
     #[serde(default)]
     pub openai: OpenAiConfig,
+    #[serde(default)]
+    pub parakeet: ParakeetConfig,
 }
 
 /// Complete application configuration.

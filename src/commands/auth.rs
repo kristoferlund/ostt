@@ -62,39 +62,55 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
 
     let (selected_provider, selected_model) = &provider_model_options[selected_idx];
 
-    // Check if we already have an API key for this provider
-    let current_api_key = config::get_api_key(selected_provider.id()).ok().flatten();
+    // Parakeet is a local model and doesn't need an API key
+    if *selected_provider != transcription::TranscriptionProvider::Parakeet {
+        // Check if we already have an API key for this provider
+        let current_api_key = config::get_api_key(selected_provider.id()).ok().flatten();
 
-    // Prompt for API key with optional entry (keep current if just pressing Enter)
-    let api_key = if current_api_key.is_some() {
-        let api_key_prompt = format!(
-            "Enter API key for {} (press Enter to keep current):",
-            selected_provider.name()
-        );
-        password(&api_key_prompt)
-            .allow_empty()
-            .interact()
-            .map_err(|e| anyhow::anyhow!("API key input cancelled: {e}"))?
-    } else {
-        let api_key_prompt = format!("Enter API key for {}:", selected_provider.name());
-        password(&api_key_prompt)
-            .interact()
-            .map_err(|e| anyhow::anyhow!("API key input cancelled: {e}"))?
-    };
-
-    // If empty input and we have a current key, keep the current one
-    let api_key_to_save = if api_key.is_empty() {
-        if let Some(key) = current_api_key {
-            key
+        // Prompt for API key with optional entry (keep current if just pressing Enter)
+        let api_key = if current_api_key.is_some() {
+            let api_key_prompt = format!(
+                "Enter API key for {} (press Enter to keep current):",
+                selected_provider.name()
+            );
+            password(&api_key_prompt)
+                .allow_empty()
+                .interact()
+                .map_err(|e| anyhow::anyhow!("API key input cancelled: {e}"))?
         } else {
-            return Err(anyhow::anyhow!("API key cannot be empty"));
-        }
-    } else {
-        api_key
-    };
+            let api_key_prompt = format!("Enter API key for {}:", selected_provider.name());
+            password(&api_key_prompt)
+                .interact()
+                .map_err(|e| anyhow::anyhow!("API key input cancelled: {e}"))?
+        };
 
-    // Save the API key for this provider
-    config::save_api_key(selected_provider.id(), &api_key_to_save)?;
+        // If empty input and we have a current key, keep the current one
+        let api_key_to_save = if api_key.is_empty() {
+            if let Some(key) = current_api_key {
+                key
+            } else {
+                return Err(anyhow::anyhow!("API key cannot be empty"));
+            }
+        } else {
+            api_key
+        };
+
+        // Save the API key for this provider
+        config::save_api_key(selected_provider.id(), &api_key_to_save)?;
+    } else {
+        let model_dir = match selected_model {
+            transcription::TranscriptionModel::ParakeetTdtV2 => "parakeet-tdt-v2",
+            transcription::TranscriptionModel::ParakeetTdtV3 => "parakeet-tdt-v3",
+            _ => "parakeet", // fallback
+        };
+        note(
+            "Local Model",
+            format!(
+                "Parakeet runs locally - no API key required!\nMake sure model files are downloaded to:\n  ~/.config/ostt/models/{}/",
+                model_dir
+            ),
+        )?;
+    }
 
     // Save the selected model to secrets (not to config file)
     config::save_selected_model(selected_provider.id(), selected_model.id())?;

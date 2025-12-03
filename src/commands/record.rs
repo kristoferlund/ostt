@@ -119,19 +119,41 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
     }
 
     tracing::info!("Stopping recording and saving audio...");
-    let codec = config_data
-        .audio
-        .output_format
-        .split_whitespace()
-        .next()
-        .unwrap_or("mp3");
-    let extension = match codec {
-        "libopus" => "ogg",
-        "libvorbis" => "ogg",
-        "flac" => "flac",
-        "aac" => "m4a",
-        "pcm_s16le" => "wav",
-        _ => codec,
+
+    use crate::transcription;
+
+    // Get the selected model to determine output format
+    let selected_model_id = config::get_selected_model().ok().flatten();
+    let is_local_model = if let Some(ref model_id) = selected_model_id {
+        if let Some(model) = transcription::TranscriptionModel::from_id(model_id) {
+            model.provider() == transcription::TranscriptionProvider::Parakeet
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
+    // For local models, save as WAV at 16kHz (sherpa-rs requirement)
+    // For cloud APIs, use configured output format (usually compressed MP3)
+    let (extension, output_format) = if is_local_model {
+        ("wav", "pcm_s16le -ar 16000".to_string())
+    } else {
+        let codec = config_data
+            .audio
+            .output_format
+            .split_whitespace()
+            .next()
+            .unwrap_or("mp3");
+        let ext = match codec {
+            "libopus" => "ogg",
+            "libvorbis" => "ogg",
+            "flac" => "flac",
+            "aac" => "m4a",
+            "pcm_s16le" => "wav",
+            _ => codec,
+        };
+        (ext, config_data.audio.output_format.clone())
     };
 
     // Save to temp directory with ostt-recording prefix
@@ -140,15 +162,13 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
     let filepath = temp_dir.join(&filename);
 
     audio_recorder
-        .stop_recording(Some(filepath.clone()), &config_data.audio.output_format)
+        .stop_recording(Some(filepath.clone()), &output_format)
         .map_err(|e| {
             tracing::error!("Failed to save recording: {}", e);
             e
         })?;
 
     if should_transcribe {
-        // Get the selected model from secrets (stored when user runs 'ostt auth')
-        let selected_model_id = config::get_selected_model().ok().flatten();
 
         if let Some(model_id) = selected_model_id {
             let filepath_str = filepath.to_string_lossy().to_string();
@@ -208,20 +228,25 @@ async fn transcribe_recording_with_animation(
 
     let provider = model.provider();
 
-    let api_key = match config::get_api_key(provider.id())? {
-        Some(key) => key,
-        None => {
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&format!(
-                "Error: No API key for {}. Please run 'ostt auth'",
-                provider.name()
-            ))?;
-            error_screen.cleanup()?;
-            return Err(anyhow::anyhow!(
-                "No API key found for provider '{}'. Please run 'ostt auth' to authorize this provider.",
-                provider.id()
-            ));
+    // Parakeet is local and doesn't need an API key
+    let api_key = if provider == transcription::TranscriptionProvider::Parakeet {
+        String::new() // Empty string for local models
+    } else {
+        match config::get_api_key(provider.id())? {
+            Some(key) => key,
+            None => {
+                tui.cleanup().ok();
+                let mut error_screen = ErrorScreen::new()?;
+                error_screen.show_error(&format!(
+                    "Error: No API key for {}. Please run 'ostt auth'",
+                    provider.name()
+                ))?;
+                error_screen.cleanup()?;
+                return Err(anyhow::anyhow!(
+                    "No API key found for provider '{}'. Please run 'ostt auth' to authorize this provider.",
+                    provider.id()
+                ));
+            }
         }
     };
 
