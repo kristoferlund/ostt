@@ -24,6 +24,10 @@ pub enum TranscriptionModel {
     DeepInfraWhisperLargeV3,
     /// DeepInfra Whisper Base model
     DeepInfraWhisperBase,
+    /// Groq Whisper Large V3 model
+    GroqWhisperLargeV3,
+    /// Groq Whisper Large V3 Turbo model (faster)
+    GroqWhisperLargeV3Turbo,
 }
 
 impl TranscriptionModel {
@@ -38,6 +42,8 @@ impl TranscriptionModel {
             }
             TranscriptionModel::DeepInfraWhisperLargeV3
             | TranscriptionModel::DeepInfraWhisperBase => TranscriptionProvider::DeepInfra,
+            TranscriptionModel::GroqWhisperLargeV3
+            | TranscriptionModel::GroqWhisperLargeV3Turbo => TranscriptionProvider::Groq,
         }
     }
 
@@ -51,6 +57,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova2 => "nova-2",
             TranscriptionModel::DeepInfraWhisperLargeV3 => "deepinfra-whisper-large-v3",
             TranscriptionModel::DeepInfraWhisperBase => "deepinfra-whisper-base",
+            TranscriptionModel::GroqWhisperLargeV3 => "groq-whisper-large-v3",
+            TranscriptionModel::GroqWhisperLargeV3Turbo => "groq-whisper-large-v3-turbo",
         }
     }
 
@@ -64,6 +72,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova2 => "Nova 2 (previous generation)",
             TranscriptionModel::DeepInfraWhisperLargeV3 => "Whisper Large V3 (best accuracy)",
             TranscriptionModel::DeepInfraWhisperBase => "Whisper Base (fast, lightweight)",
+            TranscriptionModel::GroqWhisperLargeV3 => "Whisper Large V3 (high accuracy)",
+            TranscriptionModel::GroqWhisperLargeV3Turbo => "Whisper Large V3 Turbo (fastest)",
         }
     }
 
@@ -78,6 +88,8 @@ impl TranscriptionModel {
             }
             TranscriptionModel::DeepInfraWhisperLargeV3
             | TranscriptionModel::DeepInfraWhisperBase => "https://api.deepinfra.com/v1/inference",
+            TranscriptionModel::GroqWhisperLargeV3
+            | TranscriptionModel::GroqWhisperLargeV3Turbo => "https://api.groq.com/openai/v1/audio/transcriptions",
         }
     }
 
@@ -91,6 +103,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova2 => "nova-2",
             TranscriptionModel::DeepInfraWhisperLargeV3 => "openai/whisper-large-v3",
             TranscriptionModel::DeepInfraWhisperBase => "openai/whisper-base",
+            TranscriptionModel::GroqWhisperLargeV3 => "whisper-large-v3",
+            TranscriptionModel::GroqWhisperLargeV3Turbo => "whisper-large-v3-turbo",
         }
     }
 
@@ -104,6 +118,8 @@ impl TranscriptionModel {
             "nova-2" => Some(TranscriptionModel::DeepgramNova2),
             "deepinfra-whisper-large-v3" => Some(TranscriptionModel::DeepInfraWhisperLargeV3),
             "deepinfra-whisper-base" => Some(TranscriptionModel::DeepInfraWhisperBase),
+            "groq-whisper-large-v3" => Some(TranscriptionModel::GroqWhisperLargeV3),
+            "groq-whisper-large-v3-turbo" => Some(TranscriptionModel::GroqWhisperLargeV3Turbo),
             _ => None,
         }
     }
@@ -118,6 +134,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepgramNova2,
             TranscriptionModel::DeepInfraWhisperLargeV3,
             TranscriptionModel::DeepInfraWhisperBase,
+            TranscriptionModel::GroqWhisperLargeV3,
+            TranscriptionModel::GroqWhisperLargeV3Turbo,
         ]
     }
 

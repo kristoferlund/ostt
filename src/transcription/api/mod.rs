@@ -7,6 +7,7 @@
 mod openai;
 mod deepgram;
 mod deepinfra;
+mod groq;
 
 use serde::Deserialize;
 use std::path::Path;
@@ -82,6 +83,9 @@ pub async fn transcribe(
         }
         TranscriptionProvider::DeepInfra => {
             deepinfra::transcribe(config, audio_path).await
+        }
+        TranscriptionProvider::Groq => {
+            groq::transcribe(config, audio_path).await
         }
     }?;
 

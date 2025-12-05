@@ -11,6 +11,7 @@ pub enum TranscriptionProvider {
     OpenAI,
     Deepgram,
     DeepInfra,
+    Groq,
 }
 
 impl TranscriptionProvider {
@@ -19,6 +20,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::OpenAI => "openai",
             TranscriptionProvider::Deepgram => "deepgram",
             TranscriptionProvider::DeepInfra => "deepinfra",
+            TranscriptionProvider::Groq => "groq",
         }
     }
 
@@ -27,6 +29,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::OpenAI => "OpenAI",
             TranscriptionProvider::Deepgram => "Deepgram",
             TranscriptionProvider::DeepInfra => "DeepInfra",
+            TranscriptionProvider::Groq => "Groq",
         }
     }
 
@@ -35,6 +38,7 @@ impl TranscriptionProvider {
             "openai" => Some(TranscriptionProvider::OpenAI),
             "deepgram" => Some(TranscriptionProvider::Deepgram),
             "deepinfra" => Some(TranscriptionProvider::DeepInfra),
+            "groq" => Some(TranscriptionProvider::Groq),
             _ => None,
         }
     }
@@ -44,6 +48,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::OpenAI,
             TranscriptionProvider::Deepgram,
             TranscriptionProvider::DeepInfra,
+            TranscriptionProvider::Groq,
         ]
     }
 }
