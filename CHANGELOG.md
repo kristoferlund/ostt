@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.4] - 2025-12-05
+
+### Added
+
+- **DeepInfra provider** with 2 models: Whisper Large V3 and Whisper Base
+- **Groq provider** with 2 models: Whisper Large V3 and Whisper Large V3 Turbo
+- Logging configuration documentation in README with `RUST_LOG` environment variable support
+
+### Changed
+
+- Default log level changed from `debug` to `info` for cleaner log output
+- Improved logging clarity: reduced redundant messages and moved verbose logs to DEBUG level
+- Keywords UI input text now uses clean white color instead of yellow
+- Help text on keywords and history screens now shows "esc/q exit" instead of "q quit"
+- Suppressed redundant error message when canceling auth command
+
 ## [0.0.3] - 2025-12-02
 
 ### Fixed
