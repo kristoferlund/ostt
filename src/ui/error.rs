@@ -103,14 +103,12 @@ impl ErrorScreen {
     /// - If terminal mode cannot be disabled
     /// - If cursor cannot be shown
     pub fn cleanup(&mut self) -> anyhow::Result<()> {
-        tracing::debug!("Cleaning up error screen");
         disable_raw_mode()?;
         execute!(
             self.terminal.backend_mut(),
             LeaveAlternateScreen
         )?;
         self.terminal.show_cursor()?;
-        tracing::debug!("Error screen cleanup complete");
         Ok(())
     }
 }

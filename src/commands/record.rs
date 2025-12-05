@@ -69,7 +69,7 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
     signal_hook::flag::register(signal_hook::consts::SIGUSR1, term_clone)
         .map_err(|e| anyhow::anyhow!("Failed to register signal handler: {e}"))?;
 
-    tracing::info!(
+    tracing::debug!(
         "Entering recording loop. Press 'Enter' to transcribe or 'Escape'/'q' to cancel."
     );
     let mut frame_count = 0u64;
@@ -96,12 +96,10 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
                     .map_err(|e| anyhow::anyhow!("Render failed: {e}"))?;
             }
             Ok(RecordingCommand::Transcribe) => {
-                tracing::info!("User pressed Enter: transcribing recording");
                 should_transcribe = true;
                 break;
             }
             Ok(RecordingCommand::Cancel) => {
-                tracing::info!("User pressed Escape: canceling recording without transcription");
                 break;
             }
             Ok(RecordingCommand::TogglePause) => {
@@ -118,7 +116,7 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
         }
     }
 
-    tracing::info!("Stopping recording and saving audio...");
+    tracing::debug!("Stopping recording and saving audio...");
     let codec = config_data
         .audio
         .output_format
@@ -164,14 +162,12 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
                 eprintln!("Warning: Transcription failed: {e}");
             }
         } else {
-            tracing::warn!("No transcription model configured");
+            tracing::debug!("No transcription model configured");
             tui.cleanup().ok();
             let mut error_screen = ErrorScreen::new()?;
             error_screen.show_error("Error: No transcription model configured.\n\nPlease run 'ostt auth' to select a model.")?;
             error_screen.cleanup()?;
         }
-    } else {
-        tracing::info!("User canceled recording, no transcription performed");
     }
 
     tui.cleanup()
@@ -249,7 +245,7 @@ async fn transcribe_recording_with_animation(
         config_data.providers.clone(),
     );
 
-    tracing::info!(
+    tracing::debug!(
         "Starting transcription with model '{}' for file '{}'",
         model_id,
         audio_filename
@@ -276,8 +272,7 @@ async fn transcribe_recording_with_animation(
 
     match transcription_handle.await {
         Ok(Ok(text)) => {
-            tracing::info!("Transcription completed successfully");
-            tracing::info!("Transcribed text: {}", text);
+            tracing::info!("Transcription completed: {}", text);
 
             let data_dir = dirs::home_dir()
                 .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
@@ -292,10 +287,10 @@ async fn transcribe_recording_with_animation(
 
             match copy_to_clipboard(&text) {
                 Ok(_) => {
-                    tracing::info!("Transcribed text copied to clipboard");
+                    tracing::debug!("Transcribed text copied to clipboard");
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to copy transcribed text to clipboard: {}", e);
+                    tracing::warn!("Failed to copy to clipboard: {}", e);
                 }
             }
 

@@ -308,19 +308,19 @@ impl OsttTui {
             if let Event::Key(key) = event::read()? {
                 return Ok(match key.code {
                     KeyCode::Enter => {
-                        tracing::info!("Enter pressed: proceeding to transcription");
+                        tracing::debug!("Enter pressed: proceeding to transcription");
                         RecordingCommand::Transcribe
                     }
                     KeyCode::Char('q') | KeyCode::Esc => {
-                        tracing::info!("Escape or 'q' pressed: canceling recording");
+                        tracing::debug!("Escape or 'q' pressed: canceling recording");
                         RecordingCommand::Cancel
                     }
                     KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
-                        tracing::info!("Ctrl+C pressed: canceling recording");
+                        tracing::debug!("Ctrl+C pressed: canceling recording");
                         RecordingCommand::Cancel
                     }
                     KeyCode::Char(' ') => {
-                        tracing::info!("Space pressed: toggling pause");
+                        tracing::debug!("Space pressed: toggling pause");
                         self.toggle_pause_state();
                         RecordingCommand::TogglePause
                     }
@@ -384,14 +384,12 @@ impl OsttTui {
     /// - If terminal mode cannot be disabled
     /// - If cursor cannot be shown
     pub fn cleanup(&mut self) -> Result<(), Box<dyn Error>> {
-        tracing::debug!("Cleaning up terminal");
         disable_raw_mode()?;
         execute!(
             self.terminal.backend_mut(),
             crossterm::terminal::LeaveAlternateScreen
         )?;
         self.terminal.show_cursor()?;
-        tracing::debug!("Terminal cleanup complete");
         Ok(())
     }
 }

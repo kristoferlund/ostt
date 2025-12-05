@@ -246,6 +246,22 @@ Add technical terms, names, or domain-specific vocabulary to help the AI transcr
 
 ## Troubleshooting
 
+### Logging
+
+ostt logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation. By default, logs are set to `info` level.
+
+**View recent logs:**
+```bash
+ostt logs
+```
+
+**Enable debug logging for detailed troubleshooting:**
+```bash
+RUST_LOG=debug ostt record
+```
+
+**Available log levels:** `error`, `warn`, `info` (default), `debug`, `trace`
+
 ### No Audio Input Detected
 
 ```bash
@@ -266,8 +282,8 @@ The reference level may be set too high/low for your audio card. Run ostt, maxim
 # Verify authentication
 ostt auth
 
-# Check logs
-ostt logs
+# Check logs with debug output
+RUST_LOG=debug ostt record
 ```
 
 ### Hyprland Window Not Appearing

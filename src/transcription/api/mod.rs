@@ -68,10 +68,9 @@ pub async fn transcribe(
     audio_path: &Path,
 ) -> anyhow::Result<String> {
     tracing::info!(
-        "Starting transcription using model: {} (provider: {}) from file: {}",
-        config.model.id(),
+        "Transcribing with {} ({})",
         config.model.provider().name(),
-        audio_path.display()
+        config.model.id()
     );
 
     let result = match config.model.provider() {
@@ -89,6 +88,5 @@ pub async fn transcribe(
         }
     }?;
 
-    tracing::info!("Transcription completed successfully");
     Ok(result)
 }

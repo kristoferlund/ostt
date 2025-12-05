@@ -16,7 +16,7 @@ static APPENDER_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = O
 /// Initializes the logging system with file-based output.
 ///
 /// Sets up a non-blocking rolling file appender that rotates daily.
-/// Log level is controlled by the RUST_LOG environment variable (defaults to "debug").
+/// Log level is controlled by the RUST_LOG environment variable (defaults to "info").
 ///
 /// # Errors
 /// - If the log directory cannot be determined or created
@@ -33,7 +33,7 @@ pub fn init_logging() -> Result<(), anyhow::Error> {
         .map_err(|_| anyhow::anyhow!("Logging already initialized"))?;
 
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("debug"));
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 
     tracing_subscriber::registry()
         .with(env_filter)

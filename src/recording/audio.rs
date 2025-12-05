@@ -336,13 +336,13 @@ impl AudioRecorder {
     /// Pauses recording without stopping the audio stream or losing samples.
     pub fn pause(&self) {
         *self.is_paused.lock().unwrap() = true;
-        tracing::info!("Recording paused");
+        tracing::debug!("Recording paused");
     }
 
     /// Resumes recording from a paused state.
     pub fn resume(&self) {
         *self.is_paused.lock().unwrap() = false;
-        tracing::info!("Recording resumed");
+        tracing::debug!("Recording resumed");
     }
 
     /// Returns whether recording is currently paused.
@@ -355,9 +355,9 @@ impl AudioRecorder {
         let mut paused = self.is_paused.lock().unwrap();
         *paused = !*paused;
         if *paused {
-            tracing::info!("Recording paused");
+            tracing::debug!("Recording paused");
         } else {
-            tracing::info!("Recording resumed");
+            tracing::debug!("Recording resumed");
         }
     }
 }
