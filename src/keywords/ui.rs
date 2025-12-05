@@ -305,7 +305,7 @@ impl KeywordsViewer {
         frame.render_widget(&input_block, input_area);
         let input_inner = input_block.inner(input_area);
 
-        let input_widget = Paragraph::new(input_value).style(Style::default().fg(Color::Yellow));
+        let input_widget = Paragraph::new(input_value).style(Style::default().fg(Color::Rgb(255, 255, 255)));
         frame.render_widget(input_widget, input_inner);
 
         // Cursor position based on tui_input cursor
