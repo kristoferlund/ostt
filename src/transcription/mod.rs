@@ -2,7 +2,6 @@
 //!
 //! This module provides support for multiple transcription providers and models through a
 //! unified interface. Each provider has its own API endpoint and authentication method.
-//! Currently supports OpenAI's Whisper model for high-quality speech recognition.
 
 pub mod animation;
 pub mod api;

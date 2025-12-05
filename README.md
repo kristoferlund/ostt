@@ -16,10 +16,33 @@
 - Configurable reference level for clipping detection
 - Audio clipping detection with pause/resume support
 - Audio compression for fast API calls
-- Multiple transcription providers (OpenAI, Deepgram)
+- Multiple transcription providers and models
 - Browsable transcription history
 - Keyword management for improved accuracy
 - Cross-platform: Linux and macOS support
+
+## Supported Providers & Models
+
+ostt supports multiple AI transcription providers. Bring your own API key and choose from the following:
+
+### OpenAI
+- **gpt-4o-transcribe** - Latest model with best accuracy
+- **gpt-4o-mini-transcribe** - Faster, lighter model
+- **whisper-1** - Legacy Whisper model
+
+### Deepgram
+- **nova-3** - Latest generation, fastest processing
+- **nova-2** - Previous generation model
+
+### DeepInfra
+- **deepinfra-whisper-large-v3** - High accuracy Whisper model
+- **deepinfra-whisper-base** - Fast, lightweight model
+
+### Groq
+- **groq-whisper-large-v3** - High accuracy processing
+- **groq-whisper-large-v3-turbo** - Fastest transcription speed
+
+Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
 
@@ -67,7 +90,7 @@ ffmpeg xclip         # For X11
 
 After installation, set up authentication and start recording:
 
-**Authentication:** ostt is a bring-your-own-API-key application. You need an API key from either OpenAI or Deepgram. Authenticate once with your preferred provider, then freely switch between available models.
+**Authentication:** ostt is a bring-your-own-API-key application. Authenticate once with your preferred provider, then freely switch between available models.
 
 ```bash
 # Configure your transcription provider
@@ -160,8 +183,8 @@ ostt auth
 ```
 
 This will:
-- Show available providers (OpenAI, Deepgram)
-- Let you select a model
+- Show available providers and models
+- Let you select your preferred model
 - Prompt for your API key
 - Save everything securely
 
