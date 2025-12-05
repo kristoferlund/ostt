@@ -6,6 +6,7 @@
 
 mod openai;
 mod deepgram;
+mod deepinfra;
 
 use serde::Deserialize;
 use std::path::Path;
@@ -78,6 +79,9 @@ pub async fn transcribe(
         }
         TranscriptionProvider::Deepgram => {
             deepgram::transcribe(config, audio_path).await
+        }
+        TranscriptionProvider::DeepInfra => {
+            deepinfra::transcribe(config, audio_path).await
         }
     }?;
 
