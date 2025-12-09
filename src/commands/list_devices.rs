@@ -14,16 +14,27 @@ use std::os::unix::io::AsRawFd;
 /// - If the audio host cannot be initialized
 pub fn handle_list_devices() -> Result<(), anyhow::Error> {
     // Enumerate devices while suppressing ALSA library warnings
-    let (host, devices) = suppress_stderr(|| {
+    let (host, device_results) = suppress_stderr(|| {
         let host = cpal::default_host();
-        let devices: Vec<_> = host
+        let device_iter = host
             .input_devices()
-            .map_err(|e| anyhow!("Failed to enumerate audio devices: {e}"))?
+            .map_err(|e| anyhow!("Failed to enumerate audio devices: {e}"))?;
+        
+        // Collect devices, skipping any that fail to query
+        let devices: Vec<cpal::Device> = device_iter
+            .filter_map(|d| {
+                // Test if we can get the device name without crashing
+                match d.name() {
+                    Ok(_) => Some(d),
+                    Err(_) => None,
+                }
+            })
             .collect();
+        
         Ok((host, devices))
     })?;
 
-    if devices.is_empty() {
+    if device_results.is_empty() {
         println!("No audio input devices found on this system.");
         return Ok(());
     }
@@ -40,19 +51,22 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
         .default_input_device()
         .and_then(|d| d.name().ok());
 
-    for (index, device) in devices.iter().enumerate() {
+    for (index, device) in device_results.iter().enumerate() {
         let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
         let is_default = default_device.as_ref() == Some(&device_name);
 
         let default_indicator = if is_default { " [DEFAULT]" } else { "" };
 
         // Get configuration info
-        let config_info = if let Ok(config) = device.default_input_config() {
-            let sample_rate = config.sample_rate().0;
-            let channels = config.channels();
-            format!(" ({}Hz, {} channels)", sample_rate, channels)
-        } else {
-            String::new()
+        let config_info = match device.default_input_config() {
+            Ok(config) => {
+                let sample_rate = config.sample_rate().0;
+                let channels = config.channels();
+                format!(" ({}Hz, {} channels)", sample_rate, channels)
+            }
+            Err(_) => {
+                " (configuration unavailable)".to_string()
+            }
         };
 
         println!("  ID: {}", index);
