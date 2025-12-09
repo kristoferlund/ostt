@@ -1,7 +1,7 @@
-//! Terminal user interface for audio recording with waveform visualization.
+//! Terminal user interface for audio recording with configurable visualization.
 //!
-//! Provides real-time volume display, recording duration tracking, and user input handling
-//! for the recording workflow.
+//! Supports frequency spectrum and time-domain waveform visualization modes.
+//! Handles real-time display updates, volume metering, and user input during recording.
 
 use crossterm::{
     event::{self, Event, KeyCode},
@@ -16,7 +16,10 @@ use ratatui::{
 use std::error::Error;
 use std::io::{stdout, Stdout};
 
+use crate::config::VisualizationType;
 use crate::transcription::TranscriptionAnimation;
+
+use super::visualizations::{SpectrumAnalyzer, update_waveform, resize_waveform};
 
 /// User input command during recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,12 +34,13 @@ pub enum RecordingCommand {
     TogglePause,
 }
 
-/// Terminal UI for audio recording with waveform visualization.
+/// Terminal UI for audio recording with configurable visualization.
 ///
-/// Displays real-time volume levels, recording duration, and animated transcription progress.
+/// Supports multiple visualization types: frequency spectrum or time-domain waveform.
+/// Displays real-time visualization, volume levels, recording duration, and animated transcription progress.
 pub struct OsttTui {
     terminal: Terminal<CrosstermBackend<Stdout>>,
-    volume_history: Vec<u64>,
+    display_data: Vec<u64>,
     last_sample_time: std::time::Instant,
     sample_interval: std::time::Duration,
     last_peak: u8,
@@ -53,6 +57,10 @@ pub struct OsttTui {
     pause_duration: std::time::Duration,
     /// When pause started (for calculating pause duration)
     pause_start_time: Option<std::time::Instant>,
+    /// Visualization type (spectrum or waveform)
+    visualization_type: VisualizationType,
+    /// Spectrum analyzer (used when visualization_type is Spectrum)
+    spectrum_analyzer: Option<SpectrumAnalyzer>,
 }
 
 impl OsttTui {
@@ -66,6 +74,7 @@ impl OsttTui {
         sample_rate: u32,
         peak_volume_threshold: u8,
         reference_level_db: i8,
+        visualization_type: VisualizationType,
     ) -> Result<Self, Box<dyn Error>> {
         enable_raw_mode()?;
         let mut stdout = stdout();
@@ -79,12 +88,18 @@ impl OsttTui {
 
         let sample_interval = std::time::Duration::from_millis(50);
 
-        let volume_history = vec![0u64; terminal_width];
+        // Initialize visualization-specific data
+        let display_data = vec![0u64; terminal_width];
+        let spectrum_analyzer = if visualization_type == VisualizationType::Spectrum {
+            Some(SpectrumAnalyzer::new(terminal_width))
+        } else {
+            None
+        };
 
         let now = std::time::Instant::now();
         Ok(OsttTui {
             terminal,
-            volume_history,
+            display_data,
             last_sample_time: now,
             sample_interval,
             last_peak: 0,
@@ -98,24 +113,31 @@ impl OsttTui {
             is_paused: false,
             pause_duration: std::time::Duration::ZERO,
             pause_start_time: None,
+            visualization_type,
+            spectrum_analyzer,
         })
     }
 
-    /// Renders the waveform visualization with current volume and recording duration.
+    /// Renders the visualization with current volume and recording duration.
     ///
     /// # Errors
     /// - If terminal rendering fails
     pub fn render_waveform(&mut self, samples: &[i16]) -> Result<(), Box<dyn Error>> {
         let current_volume = self.calculate_volume(samples);
 
-        // Only update waveform if not paused
         if !self.is_paused && self.last_sample_time.elapsed() >= self.sample_interval {
-            self.volume_history.push(current_volume as u64);
-
-            if self.volume_history.len() > self.terminal_width {
-                self.volume_history.remove(0);
+            match self.visualization_type {
+                VisualizationType::Spectrum => {
+                    if let Some(analyzer) = &mut self.spectrum_analyzer {
+                        analyzer.update(samples, self.sample_rate, self.reference_level_db);
+                        self.display_data = analyzer.data().to_vec();
+                    }
+                }
+                VisualizationType::Waveform => {
+                    update_waveform(&mut self.display_data, current_volume, self.terminal_width);
+                }
             }
-
+            
             self.last_sample_time = std::time::Instant::now();
         }
 
@@ -124,18 +146,21 @@ impl OsttTui {
 
         if current_width != self.terminal_width {
             self.terminal_width = current_width;
-            if self.volume_history.len() > self.terminal_width {
-                while self.volume_history.len() > self.terminal_width {
-                    self.volume_history.remove(0);
+            
+            match self.visualization_type {
+                VisualizationType::Spectrum => {
+                    if let Some(analyzer) = &mut self.spectrum_analyzer {
+                        analyzer.resize(current_width, samples, self.sample_rate, self.reference_level_db);
+                        self.display_data = analyzer.data().to_vec();
+                    }
                 }
-            } else if self.volume_history.len() < self.terminal_width {
-                while self.volume_history.len() < self.terminal_width {
-                    self.volume_history.insert(0, 0);
+                VisualizationType::Waveform => {
+                    resize_waveform(&mut self.display_data, self.terminal_width);
                 }
             }
         }
 
-        // Calculate these values before the draw closure to avoid borrow issues
+        // Pre-calculate values to avoid borrow checker issues in closure
         let is_paused = self.is_paused;
         let peak_hold = self.peak_hold;
         let last_peak = self.last_peak;
@@ -164,8 +189,8 @@ impl OsttTui {
             };
 
             let top_sparkline = Sparkline::default()
-                .data(&self.volume_history)
-                .max(80)
+                .data(&self.display_data)
+                .max(100)
                 .style(
                     Style::default()
                         .bg(Color::Rgb(0, 0, 0))
@@ -182,12 +207,12 @@ impl OsttTui {
             };
 
             let inverted_data: Vec<u64> = self
-                .volume_history
+                .display_data
                 .iter()
                 .map(|&v| 100_u64.saturating_sub(v))
                 .collect();
 
-            let bottom_sparkline = Sparkline::default().data(&inverted_data).max(80).style(
+            let bottom_sparkline = Sparkline::default().data(&inverted_data).max(100).style(
                 Style::default()
                     .bg(Color::Rgb(185, 207, 212))
                     .fg(Color::Rgb(0, 0, 0)),
@@ -315,7 +340,11 @@ impl OsttTui {
                         tracing::debug!("Escape or 'q' pressed: canceling recording");
                         RecordingCommand::Cancel
                     }
-                    KeyCode::Char('c') if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) => {
+                    KeyCode::Char('c')
+                        if key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    {
                         tracing::debug!("Ctrl+C pressed: canceling recording");
                         RecordingCommand::Cancel
                     }
@@ -351,14 +380,14 @@ impl OsttTui {
     fn get_recording_duration(&self) -> std::time::Duration {
         let total_elapsed = self.recording_start_time.elapsed();
         let mut pause_time = self.pause_duration;
-        
+
         // If currently paused, add the current pause duration
         if self.is_paused {
             if let Some(pause_start) = self.pause_start_time {
                 pause_time += pause_start.elapsed();
             }
         }
-        
+
         total_elapsed.saturating_sub(pause_time)
     }
 

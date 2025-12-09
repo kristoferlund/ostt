@@ -48,6 +48,12 @@ reference_level_db = -20
 # Add more formats as needed - ffmpeg handles the rest!
 output_format = "mp3 -ab 16k -ar 12000"
 
+# Visualization type for recording display
+# Options:
+#   "spectrum"  - Frequency spectrum showing energy across frequency bands (default)
+#   "waveform"  - Time-domain waveform showing amplitude over time
+visualization = "spectrum"
+
 # Provider-specific settings
 # Each provider can have its own configuration section
 
