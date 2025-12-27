@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.5] - 2025-12-27
+
+### Added
+
+- **Frequency spectrum visualization** - Real-time FFT-based audio spectrum display (new default visualization)
+
+### Changed
+
+- Error message centering now accounts for multi-line text, centering entire message block vertically
+
+### Fixed
+
+- Segmentation fault on macOS when listing audio devices with incompatible hardware
+- Vertical centering of multi-line error messages
+
 ## [0.0.4] - 2025-12-05
 
 ### Added

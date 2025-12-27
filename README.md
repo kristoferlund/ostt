@@ -11,15 +11,16 @@
 
 ## Features
 
-- Real-time waveform visualization with sparkline graphs
-- dBFS-based volume metering (industry standard)
-- Configurable reference level for clipping detection
-- Audio clipping detection with pause/resume support
-- Audio compression for fast API calls
-- Multiple transcription providers and models
-- Browsable transcription history
-- Keyword management for improved accuracy
-- Cross-platform: Linux and macOS support
+- **Real-time audio visualization** - Frequency spectrum (default) or time-domain waveform, optimized for human voice recording
+- **Noise gating** - Automatic suppression of background noise in spectrum mode
+- **dBFS-based volume metering** (industry standard)
+- **Configurable reference level** for clipping detection
+- **Audio clipping detection** with pause/resume support
+- **Audio compression** for fast API calls
+- **Multiple transcription providers and models**
+- **Browsable transcription history**
+- **Keyword management** for improved accuracy
+- **Cross-platform support** - Linux and macOS
 
 ## Supported Providers & Models
 
@@ -172,7 +173,13 @@ sample_rate = 16000             # 16kHz recommended for speech
 peak_volume_threshold = 90      # Warning threshold (0-100%)
 reference_level_db = -20        # dBFS reference for 100% meter
 output_format = "mp3 -ab 16k -ar 12000"  # Compressed audio format
+visualization = "spectrum"      # "spectrum" (default) or "waveform"
 ```
+
+**Visualization Types:**
+
+- `spectrum` (default) - Shows frequency spectrum with energy distribution across frequencies optimized for human voice (100-1500 Hz range).
+- `waveform` - Shows time-domain waveform with amplitude over time. Classic oscilloscope-style display showing raw audio envelope.
 
 ### Transcription Setup
 
@@ -199,6 +206,7 @@ sample_rate = 16000
 peak_volume_threshold = 90
 reference_level_db = -20
 output_format = "mp3 -ab 16k -ar 12000"
+visualization = "spectrum"  # "spectrum" for frequency display, "waveform" for amplitude display
 
 [providers.deepgram]
 punctuate = true
@@ -226,10 +234,12 @@ ostt record
 
 **Display Elements:**
 
-- **Waveform**: Real-time audio visualization
+- **Visualization**: Real-time audio display (spectrum or waveform, configurable)
+  - **Spectrum mode**: Shows frequency distribution across the voice range. Peaks in the visualization align with volume meter peaks
+  - **Waveform mode**: Shows amplitude envelope over time
 - **Vol %**: Current volume level
 - **Peak %**: Maximum volume in last 3 seconds
-- **Red indicator**: Clipping warning
+- **Red indicator**: Clipping warning (appears in both visualization modes)
 
 ### History
 
