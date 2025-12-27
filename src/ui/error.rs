@@ -73,15 +73,26 @@ impl ErrorScreen {
                         .bg(Color::Rgb(255, 0, 0)),
                 ));
 
+                // Calculate the number of lines the text will wrap to
+                let text_lines = Self::calculate_wrapped_lines(error_message, text_width);
+                let text_height = text_lines.max(1) as u16;
+
                 let paragraph = Paragraph::new(error_text)
                     .alignment(Alignment::Center)
                     .wrap(ratatui::widgets::Wrap { trim: true });
 
+                // Center vertically by calculating the starting Y position
+                let centered_y = if area.height > text_height {
+                    area.y + (area.height - text_height) / 2
+                } else {
+                    area.y
+                };
+
                 let centered_area = Rect {
                     x: area.x + padding_x,
-                    y: area.y + area.height / 2,
+                    y: centered_y,
                     width: text_width,
-                    height: area.height / 2,
+                    height: area.height.saturating_sub(centered_y - area.y),
                 };
 
                 frame.render_widget(paragraph, centered_area);
@@ -95,6 +106,32 @@ impl ErrorScreen {
         }
 
         Ok(())
+    }
+
+    /// Calculates the number of lines a message will wrap to given a maximum width.
+    fn calculate_wrapped_lines(text: &str, max_width: u16) -> usize {
+        if max_width == 0 {
+            return 1;
+        }
+
+        let mut lines = 1;
+        let mut current_line_width = 0;
+
+        for word in text.split_whitespace() {
+            let word_len = word.len() as u16;
+
+            // If word doesn't fit on current line and current line is not empty, wrap
+            if current_line_width > 0 && current_line_width + 1 + word_len > max_width {
+                lines += 1;
+                current_line_width = word_len;
+            } else if current_line_width == 0 {
+                current_line_width = word_len;
+            } else {
+                current_line_width += 1 + word_len; // +1 for space
+            }
+        }
+
+        lines
     }
 
     /// Cleans up terminal state and exits alternate screen mode.
