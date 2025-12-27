@@ -61,6 +61,7 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
         actual_sample_rate,
         config_data.audio.peak_volume_threshold,
         config_data.audio.reference_level_db,
+        config_data.audio.visualization,
     )
     .map_err(|e| anyhow::anyhow!("Failed to initialize UI: {e}"))?;
 

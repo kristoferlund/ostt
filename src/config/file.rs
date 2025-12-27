@@ -7,6 +7,31 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Visualization type for recording display.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VisualizationType {
+    /// Time-domain waveform showing amplitude over time
+    Waveform,
+    /// Frequency spectrum showing energy distribution across frequencies
+    Spectrum,
+}
+
+impl Default for VisualizationType {
+    fn default() -> Self {
+        Self::Spectrum
+    }
+}
+
+impl std::fmt::Display for VisualizationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Waveform => write!(f, "waveform"),
+            Self::Spectrum => write!(f, "spectrum"),
+        }
+    }
+}
+
 /// Audio recording and processing configuration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AudioConfig {
@@ -26,6 +51,9 @@ pub struct AudioConfig {
     /// Output audio format string: "codec [ffmpeg_options]" (e.g., "mp3 -ab 16k -ar 12000")
     #[serde(default = "default_output_format")]
     pub output_format: String,
+    /// Visualization type: "spectrum" (frequency-based) or "waveform" (time-based amplitude)
+    #[serde(default)]
+    pub visualization: VisualizationType,
 }
 
 fn default_output_format() -> String {
@@ -168,6 +196,7 @@ impl OsttConfig {
                 peak_volume_threshold: default_peak_volume_threshold(),
                 reference_level_db: default_reference_level_db(),
                 output_format: default_output_format(),
+                visualization: VisualizationType::default(),
             },
             providers: ProvidersConfig::default(),
         }

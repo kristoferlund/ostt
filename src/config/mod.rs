@@ -8,7 +8,7 @@
 pub mod file;
 pub mod secrets;
 
-pub use file::{AudioConfig, OsttConfig};
+pub use file::{AudioConfig, OsttConfig, VisualizationType};
 pub use secrets::{clear_api_key, get_api_key, get_authorized_providers, save_api_key, save_selected_model, get_selected_model};
 
 pub use file::save_config;

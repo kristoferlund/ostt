@@ -20,6 +20,7 @@ tui-input = "0.14.0"
 # Audio capture and processing
 cpal = "0.16.0"
 hound = "3.5.1"
+rustfft = "6.2.0"
 
 # Async runtime
 tokio = { version = "1.48.0", features = ["full"] }
