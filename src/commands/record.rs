@@ -18,8 +18,9 @@ use std::fs;
 /// and saves to history. Supports external triggers via SIGUSR1 signal.
 ///
 /// # Arguments
-/// * `output_mode` - Optional override for transcription output mode (clipboard or stdout)
-pub async fn handle_record(output_mode: Option<crate::config::OutputMode>) -> Result<(), anyhow::Error> {
+/// * `clipboard` - If true, copy to clipboard instead of stdout
+/// * `output_file` - Optional file path to write output to instead of stdout
+pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
 
     let config_data = match config::OsttConfig::load() {
@@ -157,7 +158,8 @@ pub async fn handle_record(output_mode: Option<crate::config::OutputMode>) -> Re
                 &config_data,
                 &model_id,
                 &filepath_str,
-                output_mode,
+                clipboard,
+                output_file.clone(),
             )
             .await
             {
@@ -194,7 +196,8 @@ async fn transcribe_recording_with_animation(
     config_data: &config::OsttConfig,
     model_id: &str,
     audio_filename: &str,
-    output_mode: Option<crate::config::OutputMode>,
+    clipboard: bool,
+    output_file: Option<String>,
 ) -> anyhow::Result<()> {
     use crate::transcription;
 
@@ -292,24 +295,32 @@ async fn transcribe_recording_with_animation(
                 tracing::warn!("Failed to save transcription to history: {}", e);
             }
 
-            // Determine output mode: use CLI override if provided, otherwise use config
-            let mode = output_mode.unwrap_or(config_data.audio.output_mode);
-
-            match mode {
-                crate::config::OutputMode::Clipboard => {
-                    match copy_to_clipboard(&text) {
-                        Ok(_) => {
-                            tracing::debug!("Transcribed text copied to clipboard");
-                        }
-                        Err(e) => {
-                            tracing::warn!("Failed to copy to clipboard: {e}");
-                        }
+            // Determine output destination: file > clipboard > stdout (default)
+            if let Some(file_path) = output_file {
+                // Write to file
+                match std::fs::write(&file_path, &text) {
+                    Ok(_) => {
+                        tracing::debug!("Transcribed text written to file: {file_path}");
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to write to file '{file_path}': {e}");
+                        return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
                     }
                 }
-                crate::config::OutputMode::Stdout => {
-                    println!("{text}");
-                    tracing::debug!("Transcribed text printed to stdout");
+            } else if clipboard {
+                // Copy to clipboard
+                match copy_to_clipboard(&text) {
+                    Ok(_) => {
+                        tracing::debug!("Transcribed text copied to clipboard");
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to copy to clipboard: {e}");
+                    }
                 }
+            } else {
+                // Default: stdout
+                println!("{text}");
+                tracing::debug!("Transcribed text printed to stdout");
             }
 
             Ok(())

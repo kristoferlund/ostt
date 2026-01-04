@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Output mode configuration** - Control transcription output destination with CLI flags:
+  - Default: outputs to stdout for piping to other commands
+  - `-c` flag: copy to clipboard
+  - `-o <file>` flag: write to file
+
+### Changed
+
+- `ostt record` now outputs to stdout by default (enables shell piping) instead of clipboard
+
 ## [0.0.5] - 2025-12-27
 
 ### Added
