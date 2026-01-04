@@ -127,5 +127,5 @@ pub async fn transcribe(
         transcription
     );
 
-    Ok(transcription.text)
+    Ok(transcription.text.trim().to_string())
 }

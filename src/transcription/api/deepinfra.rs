@@ -117,5 +117,5 @@ pub async fn transcribe(
         deepinfra_response
     );
 
-    Ok(deepinfra_response.text)
+    Ok(deepinfra_response.text.trim().to_string())
 }

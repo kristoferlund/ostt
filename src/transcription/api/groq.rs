@@ -114,5 +114,5 @@ pub async fn transcribe(
         groq_response
     );
 
-    Ok(groq_response.text)
+    Ok(groq_response.text.trim().to_string())
 }
