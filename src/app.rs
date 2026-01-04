@@ -23,7 +23,10 @@ fn suppress_alsa_warnings() {
 #[derive(Debug)]
 enum Command {
     /// Record audio and optionally transcribe
-    Record,
+    Record {
+        /// Output mode for transcription (clipboard or stdout)
+        output_mode: Option<crate::config::OutputMode>,
+    },
     /// Authenticate with a transcription provider and select model
     Auth,
     /// View transcription history
@@ -111,7 +114,19 @@ impl Command {
 
         if args.len() > 1 {
             match args[1].as_str() {
-                "record" => Command::Record,
+                "record" => {
+                    // Parse optional --output flag
+                    let output_mode = args.iter().position(|arg| arg == "--output").and_then(|i| {
+                        args.get(i + 1).and_then(|mode| {
+                            match mode.as_str() {
+                                "clipboard" => Some(crate::config::OutputMode::Clipboard),
+                                "stdout" => Some(crate::config::OutputMode::Stdout),
+                                _ => None,
+                            }
+                        })
+                    });
+                    Command::Record { output_mode }
+                }
                 "auth" => Command::Auth,
                 "history" => Command::History,
                 "keywords" => Command::Keywords,
@@ -123,7 +138,7 @@ impl Command {
                 invalid => Command::Invalid(invalid.to_string()),
             }
         } else {
-            Command::Record
+            Command::Record { output_mode: None }
         }
     }
 }
@@ -173,7 +188,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
     }
 
     if let Command::Invalid(cmd) = &command {
-        eprintln!("Error: unknown command '{}'", cmd);
+        eprintln!("Error: unknown command '{cmd}'");
         eprintln!("Run 'ostt help' to see available commands.");
         process::exit(2);
     }
@@ -207,7 +222,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 }
             }
         }
-        Command::Record => commands::handle_record().await?,
+        Command::Record { output_mode } => commands::handle_record(output_mode).await?,
         Command::History => commands::handle_history().await?,
         Command::Keywords => commands::handle_keywords().await?,
         Command::Config => commands::handle_config()?,

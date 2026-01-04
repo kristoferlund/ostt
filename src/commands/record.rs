@@ -16,7 +16,10 @@ use std::fs;
 ///
 /// Records audio with real-time waveform visualization, optionally transcribes the recording,
 /// and saves to history. Supports external triggers via SIGUSR1 signal.
-pub async fn handle_record() -> Result<(), anyhow::Error> {
+///
+/// # Arguments
+/// * `output_mode` - Optional override for transcription output mode (clipboard or stdout)
+pub async fn handle_record(output_mode: Option<crate::config::OutputMode>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
 
     let config_data = match config::OsttConfig::load() {
@@ -24,13 +27,12 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
         Err(err) => {
             tracing::error!("Failed to load configuration: {}", err);
             let error_message = format!(
-                "Configuration Error:\n\n{}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.",
-                err
+                "Configuration Error:\n\n{err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again."
             );
             let mut error_screen = ErrorScreen::new()?;
             error_screen.show_error(&error_message)?;
             error_screen.cleanup()?;
-            return Err(anyhow::anyhow!("Configuration error: {}", err));
+            return Err(anyhow::anyhow!("Configuration error: {err}"));
         }
     };
 
@@ -47,8 +49,7 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
     if let Err(e) = audio_recorder.start_recording() {
         tracing::error!("Failed to start recording: {}", e);
         let error_message = format!(
-            "Recording Error:\n\n{}\n\nPlease check your audio configuration and try again.",
-            e
+            "Recording Error:\n\n{e}\n\nPlease check your audio configuration and try again."
         );
         let mut error_screen = ErrorScreen::new()?;
         error_screen.show_error(&error_message)?;
@@ -156,6 +157,7 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
                 &config_data,
                 &model_id,
                 &filepath_str,
+                output_mode,
             )
             .await
             {
@@ -180,6 +182,9 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
 
 /// Transcribes an audio recording with animated progress indicator.
 ///
+/// # Arguments
+/// * `output_mode` - Optional override for output mode (clipboard or stdout)
+///
 /// # Errors
 /// - If the model ID is invalid
 /// - If no API key is configured for the provider
@@ -189,6 +194,7 @@ async fn transcribe_recording_with_animation(
     config_data: &config::OsttConfig,
     model_id: &str,
     audio_filename: &str,
+    output_mode: Option<crate::config::OutputMode>,
 ) -> anyhow::Result<()> {
     use crate::transcription;
 
@@ -286,12 +292,23 @@ async fn transcribe_recording_with_animation(
                 tracing::warn!("Failed to save transcription to history: {}", e);
             }
 
-            match copy_to_clipboard(&text) {
-                Ok(_) => {
-                    tracing::debug!("Transcribed text copied to clipboard");
+            // Determine output mode: use CLI override if provided, otherwise use config
+            let mode = output_mode.unwrap_or(config_data.audio.output_mode);
+
+            match mode {
+                crate::config::OutputMode::Clipboard => {
+                    match copy_to_clipboard(&text) {
+                        Ok(_) => {
+                            tracing::debug!("Transcribed text copied to clipboard");
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to copy to clipboard: {e}");
+                        }
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!("Failed to copy to clipboard: {}", e);
+                crate::config::OutputMode::Stdout => {
+                    println!("{text}");
+                    tracing::debug!("Transcribed text printed to stdout");
                 }
             }
 

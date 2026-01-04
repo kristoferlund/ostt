@@ -7,6 +7,31 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// Output destination for transcription results.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OutputMode {
+    /// Copy transcribed text to clipboard
+    Clipboard,
+    /// Print transcribed text to standard output
+    Stdout,
+}
+
+impl Default for OutputMode {
+    fn default() -> Self {
+        Self::Clipboard
+    }
+}
+
+impl std::fmt::Display for OutputMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Clipboard => write!(f, "clipboard"),
+            Self::Stdout => write!(f, "stdout"),
+        }
+    }
+}
+
 /// Visualization type for recording display.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -54,6 +79,9 @@ pub struct AudioConfig {
     /// Visualization type: "spectrum" (frequency-based) or "waveform" (time-based amplitude)
     #[serde(default)]
     pub visualization: VisualizationType,
+    /// Output mode for transcription: "clipboard" or "stdout"
+    #[serde(default)]
+    pub output_mode: OutputMode,
 }
 
 fn default_output_format() -> String {
@@ -197,6 +225,7 @@ impl OsttConfig {
                 reference_level_db: default_reference_level_db(),
                 output_format: default_output_format(),
                 visualization: VisualizationType::default(),
+                output_mode: OutputMode::default(),
             },
             providers: ProvidersConfig::default(),
         }
