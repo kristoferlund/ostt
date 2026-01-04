@@ -8,6 +8,7 @@ mod openai;
 mod deepgram;
 mod deepinfra;
 mod groq;
+mod shared;
 
 use serde::Deserialize;
 use std::path::Path;
