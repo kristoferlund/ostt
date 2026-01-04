@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Retry command** - Re-transcribe previous recordings without re-recording audio (`ostt retry` or `ostt retry N`)
+- **Replay command** - Playback previous recordings using system audio player (`ostt replay` or `ostt replay N`)
+- **Recording history** - Maintains history of 10 most recent audio recordings with automatic rotation
+
 ## [0.0.5] - 2025-12-27
 
 ### Added

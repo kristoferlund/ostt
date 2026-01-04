@@ -1424,6 +1424,7 @@ dependencies = [
  "rusqlite",
  "rustfft",
  "serde",
+ "serde_json",
  "signal-hook",
  "tokio",
  "toml",
