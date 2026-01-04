@@ -95,7 +95,7 @@ mod tests {
         // This test will succeed if ffmpeg is installed
         match find_ffmpeg() {
             Ok(path) => println!("Found ffmpeg at: {}", path.display()),
-            Err(e) => println!("ffmpeg not found (expected on CI): {}", e),
+            Err(e) => println!("ffmpeg not found (expected on CI): {e}"),
         }
     }
 }
