@@ -3,15 +3,9 @@
 //! Handles transcription requests to Groq's OpenAI-compatible Whisper API using multipart form data.
 
 use std::path::Path;
-use serde::Deserialize;
 
 use super::TranscriptionConfig;
-
-/// Groq API response wrapper
-#[derive(Debug, Deserialize)]
-struct GroqResponse {
-    text: String,
-}
+use super::shared::WhisperApiResponse;
 
 /// Transcribes an audio file using Groq's Whisper API.
 ///
@@ -102,7 +96,7 @@ pub async fn transcribe(
         return Err(anyhow::anyhow!(human_readable));
     }
 
-    let groq_response: GroqResponse = response
+    let groq_response: WhisperApiResponse = response
         .json()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to parse Groq response: {e}"))?;

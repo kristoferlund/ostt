@@ -3,15 +3,9 @@
 //! Handles transcription requests to DeepInfra's inference API using multipart form data.
 
 use std::path::Path;
-use serde::Deserialize;
 
 use super::TranscriptionConfig;
-
-/// DeepInfra API response structure
-#[derive(Debug, Deserialize)]
-struct DeepInfraResponse {
-    text: String,
-}
+use super::shared::WhisperApiResponse;
 
 /// Transcribes an audio file using DeepInfra's Whisper API.
 ///
@@ -105,7 +99,7 @@ pub async fn transcribe(
         return Err(anyhow::anyhow!(human_readable));
     }
 
-    let deepinfra_response: DeepInfraResponse = response
+    let deepinfra_response: WhisperApiResponse = response
         .json()
         .await
         .map_err(|e| anyhow::anyhow!("Failed to parse DeepInfra response: {e}"))?;
