@@ -32,10 +32,6 @@ enum Command {
     Keywords,
     /// Edit configuration file
     Config,
-    /// Retry the last recording with the same model
-    Retry,
-    /// Replay a previous recording from history
-    Replay,
     /// Show help message
     Help,
     /// Show version information
@@ -74,12 +70,6 @@ COMMANDS:
 
     config              Open configuration file in your preferred editor
                         Customize audio settings and provider options
-
-    retry               Retry the last recording with the same transcription model
-                        Automatically transcribes the previous recording
-
-    replay              Replay a previous recording from history
-                        Select a recording to retranscribe with the original model
 
     version, -V, --version
                         Show version information
@@ -126,8 +116,6 @@ impl Command {
                 "history" => Command::History,
                 "keywords" => Command::Keywords,
                 "config" => Command::Config,
-                "retry" => Command::Retry,
-                "replay" => Command::Replay,
                 "help" | "-h" | "--help" => Command::Help,
                 "version" | "-V" | "--version" => Command::Version,
                 "list-devices" => Command::ListDevices,
@@ -223,8 +211,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Command::History => commands::handle_history().await?,
         Command::Keywords => commands::handle_keywords().await?,
         Command::Config => commands::handle_config()?,
-        Command::Retry => commands::handle_retry().await?,
-        Command::Replay => commands::handle_replay().await?,
         Command::Help => unreachable!(),
         Command::Version => unreachable!(),
         Command::ListDevices => unreachable!(),
