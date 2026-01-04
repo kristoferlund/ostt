@@ -24,8 +24,10 @@ fn suppress_alsa_warnings() {
 enum Command {
     /// Record audio and optionally transcribe
     Record {
-        /// Output mode for transcription (clipboard or stdout)
-        output_mode: Option<crate::config::OutputMode>,
+        /// Copy to clipboard instead of stdout
+        clipboard: bool,
+        /// Write to file instead of stdout
+        output_file: Option<String>,
     },
     /// Authenticate with a transcription provider and select model
     Auth,
@@ -58,34 +60,44 @@ USAGE:
     ostt [COMMAND]
 
 COMMANDS:
-    record              Record audio with real-time volume metering
-                        Press Enter to transcribe, Escape/q to cancel
+     record              Record audio with real-time volume metering
+                         Press Enter to transcribe, Escape/q to cancel
+     
+     FLAGS (for record command):
+       -c                Copy to clipboard instead of stdout
+       -o <file>         Write to file instead of stdout
 
-    auth                Authenticate with a transcription provider and
-                        select a model. Handles both provider selection
-                        and API key management in one unified flow.
+     auth                Authenticate with a transcription provider and
+                         select a model. Handles both provider selection
+                         and API key management in one unified flow.
 
-    history             View and browse your transcription history
-                        Select a transcription to copy it to clipboard
+     history             View and browse your transcription history
+                         Select a transcription to copy it to clipboard
 
-    keywords            Manage keywords for improved transcription accuracy
-                        Add, remove, and view keywords used by AI models
+     keywords            Manage keywords for improved transcription accuracy
+                         Add, remove, and view keywords used by AI models
 
-    config              Open configuration file in your preferred editor
-                        Customize audio settings and provider options
+     config              Open configuration file in your preferred editor
+                         Customize audio settings and provider options
 
-    version, -V, --version
-                        Show version information
+     version, -V, --version
+                         Show version information
 
-    list-devices        List available audio input devices
+     list-devices        List available audio input devices
 
-    logs                Show recent log entries from the application
+     logs                Show recent log entries from the application
 
-    help, -h, --help    Show this help message
+     help, -h, --help    Show this help message
 
 EXAMPLES:
-    # Record audio
-    $ ostt record
+     # Record and pipe to other command (default stdout)
+     $ ostt record | grep word
+     
+     # Record and copy to clipboard
+     $ ostt record -c
+     
+     # Record and write to file
+     $ ostt record -o output.txt
     
     # Set up authentication and select a model
     $ ostt auth
@@ -115,17 +127,11 @@ impl Command {
         if args.len() > 1 {
             match args[1].as_str() {
                 "record" => {
-                    // Parse optional --output flag
-                    let output_mode = args.iter().position(|arg| arg == "--output").and_then(|i| {
-                        args.get(i + 1).and_then(|mode| {
-                            match mode.as_str() {
-                                "clipboard" => Some(crate::config::OutputMode::Clipboard),
-                                "stdout" => Some(crate::config::OutputMode::Stdout),
-                                _ => None,
-                            }
-                        })
+                    let clipboard = args.contains(&"-c".to_string());
+                    let output_file = args.iter().position(|arg| arg == "-o").and_then(|i| {
+                        args.get(i + 1).cloned()
                     });
-                    Command::Record { output_mode }
+                    Command::Record { clipboard, output_file }
                 }
                 "auth" => Command::Auth,
                 "history" => Command::History,
@@ -138,7 +144,7 @@ impl Command {
                 invalid => Command::Invalid(invalid.to_string()),
             }
         } else {
-            Command::Record { output_mode: None }
+            Command::Record { clipboard: false, output_file: None }
         }
     }
 }
@@ -222,7 +228,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 }
             }
         }
-        Command::Record { output_mode } => commands::handle_record(output_mode).await?,
+        Command::Record { clipboard, output_file } => commands::handle_record(clipboard, output_file).await?,
         Command::History => commands::handle_history().await?,
         Command::Keywords => commands::handle_keywords().await?,
         Command::Config => commands::handle_config()?,
