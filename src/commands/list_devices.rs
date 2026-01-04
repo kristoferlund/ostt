@@ -62,16 +62,16 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
             Ok(config) => {
                 let sample_rate = config.sample_rate().0;
                 let channels = config.channels();
-                format!(" ({}Hz, {} channels)", sample_rate, channels)
+                format!(" ({sample_rate}Hz, {channels} channels)")
             }
             Err(_) => {
                 " (configuration unavailable)".to_string()
             }
         };
 
-        println!("  ID: {}", index);
-        println!("    Name: {}{}", device_name, default_indicator);
-        println!("    Config:{}", config_info);
+        println!("  ID: {index}");
+        println!("    Name: {device_name}{default_indicator}");
+        println!("    Config:{config_info}");
         println!();
     }
 

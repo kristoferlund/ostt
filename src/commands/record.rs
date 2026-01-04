@@ -22,15 +22,14 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
     let config_data = match config::OsttConfig::load() {
         Ok(config) => config,
         Err(err) => {
-            tracing::error!("Failed to load configuration: {}", err);
+            tracing::error!("Failed to load configuration: {err}");
             let error_message = format!(
-                "Configuration Error:\n\n{}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.",
-                err
+                "Configuration Error:\n\n{err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again."
             );
             let mut error_screen = ErrorScreen::new()?;
             error_screen.show_error(&error_message)?;
             error_screen.cleanup()?;
-            return Err(anyhow::anyhow!("Configuration error: {}", err));
+            return Err(anyhow::anyhow!("Configuration error: {err}"));
         }
     };
 
@@ -47,8 +46,7 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
     if let Err(e) = audio_recorder.start_recording() {
         tracing::error!("Failed to start recording: {}", e);
         let error_message = format!(
-            "Recording Error:\n\n{}\n\nPlease check your audio configuration and try again.",
-            e
+            "Recording Error:\n\n{e}\n\nPlease check your audio configuration and try again."
         );
         let mut error_screen = ErrorScreen::new()?;
         error_screen.show_error(&error_message)?;

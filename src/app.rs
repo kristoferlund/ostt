@@ -173,7 +173,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
     }
 
     if let Command::Invalid(cmd) = &command {
-        eprintln!("Error: unknown command '{}'", cmd);
+        eprintln!("Error: unknown command '{cmd}'");
         eprintln!("Run 'ostt help' to see available commands.");
         process::exit(2);
     }
