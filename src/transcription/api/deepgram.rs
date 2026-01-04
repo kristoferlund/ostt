@@ -153,5 +153,5 @@ pub async fn transcribe(
         .map(|alt| alt.transcript.clone())
         .ok_or_else(|| anyhow::anyhow!("No transcript found in Deepgram response"))?;
 
-    Ok(transcript)
+    Ok(transcript.trim().to_string())
 }

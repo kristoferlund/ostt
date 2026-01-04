@@ -280,7 +280,8 @@ async fn transcribe_recording_with_animation(
 
     match transcription_handle.await {
         Ok(Ok(text)) => {
-            tracing::info!("Transcription completed: {}", text);
+            let trimmed_text = text.trim().to_string();
+            tracing::info!("Transcription completed: {}", trimmed_text);
 
             let data_dir = dirs::home_dir()
                 .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
@@ -289,11 +290,11 @@ async fn transcribe_recording_with_animation(
                 .join("ostt");
 
             let mut history_manager = HistoryManager::new(&data_dir)?;
-            if let Err(e) = history_manager.save_transcription(&text) {
+            if let Err(e) = history_manager.save_transcription(&trimmed_text) {
                 tracing::warn!("Failed to save transcription to history: {}", e);
             }
 
-            match copy_to_clipboard(&text) {
+            match copy_to_clipboard(&trimmed_text) {
                 Ok(_) => {
                     tracing::debug!("Transcribed text copied to clipboard");
                 }
