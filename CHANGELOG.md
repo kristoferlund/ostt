@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Transcribed text no longer includes leading/trailing whitespace added by transcription models
+- Code quality improvements: fixed format string linting issues
+
 ## [0.0.5] - 2025-12-27
 
 ### Added
