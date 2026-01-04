@@ -71,7 +71,7 @@ pub fn handle_logs() -> Result<(), anyhow::Error> {
     println!();
 
     for line in lines[start_index..].iter() {
-        println!("{}", line);
+        println!("{line}");
     }
 
     Ok(())

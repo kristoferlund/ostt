@@ -419,8 +419,7 @@ fn find_device_by_name(
     }
 
     Err(anyhow!(
-        "Audio input device '{}' not found. Use 'ostt list-devices' to see available devices.",
-        device_spec
+        "Audio input device '{device_spec}' not found. Use 'ostt list-devices' to see available devices."
     ))
 }
 
