@@ -38,7 +38,14 @@ enum Command {
     /// Edit configuration file
     Config,
     /// Retry the last recording with the same model
-    Retry(Option<usize>),
+    Retry {
+        /// Recording index (1 = most recent)
+        index: Option<usize>,
+        /// Copy to clipboard instead of stdout
+        clipboard: bool,
+        /// Write to file instead of stdout
+        output_file: Option<String>,
+    },
     /// Replay a previous recording from history
     Replay(Option<usize>),
     /// Show help message
@@ -67,7 +74,7 @@ COMMANDS:
      record              Record audio with real-time volume metering
                          Press Enter to transcribe, Escape/q to cancel
      
-     FLAGS (for record command):
+     FLAGS (for record and retry commands):
        -c                Copy to clipboard instead of stdout
        -o <file>         Write to file instead of stdout
 
@@ -84,9 +91,10 @@ COMMANDS:
      config              Open configuration file in your preferred editor
                          Customize audio settings and provider options
 
-    retry               Retry the last recording with the same transcription model
+    retry [N]           Retry transcribing recording #N (default: most recent)
+                        Supports same flags as record command (-c, -o)
 
-    replay              Replay a previous recording from history
+    replay [N]          Replay recording #N using system audio player
 
     version, -V, --version
                         Show version information
@@ -106,6 +114,12 @@ EXAMPLES:
      
      # Record and write to file
      $ ostt record -o output.txt
+     
+     # Retry most recent recording and pipe output
+     $ ostt retry | wc -w
+     
+     # Retry recording #2 and copy to clipboard
+     $ ostt retry 2 -c
     
     # Set up authentication and select a model
     $ ostt auth
@@ -146,8 +160,15 @@ impl Command {
                 "keywords" => Command::Keywords,
                 "config" => Command::Config,
                 "retry" => {
-                    let index = args.get(2).and_then(|s| s.parse().ok());
-                    Command::Retry(index)
+                    let clipboard = args.contains(&"-c".to_string());
+                    let output_file = args.iter().position(|arg| arg == "-o").and_then(|i| {
+                        args.get(i + 1).cloned()
+                    });
+                    // Parse index from args, skipping flags
+                    let index = args.get(2)
+                        .filter(|arg| !arg.starts_with('-'))
+                        .and_then(|s| s.parse().ok());
+                    Command::Retry { index, clipboard, output_file }
                 }
                 "replay" => {
                     let index = args.get(2).and_then(|s| s.parse().ok());
@@ -248,7 +269,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Command::History => commands::handle_history().await?,
         Command::Keywords => commands::handle_keywords().await?,
         Command::Config => commands::handle_config()?,
-        Command::Retry(index) => commands::handle_retry(index).await?,
+        Command::Retry { index, clipboard, output_file } => commands::handle_retry(index, clipboard, output_file).await?,
         Command::Replay(index) => commands::handle_replay(index).await?,
         Command::Help => unreachable!(),
         Command::Version => unreachable!(),
