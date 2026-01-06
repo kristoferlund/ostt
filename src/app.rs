@@ -32,6 +32,10 @@ enum Command {
     Keywords,
     /// Edit configuration file
     Config,
+    /// Retry the last recording with the same model
+    Retry(Option<usize>),
+    /// Replay a previous recording from history
+    Replay(Option<usize>),
     /// Show help message
     Help,
     /// Show version information
@@ -70,6 +74,10 @@ COMMANDS:
 
     config              Open configuration file in your preferred editor
                         Customize audio settings and provider options
+
+    retry               Retry the last recording with the same transcription model
+
+    replay              Replay a previous recording from history
 
     version, -V, --version
                         Show version information
@@ -116,6 +124,14 @@ impl Command {
                 "history" => Command::History,
                 "keywords" => Command::Keywords,
                 "config" => Command::Config,
+                "retry" => {
+                    let index = args.get(2).and_then(|s| s.parse().ok());
+                    Command::Retry(index)
+                }
+                "replay" => {
+                    let index = args.get(2).and_then(|s| s.parse().ok());
+                    Command::Replay(index)
+                }
                 "help" | "-h" | "--help" => Command::Help,
                 "version" | "-V" | "--version" => Command::Version,
                 "list-devices" => Command::ListDevices,
@@ -211,6 +227,8 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Command::History => commands::handle_history().await?,
         Command::Keywords => commands::handle_keywords().await?,
         Command::Config => commands::handle_config()?,
+        Command::Retry(index) => commands::handle_retry(index).await?,
+        Command::Replay(index) => commands::handle_replay(index).await?,
         Command::Help => unreachable!(),
         Command::Version => unreachable!(),
         Command::ListDevices => unreachable!(),
