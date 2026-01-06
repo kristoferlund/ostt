@@ -152,13 +152,13 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
             e
         })?;
 
-    // Save recording metadata for retry/replay functionality
-    let selected_model_id = config::get_selected_model().ok().flatten();
+    // Clean up old recordings to keep only 10 most recent
     if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
-        let _ = recording_history.save_recording(filepath.clone(), selected_model_id.clone());
+        let _ = recording_history.cleanup_old_recordings();
     }
 
     if should_transcribe {
+        let selected_model_id = config::get_selected_model().ok().flatten();
 
         if let Some(model_id) = selected_model_id {
             let filepath_str = filepath.to_string_lossy().to_string();

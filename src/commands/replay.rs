@@ -36,8 +36,7 @@ pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow:
         ));
     }
 
-    let recording = &all_recordings[index - 1];
-    let audio_path = &recording.audio_path;
+    let audio_path = &all_recordings[index - 1];
 
     if !audio_path.exists() {
         return Err(anyhow::anyhow!(
@@ -47,9 +46,8 @@ pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow:
     }
 
     tracing::info!(
-        "Playing recording #{} from {}",
-        index,
-        recording.created_at.format("%Y-%m-%d %H:%M:%S")
+        "Playing recording #{}",
+        index
     );
 
     // Platform-specific audio player invocation
