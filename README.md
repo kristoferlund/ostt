@@ -22,6 +22,13 @@
 - **Keyword management** for improved accuracy
 - **Cross-platform support** - Linux and macOS
 
+> [!IMPORTANT]
+> **Upgrading from 0.0.5?** Version 0.0.6 introduces output flags (`-c`, `-o`) that change default behavior for popup integrations.
+> - **Hyprland users**: See [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
+> - **macOS users**: See [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
+> 
+> Without updates, transcriptions will output to stdout instead of clipboard in popup windows.
+
 ## Supported Providers & Models
 
 ostt supports multiple AI transcription providers. Bring your own API key and choose from the following:
@@ -128,6 +135,12 @@ ostt works on all Linux distributions and macOS without additional setup. Simply
 
 ```bash
 ostt record          # Record audio with real-time visualization
+                     # Output to stdout by default
+ostt record -c       # Record and copy to clipboard
+ostt record -o file  # Record and write to file
+ostt retry [N]       # Re-transcribe recording #N (1=most recent)
+ostt retry -c        # Re-transcribe and copy to clipboard
+ostt replay [N]      # Play back recording #N
 ostt auth            # Configure transcription provider and API key
 ostt history         # Browse transcription history
 ostt keywords        # Manage keywords for improved accuracy
@@ -221,7 +234,9 @@ For detailed configuration options, see the config file comments or run `ostt co
 ### Recording
 
 ```bash
-ostt record
+ostt record          # Output to stdout (default)
+ostt record -c       # Copy to clipboard
+ostt record -o file  # Write to file
 ```
 
 **Keyboard Controls:**

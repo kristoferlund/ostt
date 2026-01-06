@@ -16,7 +16,13 @@ use dirs;
 ///
 /// # Arguments
 /// * `recording_index` - Optional index of recording to retry (1 = most recent, None = most recent)
-pub async fn handle_retry(recording_index: Option<usize>) -> Result<(), anyhow::Error> {
+/// * `clipboard` - If true, copy to clipboard instead of stdout
+/// * `output_file` - Optional file path to write output to instead of stdout
+pub async fn handle_retry(
+    recording_index: Option<usize>,
+    clipboard: bool,
+    output_file: Option<String>,
+) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Retry Command ===");
 
     let data_dir = dirs::home_dir()
@@ -112,21 +118,39 @@ pub async fn handle_retry(recording_index: Option<usize>) -> Result<(), anyhow::
 
                 // Save to history
                 let mut history_manager = HistoryManager::new(&data_dir)?;
-                let history_note = format!("[Retried from recording #{}]", index);
+                let history_note = format!("[Retried from recording #{index}]");
                 if let Err(e) = history_manager
-                    .save_transcription(&format!("{} {}", history_note, trimmed_text))
+                    .save_transcription(&format!("{history_note} {trimmed_text}"))
                 {
                     tracing::warn!("Failed to save transcription to history: {}", e);
                 }
 
-                // Copy to clipboard
-                match copy_to_clipboard(&trimmed_text) {
-                    Ok(_) => {
-                        tracing::debug!("Retried transcription copied to clipboard");
+                // Determine output destination: file > clipboard > stdout (default)
+                if let Some(file_path) = output_file {
+                    // Write to file
+                    match std::fs::write(&file_path, &trimmed_text) {
+                        Ok(_) => {
+                            tracing::debug!("Transcribed text written to file: {file_path}");
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to write to file '{file_path}': {e}");
+                            return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
+                        }
                     }
-                    Err(e) => {
-                        tracing::warn!("Failed to copy to clipboard: {e}");
+                } else if clipboard {
+                    // Copy to clipboard
+                    match copy_to_clipboard(&trimmed_text) {
+                        Ok(_) => {
+                            tracing::debug!("Retried transcription copied to clipboard");
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to copy to clipboard: {e}");
+                        }
                     }
+                } else {
+                    // Default: stdout
+                    println!("{trimmed_text}");
+                    tracing::debug!("Transcribed text printed to stdout");
                 }
 
                 Ok(())

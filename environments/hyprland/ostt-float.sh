@@ -2,10 +2,11 @@
 #
 # ostt Hyprland Integration Script
 #
-# Usage: hyperland-record.sh
+# Usage: ostt-float.sh [ostt arguments]
 #
 # - First execution: opens floating ostt window and starts recording
 # - Second execution: sends SIGUSR1 to trigger transcription, closes window
+# - Arguments are passed directly to ostt (e.g., -c for clipboard, -o file for output)
 
 # --- Configuration -----------------------------------------------------------
 OSTT_BIN="${OSTT_BIN:-ostt}"
@@ -57,8 +58,9 @@ if [ -f "$STATE_FILE" ]; then
 fi
 
 # ostt not running → spawn new window with Alacritty config
+# Pass all script arguments to ostt
 hyprctl dispatch exec \
-  "[float] alacritty --config-file \"$ALACRITTY_CONFIG\" --title ostt -e \"$OSTT_BIN\""
+  "[float] alacritty --config-file \"$ALACRITTY_CONFIG\" --title ostt -e \"$OSTT_BIN\" $*"
 
 # small delay so the process exists and we can grab PID
 sleep 0.5

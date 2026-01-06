@@ -9,14 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Output mode configuration** - Control transcription output destination with CLI flags:
+  - Default: outputs to stdout for piping to other commands
+  - `-c` flag: copy to clipboard
+  - `-o <file>` flag: write to file
 - **Retry command** - Re-transcribe previous recordings without re-recording audio (`ostt retry` or `ostt retry N`)
 - **Replay command** - Playback previous recordings using system audio player (`ostt replay` or `ostt replay N`)
 - **Recording history** - Maintains history of 10 most recent audio recordings with automatic rotation
 
+### Changed
+
+- `ostt record` now outputs to stdout by default (enables shell piping) instead of clipboard
+
 ### Fixed
 
 - Transcribed text no longer includes leading/trailing whitespace added by transcription models
-- Code quality improvements: fixed format string linting issues
 
 ## [0.0.5] - 2025-12-27
 

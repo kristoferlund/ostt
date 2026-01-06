@@ -23,7 +23,12 @@ fn suppress_alsa_warnings() {
 #[derive(Debug)]
 enum Command {
     /// Record audio and optionally transcribe
-    Record,
+    Record {
+        /// Copy to clipboard instead of stdout
+        clipboard: bool,
+        /// Write to file instead of stdout
+        output_file: Option<String>,
+    },
     /// Authenticate with a transcription provider and select model
     Auth,
     /// View transcription history
@@ -33,7 +38,14 @@ enum Command {
     /// Edit configuration file
     Config,
     /// Retry the last recording with the same model
-    Retry(Option<usize>),
+    Retry {
+        /// Recording index (1 = most recent)
+        index: Option<usize>,
+        /// Copy to clipboard instead of stdout
+        clipboard: bool,
+        /// Write to file instead of stdout
+        output_file: Option<String>,
+    },
     /// Replay a previous recording from history
     Replay(Option<usize>),
     /// Show help message
@@ -59,38 +71,55 @@ USAGE:
     ostt [COMMAND]
 
 COMMANDS:
-    record              Record audio with real-time volume metering
-                        Press Enter to transcribe, Escape/q to cancel
+     record              Record audio with real-time volume metering
+                         Press Enter to transcribe, Escape/q to cancel
+     
+     FLAGS (for record and retry commands):
+       -c                Copy to clipboard instead of stdout
+       -o <file>         Write to file instead of stdout
 
-    auth                Authenticate with a transcription provider and
-                        select a model. Handles both provider selection
-                        and API key management in one unified flow.
+     auth                Authenticate with a transcription provider and
+                         select a model. Handles both provider selection
+                         and API key management in one unified flow.
 
-    history             View and browse your transcription history
-                        Select a transcription to copy it to clipboard
+     history             View and browse your transcription history
+                         Select a transcription to copy it to clipboard
 
-    keywords            Manage keywords for improved transcription accuracy
-                        Add, remove, and view keywords used by AI models
+     keywords            Manage keywords for improved transcription accuracy
+                         Add, remove, and view keywords used by AI models
 
-    config              Open configuration file in your preferred editor
-                        Customize audio settings and provider options
+     config              Open configuration file in your preferred editor
+                         Customize audio settings and provider options
 
-    retry               Retry the last recording with the same transcription model
+    retry [N]           Retry transcribing recording #N (default: most recent)
+                        Supports same flags as record command (-c, -o)
 
-    replay              Replay a previous recording from history
+    replay [N]          Replay recording #N using system audio player
 
     version, -V, --version
                         Show version information
 
-    list-devices        List available audio input devices
+     list-devices        List available audio input devices
 
-    logs                Show recent log entries from the application
+     logs                Show recent log entries from the application
 
-    help, -h, --help    Show this help message
+     help, -h, --help    Show this help message
 
 EXAMPLES:
-    # Record audio
-    $ ostt record
+     # Record and pipe to other command (default stdout)
+     $ ostt record | grep word
+     
+     # Record and copy to clipboard
+     $ ostt record -c
+     
+     # Record and write to file
+     $ ostt record -o output.txt
+     
+     # Retry most recent recording and pipe output
+     $ ostt retry | wc -w
+     
+     # Retry recording #2 and copy to clipboard
+     $ ostt retry 2 -c
     
     # Set up authentication and select a model
     $ ostt auth
@@ -119,14 +148,27 @@ impl Command {
 
         if args.len() > 1 {
             match args[1].as_str() {
-                "record" => Command::Record,
+                "record" => {
+                    let clipboard = args.contains(&"-c".to_string());
+                    let output_file = args.iter().position(|arg| arg == "-o").and_then(|i| {
+                        args.get(i + 1).cloned()
+                    });
+                    Command::Record { clipboard, output_file }
+                }
                 "auth" => Command::Auth,
                 "history" => Command::History,
                 "keywords" => Command::Keywords,
                 "config" => Command::Config,
                 "retry" => {
-                    let index = args.get(2).and_then(|s| s.parse().ok());
-                    Command::Retry(index)
+                    let clipboard = args.contains(&"-c".to_string());
+                    let output_file = args.iter().position(|arg| arg == "-o").and_then(|i| {
+                        args.get(i + 1).cloned()
+                    });
+                    // Parse index from args, skipping flags
+                    let index = args.get(2)
+                        .filter(|arg| !arg.starts_with('-'))
+                        .and_then(|s| s.parse().ok());
+                    Command::Retry { index, clipboard, output_file }
                 }
                 "replay" => {
                     let index = args.get(2).and_then(|s| s.parse().ok());
@@ -139,7 +181,7 @@ impl Command {
                 invalid => Command::Invalid(invalid.to_string()),
             }
         } else {
-            Command::Record
+            Command::Record { clipboard: false, output_file: None }
         }
     }
 }
@@ -223,11 +265,11 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 }
             }
         }
-        Command::Record => commands::handle_record().await?,
+        Command::Record { clipboard, output_file } => commands::handle_record(clipboard, output_file).await?,
         Command::History => commands::handle_history().await?,
         Command::Keywords => commands::handle_keywords().await?,
         Command::Config => commands::handle_config()?,
-        Command::Retry(index) => commands::handle_retry(index).await?,
+        Command::Retry { index, clipboard, output_file } => commands::handle_retry(index, clipboard, output_file).await?,
         Command::Replay(index) => commands::handle_replay(index).await?,
         Command::Help => unreachable!(),
         Command::Version => unreachable!(),

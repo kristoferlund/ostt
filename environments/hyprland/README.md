@@ -15,8 +15,8 @@ On first run, ostt automatically detects Hyprland and creates the integration sc
 Add the following to your `~/.config/hypr/hyprland.conf`:
 
 ```hyprland
-# ostt - Speech-to-Text hotkey
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float
+# ostt - Speech-to-Text hotkey (clipboard output)
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
 
 # Window appearance (optional but recommended)
 windowrule = float, title:ostt
@@ -34,12 +34,33 @@ That's it!
 
 ## Usage
 
+### Basic Usage (Clipboard Output)
+
 1. **Press `Super+R`**: Opens ostt in a floating window and starts recording
 2. **Speak your text**: Watch the real-time waveform visualization
 3. **Press `Enter`**: Stops recording, transcribes, and copies to clipboard
 4. **Press `Ctrl+V`**: Paste the transcribed text anywhere
 
 Alternatively, you can press `Super+R` again instead of `Enter` to stop recording and transcribe.
+
+### Output Options
+
+By default, the Hyprland integration copies transcriptions to the clipboard. You can customize this by passing flags to ostt:
+
+**Clipboard (default):**
+```hyprland
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+```
+
+**Stdout (for piping to other commands):**
+```hyprland
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float
+```
+
+**File output:**
+```hyprland
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -o ~/transcription.txt
+```
 
 ## Customization
 
@@ -69,6 +90,43 @@ Change `SUPER, R` to your preferred key combination in `hyprland.conf`:
 # Example: Use Ctrl+Alt+R instead
 bindd = CTRL_ALT, R, ostt, exec, bash ~/.local/bin/ostt-float
 ```
+
+## Upgrading from 0.0.5
+
+If you're upgrading from ostt 0.0.5, you need to update your integration:
+
+### 1. Update the Shell Script
+
+The `ostt-float.sh` script has been updated to support command-line flags. Replace it with the new version:
+
+```bash
+# Backup your current script (optional)
+cp ~/.local/bin/ostt-float ~/.local/bin/ostt-float.backup
+
+# Copy the new script from the repository
+cp ~/.config/ostt/ostt-float.sh ~/.local/bin/ostt-float
+chmod +x ~/.local/bin/ostt-float
+```
+
+### 2. Update Your Hyprland Config
+
+Update the bind command in `~/.config/hypr/hyprland.conf` to include the `-c` flag for clipboard output:
+
+```hyprland
+# Old (0.0.5):
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float
+
+# New (0.0.6+):
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+```
+
+Then reload your Hyprland configuration:
+
+```bash
+hyprctl reload
+```
+
+**Note:** Without the `-c` flag, transcriptions will output to stdout instead of clipboard.
 
 ## Troubleshooting
 
