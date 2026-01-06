@@ -1,10 +1,10 @@
 //! Retry transcription of a previous recording without re-recording audio.
 
-use crate::recording::RecordingHistory;
-use crate::config;
 use crate::clipboard::copy_to_clipboard;
+use crate::config;
 use crate::history::HistoryManager;
 use crate::keywords::KeywordsManager;
+use crate::recording::RecordingHistory;
 use crate::transcription;
 use crate::ui::ErrorScreen;
 use dirs;
@@ -115,7 +115,9 @@ pub async fn handle_retry(recording_index: Option<usize>) -> Result<(), anyhow::
                 // Save to history
                 let mut history_manager = HistoryManager::new(&data_dir)?;
                 let history_note = format!("[Retried from recording #{}]", index);
-                if let Err(e) = history_manager.save_transcription(&format!("{} {}", history_note, trimmed_text)) {
+                if let Err(e) = history_manager
+                    .save_transcription(&format!("{} {}", history_note, trimmed_text))
+                {
                     tracing::warn!("Failed to save transcription to history: {}", e);
                 }
 

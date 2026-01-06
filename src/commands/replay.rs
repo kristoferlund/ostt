@@ -1,8 +1,8 @@
 //! Replay a previous recording from history using the system audio player.
 
 use crate::recording::RecordingHistory;
-use std::process::Command;
 use dirs;
+use std::process::Command;
 
 /// Plays back a previous recording using the system's default audio player.
 ///
@@ -65,9 +65,7 @@ pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow:
 
     #[cfg(target_os = "linux")]
     {
-        let result = Command::new("xdg-open")
-            .arg(audio_path)
-            .spawn();
+        let result = Command::new("xdg-open").arg(audio_path).spawn();
 
         match result {
             Ok(mut child) => {
