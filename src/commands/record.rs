@@ -6,7 +6,7 @@
 use crate::clipboard::copy_to_clipboard;
 use crate::config;
 use crate::history::HistoryManager;
-use crate::recording::{AudioRecorder, OsttTui, RecordingCommand};
+use crate::recording::{AudioRecorder, OsttTui, RecordingCommand, RecordingHistory};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::ErrorScreen;
 use dirs;
@@ -26,7 +26,7 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
     let config_data = match config::OsttConfig::load() {
         Ok(config) => config,
         Err(err) => {
-            tracing::error!("Failed to load configuration: {}", err);
+            tracing::error!("Failed to load configuration: {err}");
             let error_message = format!(
                 "Configuration Error:\n\n{err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again."
             );
@@ -48,7 +48,7 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
     let mut audio_recorder = AudioRecorder::new(config_data.audio.sample_rate, config_data.audio.device.clone());
 
     if let Err(e) = audio_recorder.start_recording() {
-        tracing::error!("Failed to start recording: {}", e);
+        tracing::error!("Failed to start recording: {e}");
         let error_message = format!(
             "Recording Error:\n\n{e}\n\nPlease check your audio configuration and try again."
         );
@@ -135,10 +135,19 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
         _ => codec,
     };
 
-    // Save to temp directory with ostt-recording prefix
-    let temp_dir = std::env::temp_dir();
-    let filename = format!("ostt-recording.{extension}");
-    let filepath = temp_dir.join(&filename);
+    // Prepare data directory for recordings
+    let data_dir = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+        .join(".local")
+        .join("share")
+        .join("ostt");
+
+    // Save to persistent recordings directory with timestamp
+    let recordings_dir = data_dir.join("recordings");
+    fs::create_dir_all(&recordings_dir)?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
+    let filename = format!("ostt-recording-{}.{}", timestamp, extension);
+    let filepath = recordings_dir.join(&filename);
 
     audio_recorder
         .stop_recording(Some(filepath.clone()), &config_data.audio.output_format)
@@ -147,8 +156,12 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
             e
         })?;
 
+    // Clean up old recordings to keep only 10 most recent
+    if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
+        let _ = recording_history.cleanup_old_recordings();
+    }
+
     if should_transcribe {
-        // Get the selected model from secrets (stored when user runs 'ostt auth')
         let selected_model_id = config::get_selected_model().ok().flatten();
 
         if let Some(model_id) = selected_model_id {
@@ -282,7 +295,8 @@ async fn transcribe_recording_with_animation(
 
     match transcription_handle.await {
         Ok(Ok(text)) => {
-            tracing::info!("Transcription completed: {}", text);
+            let trimmed_text = text.trim().to_string();
+            tracing::info!("Transcription completed: {}", trimmed_text);
 
             let data_dir = dirs::home_dir()
                 .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
@@ -291,7 +305,7 @@ async fn transcribe_recording_with_animation(
                 .join("ostt");
 
             let mut history_manager = HistoryManager::new(&data_dir)?;
-            if let Err(e) = history_manager.save_transcription(&text) {
+            if let Err(e) = history_manager.save_transcription(&trimmed_text) {
                 tracing::warn!("Failed to save transcription to history: {}", e);
             }
 
