@@ -33,9 +33,9 @@ enum Command {
     /// Edit configuration file
     Config,
     /// Retry the last recording with the same model
-    Retry,
+    Retry(Option<usize>),
     /// Replay a previous recording from history
-    Replay,
+    Replay(Option<usize>),
     /// Show help message
     Help,
     /// Show version information
@@ -126,8 +126,14 @@ impl Command {
                 "history" => Command::History,
                 "keywords" => Command::Keywords,
                 "config" => Command::Config,
-                "retry" => Command::Retry,
-                "replay" => Command::Replay,
+                "retry" => {
+                    let index = args.get(2).and_then(|s| s.parse().ok());
+                    Command::Retry(index)
+                }
+                "replay" => {
+                    let index = args.get(2).and_then(|s| s.parse().ok());
+                    Command::Replay(index)
+                }
                 "help" | "-h" | "--help" => Command::Help,
                 "version" | "-V" | "--version" => Command::Version,
                 "list-devices" => Command::ListDevices,
@@ -223,8 +229,8 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Command::History => commands::handle_history().await?,
         Command::Keywords => commands::handle_keywords().await?,
         Command::Config => commands::handle_config()?,
-        Command::Retry => commands::handle_retry().await?,
-        Command::Replay => commands::handle_replay().await?,
+        Command::Retry(index) => commands::handle_retry(index).await?,
+        Command::Replay(index) => commands::handle_replay(index).await?,
         Command::Help => unreachable!(),
         Command::Version => unreachable!(),
         Command::ListDevices => unreachable!(),

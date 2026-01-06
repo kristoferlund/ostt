@@ -37,12 +37,18 @@ impl RecordingHistory {
     }
 
     /// Saves recording metadata for a new recording session.
+    /// 
+    /// Keeps only the 10 most recent recordings. If there are already 10 recordings,
+    /// the oldest one (including its audio file) is deleted before saving the new one.
     pub fn save_recording(&self, audio_path: PathBuf, model_id: Option<String>) -> Result<String> {
+        // Clean up old recordings if we already have 10
+        self.cleanup_old_recordings()?;
+
         let now = Local::now();
         let recording_id = now.timestamp_millis().to_string();
         let metadata = RecordingMetadata {
             id: recording_id.clone(),
-            audio_path,
+            audio_path: audio_path.clone(),
             model_id,
             created_at: now,
         };
@@ -50,7 +56,55 @@ impl RecordingHistory {
         let json = serde_json::to_string_pretty(&metadata)?;
         fs::write(metadata_path, json)?;
         tracing::info!("Recording metadata saved with ID: {}", recording_id);
+
         Ok(recording_id)
+    }
+
+    /// Removes the oldest recording if there are more than 10 recordings.
+    fn cleanup_old_recordings(&self) -> Result<()> {
+        let entries = fs::read_dir(&self.history_dir)?;
+        let mut recordings: Vec<(PathBuf, DateTime<Local>)> = entries
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let path = entry.path();
+                if path.extension().map(|ext| ext == "json").unwrap_or(false) {
+                    let metadata = fs::read_to_string(&path).ok()?;
+                    let meta: RecordingMetadata = serde_json::from_str(&metadata).ok()?;
+                    Some((path, meta.created_at))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // If we have 10 or more recordings, delete the oldest to make room
+        if recordings.len() >= 10 {
+            recordings.sort_by(|a, b| a.1.cmp(&b.1));
+            let oldest_metadata_path = &recordings[0].0;
+            
+            // Load the metadata to get the audio file path
+            if let Ok(metadata_content) = fs::read_to_string(oldest_metadata_path) {
+                if let Ok(metadata) = serde_json::from_str::<RecordingMetadata>(&metadata_content) {
+                    // Delete the audio file
+                    if metadata.audio_path.exists() {
+                        if let Err(e) = fs::remove_file(&metadata.audio_path) {
+                            tracing::warn!("Failed to delete old recording audio: {}", e);
+                        } else {
+                            tracing::info!("Deleted old recording audio: {}", metadata.audio_path.display());
+                        }
+                    }
+                }
+            }
+            
+            // Delete the metadata file
+            if let Err(e) = fs::remove_file(oldest_metadata_path) {
+                tracing::warn!("Failed to delete old recording metadata: {}", e);
+            } else {
+                tracing::info!("Deleted old recording metadata: {}", oldest_metadata_path.display());
+            }
+        }
+
+        Ok(())
     }
 
     /// Retrieves the most recent recording metadata (for retry).

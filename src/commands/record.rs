@@ -131,10 +131,19 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
         _ => codec,
     };
 
-    // Save to temp directory with ostt-recording prefix
-    let temp_dir = std::env::temp_dir();
-    let filename = format!("ostt-recording.{extension}");
-    let filepath = temp_dir.join(&filename);
+    // Prepare data directory for recordings
+    let data_dir = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+        .join(".local")
+        .join("share")
+        .join("ostt");
+
+    // Save to persistent recordings directory with timestamp
+    let recordings_dir = data_dir.join("recordings");
+    fs::create_dir_all(&recordings_dir)?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
+    let filename = format!("ostt-recording-{}.{}", timestamp, extension);
+    let filepath = recordings_dir.join(&filename);
 
     audio_recorder
         .stop_recording(Some(filepath.clone()), &config_data.audio.output_format)
@@ -145,11 +154,6 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
 
     // Save recording metadata for retry/replay functionality
     let selected_model_id = config::get_selected_model().ok().flatten();
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
     if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
         let _ = recording_history.save_recording(filepath.clone(), selected_model_id.clone());
     }
