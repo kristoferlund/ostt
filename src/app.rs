@@ -76,10 +76,8 @@ COMMANDS:
                         Customize audio settings and provider options
 
     retry               Retry the last recording with the same transcription model
-                        Automatically transcribes the previous recording
 
     replay              Replay a previous recording from history
-                        Select a recording to retranscribe with the original model
 
     version, -V, --version
                         Show version information
