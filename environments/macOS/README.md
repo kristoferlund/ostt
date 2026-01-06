@@ -35,6 +35,7 @@ With ostt integrated via Hammerspoon, you get instant voice-to-text transcriptio
 -- === ostt Configuration ===
 local OSTT_BIN = "/opt/homebrew/bin/ostt"
 local GHOSTTY_BIN = "/Applications/Ghostty.app/Contents/MacOS/ghostty"
+local OSTT_ARGS = "-c"  -- Copy to clipboard by default. Use "" for stdout, or "-o file" for file output
 
 local function osttExists()
 	local attr = hs.fs.attributes(OSTT_BIN)
@@ -50,13 +51,8 @@ local function spawnOsttPopup()
 	-- Remember the currently focused app to restore later
 	local frontApp = hs.application.frontmostApplication()
 
-	-- Start Ghostty running OSTT with window position/size flags
-	local task = hs.task.new(GHOSTTY_BIN, function(exitCode, stdOut, stdErr)
-		-- When Ghostty/OSTT exits, go back to the previous app
-		if frontApp then
-			frontApp:activate()
-		end
-	end, {
+	-- Build the command with args
+	local args = {
 		"--window-position-x=630",
 		"--window-position-y=790",
 		"--window-width=50",
@@ -67,7 +63,22 @@ local function spawnOsttPopup()
 		"--macos-window-shadow=false",
 		"-e",
 		OSTT_BIN,
-	})
+	}
+	
+	-- Add ostt arguments if specified
+	if OSTT_ARGS ~= "" then
+		for arg in string.gmatch(OSTT_ARGS, "%S+") do
+			table.insert(args, arg)
+		end
+	end
+
+	-- Start Ghostty running OSTT with window position/size flags
+	local task = hs.task.new(GHOSTTY_BIN, function(exitCode, stdOut, stdErr)
+		-- When Ghostty/OSTT exits, go back to the previous app
+		if frontApp then
+			frontApp:activate()
+		end
+	end, args)
 
 	task:start()
 end
@@ -82,10 +93,31 @@ That's it!
 
 ## Usage
 
+### Basic Usage (Clipboard Output)
+
 1. **Press `Cmd+Shift+R`**: Opens ostt in a popup window and starts recording
 2. **Speak your text**: Watch the real-time waveform visualization
 3. **Press `Enter`**: Stops recording, transcribes, and copies to clipboard
 4. **Press `Cmd+V`**: Paste the transcribed text anywhere
+
+### Output Options
+
+By default, the Hammerspoon integration copies transcriptions to the clipboard. You can customize this by changing the `OSTT_ARGS` variable in your `init.lua`:
+
+**Clipboard (default):**
+```lua
+local OSTT_ARGS = "-c"
+```
+
+**Stdout (for piping to other commands):**
+```lua
+local OSTT_ARGS = ""
+```
+
+**File output:**
+```lua
+local OSTT_ARGS = "-o ~/transcription.txt"
+```
 
 ## Customization
 
@@ -114,6 +146,36 @@ Change the hotkey binding in `init.lua`:
 -- Example: Use Ctrl+Alt+R instead
 hs.hotkey.bind({ "ctrl", "alt" }, "R", spawnOsttPopup)
 ```
+
+## Upgrading from 0.0.5
+
+If you're upgrading from ostt 0.0.5, you need to update your Hammerspoon configuration to support the new output flags.
+
+### Update Your init.lua
+
+Edit your `~/.hammerspoon/init.lua` (or wherever you placed the ostt configuration) and add the `OSTT_ARGS` variable:
+
+**1. Add the OSTT_ARGS variable after the other config variables:**
+
+```lua
+local OSTT_BIN = "/opt/homebrew/bin/ostt"
+local GHOSTTY_BIN = "/Applications/Ghostty.app/Contents/MacOS/ghostty"
+local OSTT_ARGS = "-c"  -- Add this line for clipboard output
+```
+
+**2. Update the `spawnOsttPopup` function to build args dynamically:**
+
+Replace the existing function with the updated version from this README (see the "One-Time Configuration" section above), which includes:
+- Building an `args` table
+- Parsing and adding `OSTT_ARGS` to the command
+
+**3. Reload Hammerspoon:**
+
+Click the Hammerspoon menu bar icon → "Reload Config"
+
+**Alternative:** If you prefer, you can copy the entire updated configuration from the [init.lua template](init.lua) in this repository.
+
+**Note:** Without the `-c` flag in `OSTT_ARGS`, transcriptions will output to stdout instead of clipboard (which won't be visible in the popup window).
 
 ## Troubleshooting
 
