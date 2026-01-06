@@ -146,7 +146,7 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
     let recordings_dir = data_dir.join("recordings");
     fs::create_dir_all(&recordings_dir)?;
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
-    let filename = format!("ostt-recording-{}.{}", timestamp, extension);
+    let filename = format!("ostt-recording-{timestamp}.{extension}");
     let filepath = recordings_dir.join(&filename);
 
     audio_recorder
@@ -161,23 +161,25 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
         let _ = recording_history.cleanup_old_recordings();
     }
 
-    if should_transcribe {
+    let transcription_text = if should_transcribe {
         let selected_model_id = config::get_selected_model().ok().flatten();
 
         if let Some(model_id) = selected_model_id {
             let filepath_str = filepath.to_string_lossy().to_string();
-            if let Err(e) = transcribe_recording_with_animation(
+            match transcribe_recording_with_animation(
                 &mut tui,
                 &config_data,
                 &model_id,
                 &filepath_str,
-                clipboard,
-                output_file.clone(),
             )
             .await
             {
-                tracing::warn!("Transcription failed: {}", e);
-                eprintln!("Warning: Transcription failed: {e}");
+                Ok(text) => Some(text),
+                Err(e) => {
+                    tracing::warn!("Transcription failed: {}", e);
+                    eprintln!("Warning: Transcription failed: {e}");
+                    None
+                }
             }
         } else {
             tracing::debug!("No transcription model configured");
@@ -185,11 +187,28 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
             let mut error_screen = ErrorScreen::new()?;
             error_screen.show_error("Error: No transcription model configured.\n\nPlease run 'ostt auth' to select a model.")?;
             error_screen.cleanup()?;
+            None
         }
-    }
+    } else {
+        None
+    };
 
     tui.cleanup()
         .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+
+    // Output transcription after TUI is completely cleaned up
+    if let Some(text) = transcription_text {
+        if let Some(file_path) = output_file {
+            std::fs::write(&file_path, &text)?;
+            tracing::info!("Transcription written to file: {}", file_path);
+        } else if clipboard {
+            copy_to_clipboard(&text)?;
+            tracing::info!("Transcription copied to clipboard");
+        } else {
+            println!("{text}");
+            tracing::info!("Transcription printed to stdout");
+        }
+    }
 
     tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
     Ok(())
@@ -209,9 +228,7 @@ async fn transcribe_recording_with_animation(
     config_data: &config::OsttConfig,
     model_id: &str,
     audio_filename: &str,
-    clipboard: bool,
-    output_file: Option<String>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<String> {
     use crate::transcription;
 
     let model = match transcription::TranscriptionModel::from_id(model_id) {
@@ -309,35 +326,8 @@ async fn transcribe_recording_with_animation(
                 tracing::warn!("Failed to save transcription to history: {}", e);
             }
 
-            // Determine output destination: file > clipboard > stdout (default)
-            if let Some(file_path) = output_file {
-                // Write to file
-                match std::fs::write(&file_path, &text) {
-                    Ok(_) => {
-                        tracing::debug!("Transcribed text written to file: {file_path}");
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to write to file '{file_path}': {e}");
-                        return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
-                    }
-                }
-            } else if clipboard {
-                // Copy to clipboard
-                match copy_to_clipboard(&text) {
-                    Ok(_) => {
-                        tracing::debug!("Transcribed text copied to clipboard");
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to copy to clipboard: {e}");
-                    }
-                }
-            } else {
-                // Default: stdout
-                println!("{text}");
-                tracing::debug!("Transcribed text printed to stdout");
-            }
-
-            Ok(())
+            // Return the transcription text to be output after TUI cleanup
+            Ok(text)
         }
         Ok(Err(e)) => {
             tracing::error!("Transcription failed: {}", e);
