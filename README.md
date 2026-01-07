@@ -54,18 +54,6 @@ Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
 
-### macOS
-
-**Homebrew (Recommended):**
-```bash
-brew install kristoferlund/ostt/ostt
-```
-
-**Shell Installer:**
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
-```
-
 ### Linux
 
 **Arch Linux (AUR):**
@@ -74,6 +62,18 @@ yay -S ostt
 ```
 
 **Shell Installer (All Distributions):**
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
+```
+
+### macOS
+
+**Homebrew (Recommended):**
+```bash
+brew install kristoferlund/ostt/ostt
+```
+
+**Shell Installer:**
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
 ```
@@ -149,6 +149,15 @@ ostt list-devices    # List available audio input devices
 ostt logs            # View recent application logs
 ostt version         # Show version information
 ostt help            # Show all commands
+ostt -h              # Quick help
+ostt --help          # Detailed help with examples
+```
+
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+
+```bash
+ostt r -c            # Same as: ostt record -c
+ostt a               # Same as: ostt auth
 ```
 
 ## Configuration

@@ -16,10 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Retry command** - Re-transcribe previous recordings without re-recording audio (`ostt retry` or `ostt retry N`)
 - **Replay command** - Playback previous recordings using system audio player (`ostt replay` or `ostt replay N`)
 - **Recording history** - Maintains history of 10 most recent audio recordings with automatic rotation
+- **Command aliases** - Short aliases for common commands: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay)
+- **Rich help system** - Two-tier help with `-h` (short) and `--help` (long with examples)
+- **Improved error messages** - Typo suggestions and better command-not-found errors
 
 ### Changed
 
+- **CLI framework migration** - Migrated from manual argument parsing to clap for better UX and maintainability
 - `ostt record` now outputs to stdout by default (enables shell piping) instead of clipboard
+- **BREAKING CHANGE for Hyprland/macOS popup users**: Default output changed to stdout. Update your integration scripts to add `-c` flag for clipboard output. See upgrade guides:
+  - [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
+  - [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
 
 ### Fixed
 

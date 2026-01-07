@@ -5,6 +5,7 @@
 use crate::commands;
 use crate::logging;
 use anyhow::anyhow;
+use clap::{Parser, Subcommand};
 use dirs;
 use std::env;
 use std::process;
@@ -19,171 +20,106 @@ fn suppress_alsa_warnings() {
     }
 }
 
-/// Application command types.
-#[derive(Debug)]
-enum Command {
-    /// Record audio and optionally transcribe
-    Record {
-        /// Copy to clipboard instead of stdout
-        clipboard: bool,
-        /// Write to file instead of stdout
-        output_file: Option<String>,
-    },
-    /// Authenticate with a transcription provider and select model
-    Auth,
-    /// View transcription history
-    History,
-    /// Manage keywords for transcription
-    Keywords,
-    /// Edit configuration file
-    Config,
-    /// Retry the last recording with the same model
-    Retry {
-        /// Recording index (1 = most recent)
-        index: Option<usize>,
-        /// Copy to clipboard instead of stdout
-        clipboard: bool,
-        /// Write to file instead of stdout
-        output_file: Option<String>,
-    },
-    /// Replay a previous recording from history
-    Replay(Option<usize>),
-    /// Show help message
-    Help,
-    /// Show version information
-    Version,
-    /// List available audio input devices
-    ListDevices,
-    /// Show recent log entries
-    Logs,
-    /// Invalid command provided
-    Invalid(String),
+/// A terminal-based speech-to-text recorder with real-time waveform visualization
+#[derive(Parser)]
+#[command(name = "ostt")]
+#[command(version)]
+#[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
+#[command(long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config")]
+#[command(
+    after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
 }
 
-const HELP_TEXT: &str = r#"
-┏┓┏╋╋
-┗┛┛┗┗
-
-A terminal-based speech-to-text recorder with real-time waveform visualization
-and automatic transcription support.
-
-USAGE:
-    ostt [COMMAND]
-
-COMMANDS:
-     record              Record audio with real-time volume metering
-                         Press Enter to transcribe, Escape/q to cancel
-     
-     FLAGS (for record and retry commands):
-       -c                Copy to clipboard instead of stdout
-       -o <file>         Write to file instead of stdout
-
-     auth                Authenticate with a transcription provider and
-                         select a model. Handles both provider selection
-                         and API key management in one unified flow.
-
-     history             View and browse your transcription history
-                         Select a transcription to copy it to clipboard
-
-     keywords            Manage keywords for improved transcription accuracy
-                         Add, remove, and view keywords used by AI models
-
-     config              Open configuration file in your preferred editor
-                         Customize audio settings and provider options
-
-    retry [N]           Retry transcribing recording #N (default: most recent)
-                        Supports same flags as record command (-c, -o)
-
-    replay [N]          Replay recording #N using system audio player
-
-    version, -V, --version
-                        Show version information
-
-     list-devices        List available audio input devices
-
-     logs                Show recent log entries from the application
-
-     help, -h, --help    Show this help message
-
-EXAMPLES:
-     # Record and pipe to other command (default stdout)
-     $ ostt record | grep word
-     
-     # Record and copy to clipboard
-     $ ostt record -c
-     
-     # Record and write to file
-     $ ostt record -o output.txt
-     
-     # Retry most recent recording and pipe output
-     $ ostt retry | wc -w
-     
-     # Retry recording #2 and copy to clipboard
-     $ ostt retry 2 -c
-    
-    # Set up authentication and select a model
-    $ ostt auth
-    
-    # View your transcription history
-    $ ostt history
-    
-    # Edit configuration file
-    $ ostt config
-
-CONFIGURATION:
-    Config file:        ~/.config/ostt/ostt.toml
-    Logs:               ~/.local/state/ostt/ostt.log.*
-
-For more information, visit: https://github.com/kristoferlund/ostt
-"#;
-
-impl Command {
-    /// Parse command from command-line arguments.
+#[derive(Subcommand)]
+enum Commands {
+    /// Record audio with real-time visualization (default)
     ///
-    /// Returns the appropriate command based on the first argument.
-    /// If no arguments or "record" is provided, returns Record command.
-    /// If an unrecognized command is provided, returns Invalid.
-    fn from_args() -> Self {
-        let args: Vec<String> = env::args().collect();
+    /// Press Enter to transcribe, Space to pause/resume, Escape/q to cancel.
+    /// By default, transcription outputs to stdout for piping to other commands.
+    #[command(visible_alias = "r")]
+    Record {
+        /// Copy transcription to clipboard instead of stdout
+        #[arg(short, long)]
+        clipboard: bool,
 
-        if args.len() > 1 {
-            match args[1].as_str() {
-                "record" => {
-                    let clipboard = args.contains(&"-c".to_string());
-                    let output_file = args.iter().position(|arg| arg == "-o").and_then(|i| {
-                        args.get(i + 1).cloned()
-                    });
-                    Command::Record { clipboard, output_file }
-                }
-                "auth" => Command::Auth,
-                "history" => Command::History,
-                "keywords" => Command::Keywords,
-                "config" => Command::Config,
-                "retry" => {
-                    let clipboard = args.contains(&"-c".to_string());
-                    let output_file = args.iter().position(|arg| arg == "-o").and_then(|i| {
-                        args.get(i + 1).cloned()
-                    });
-                    // Parse index from args, skipping flags
-                    let index = args.get(2)
-                        .filter(|arg| !arg.starts_with('-'))
-                        .and_then(|s| s.parse().ok());
-                    Command::Retry { index, clipboard, output_file }
-                }
-                "replay" => {
-                    let index = args.get(2).and_then(|s| s.parse().ok());
-                    Command::Replay(index)
-                }
-                "help" | "-h" | "--help" => Command::Help,
-                "version" | "-V" | "--version" => Command::Version,
-                "list-devices" => Command::ListDevices,
-                "logs" => Command::Logs,
-                invalid => Command::Invalid(invalid.to_string()),
-            }
-        } else {
-            Command::Record { clipboard: false, output_file: None }
-        }
-    }
+        /// Write transcription to file instead of stdout
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
+
+    /// Retry transcription of a previous recording
+    ///
+    /// Re-transcribe a recording using the current model/provider settings.
+    /// Useful when transcription failed or you want to try a different model.
+    Retry {
+        /// Recording index (1 = most recent, 2 = second most recent, etc.)
+        #[arg(value_name = "N")]
+        index: Option<usize>,
+
+        /// Copy transcription to clipboard instead of stdout
+        #[arg(short, long)]
+        clipboard: bool,
+
+        /// Write transcription to file instead of stdout
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
+
+    /// Replay a previous recording using system audio player
+    ///
+    /// Play back the audio of a previous recording without transcribing.
+    /// Uses afplay (macOS) or aplay (Linux).
+    #[command(visible_alias = "rp")]
+    Replay {
+        /// Recording index (1 = most recent, 2 = second most recent, etc.)
+        #[arg(value_name = "N")]
+        index: Option<usize>,
+    },
+
+    /// Authenticate with a transcription provider and select model
+    ///
+    /// Configure your AI provider credentials and choose which model to use.
+    /// Handles both provider selection and API key management in one flow.
+    #[command(visible_alias = "a")]
+    Auth,
+
+    /// View and browse transcription history
+    ///
+    /// Browse previous transcriptions, select one to copy to clipboard.
+    /// Use arrow keys to navigate, Enter to copy, Esc to exit.
+    #[command(visible_alias = "h")]
+    History,
+
+    /// Manage keywords for improved transcription accuracy
+    ///
+    /// Add technical terms, names, or domain-specific vocabulary to help
+    /// the AI transcribe more accurately.
+    #[command(visible_alias = "k")]
+    Keywords,
+
+    /// Open configuration file in your preferred editor
+    ///
+    /// Edit audio settings, provider options, and other configuration.
+    /// Uses $EDITOR environment variable or falls back to nano/vim.
+    #[command(visible_alias = "c")]
+    Config,
+
+    /// List available audio input devices
+    ///
+    /// Shows device IDs, names, and configurations to help configure
+    /// the correct input device in ostt.toml.
+    #[command(name = "list-devices")]
+    ListDevices,
+
+    /// Show recent log entries from the application
+    ///
+    /// Display the last 50 lines of the most recent log file.
+    /// Useful for troubleshooting issues.
+    Logs,
 }
 
 /// Runs the main application based on command-line arguments.
@@ -198,46 +134,35 @@ impl Command {
 /// - If logging initialization fails
 /// - If command execution fails (e.g., authentication, recording, history viewing)
 pub async fn run() -> Result<(), anyhow::Error> {
-    let command = Command::from_args();
+    let cli = Cli::parse();
 
-    if matches!(command, Command::Help) {
-        println!("{HELP_TEXT}");
-        return Ok(());
+    // Handle commands that don't need logging or config setup
+    match &cli.command {
+        Some(Commands::ListDevices) => {
+            return match commands::handle_list_devices() {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    process::exit(1);
+                }
+            };
+        }
+        Some(Commands::Logs) => {
+            return match commands::handle_logs() {
+                Ok(()) => Ok(()),
+                Err(e) => {
+                    eprintln!("Error: {e}");
+                    process::exit(1);
+                }
+            };
+        }
+        _ => {}
     }
 
-    if matches!(command, Command::Version) {
-        println!("ostt {}", env!("CARGO_PKG_VERSION"));
-        return Ok(());
-    }
-
-    if matches!(command, Command::ListDevices) {
-        return match commands::handle_list_devices() {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                eprintln!("Error: {e}");
-                process::exit(1);
-            }
-        };
-    }
-
-    if matches!(command, Command::Logs) {
-        return match commands::handle_logs() {
-            Ok(()) => Ok(()),
-            Err(e) => {
-                eprintln!("Error: {e}");
-                process::exit(1);
-            }
-        };
-    }
-
-    if let Command::Invalid(cmd) = &command {
-        eprintln!("Error: unknown command '{cmd}'");
-        eprintln!("Run 'ostt help' to see available commands.");
-        process::exit(2);
-    }
-
+    // Initialize logging for all other commands
     logging::init_logging()?;
 
+    // Ensure config file exists, run setup if needed
     let config_path = dirs::home_dir()
         .ok_or_else(|| anyhow!("Could not determine home directory"))?
         .join(".config")
@@ -252,8 +177,28 @@ pub async fn run() -> Result<(), anyhow::Error> {
         tracing::info!("Setup completed successfully");
     }
 
-    match command {
-        Command::Auth => {
+    // Route to appropriate command handler
+    match cli.command {
+        None | Some(Commands::Record { .. }) => {
+            // Default command is record
+            let (clipboard, output) = match cli.command {
+                Some(Commands::Record { clipboard, output }) => (clipboard, output),
+                None => (false, None),
+                _ => unreachable!(),
+            };
+            commands::handle_record(clipboard, output).await?;
+        }
+        Some(Commands::Retry {
+            index,
+            clipboard,
+            output,
+        }) => {
+            commands::handle_retry(index, clipboard, output).await?;
+        }
+        Some(Commands::Replay { index }) => {
+            commands::handle_replay(index).await?;
+        }
+        Some(Commands::Auth) => {
             if let Err(e) = commands::handle_auth().await {
                 // Check if it's a cancellation error (cliclack already displayed the message)
                 let err_msg = e.to_string();
@@ -265,17 +210,18 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 }
             }
         }
-        Command::Record { clipboard, output_file } => commands::handle_record(clipboard, output_file).await?,
-        Command::History => commands::handle_history().await?,
-        Command::Keywords => commands::handle_keywords().await?,
-        Command::Config => commands::handle_config()?,
-        Command::Retry { index, clipboard, output_file } => commands::handle_retry(index, clipboard, output_file).await?,
-        Command::Replay(index) => commands::handle_replay(index).await?,
-        Command::Help => unreachable!(),
-        Command::Version => unreachable!(),
-        Command::ListDevices => unreachable!(),
-        Command::Logs => unreachable!(),
-        Command::Invalid(_) => unreachable!(),
+        Some(Commands::History) => {
+            commands::handle_history().await?;
+        }
+        Some(Commands::Keywords) => {
+            commands::handle_keywords().await?;
+        }
+        Some(Commands::Config) => {
+            commands::handle_config()?;
+        }
+        Some(Commands::ListDevices) | Some(Commands::Logs) => {
+            unreachable!("These commands are handled earlier")
+        }
     }
 
     Ok(())
