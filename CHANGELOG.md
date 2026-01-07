@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Command aliases** - Short aliases for common commands: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay)
 - **Rich help system** - Two-tier help with `-h` (short) and `--help` (long with examples)
 - **Improved error messages** - Typo suggestions and better command-not-found errors
+- **Shell completions** - Generate completion scripts for bash, zsh, fish, and PowerShell (`ostt completions <shell>`)
 
 ### Changed
 

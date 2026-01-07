@@ -5,9 +5,11 @@
 use crate::commands;
 use crate::logging;
 use anyhow::anyhow;
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
+use clap_complete::{generate, Shell};
 use dirs;
 use std::env;
+use std::io;
 use std::process;
 
 /// Suppress ALSA library warnings that are not relevant to the user.
@@ -120,6 +122,21 @@ enum Commands {
     /// Display the last 50 lines of the most recent log file.
     /// Useful for troubleshooting issues.
     Logs,
+
+    /// Generate shell completion script
+    ///
+    /// Generate completion script for your shell. Save the output to your
+    /// shell's completion directory or source it directly.
+    ///
+    /// Examples:
+    ///   ostt completions bash > ostt.bash
+    ///   ostt completions zsh > _ostt
+    ///   ostt completions fish > ostt.fish
+    Completions {
+        /// The shell to generate completions for
+        #[arg(value_enum)]
+        shell: Shell,
+    },
 }
 
 /// Runs the main application based on command-line arguments.
@@ -138,6 +155,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
     // Handle commands that don't need logging or config setup
     match &cli.command {
+        Some(Commands::Completions { shell }) => {
+            generate(*shell, &mut Cli::command(), "ostt", &mut io::stdout());
+            return Ok(());
+        }
         Some(Commands::ListDevices) => {
             return match commands::handle_list_devices() {
                 Ok(()) => Ok(()),
@@ -219,7 +240,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Config) => {
             commands::handle_config()?;
         }
-        Some(Commands::ListDevices) | Some(Commands::Logs) => {
+        Some(Commands::Completions { .. }) | Some(Commands::ListDevices) | Some(Commands::Logs) => {
             unreachable!("These commands are handled earlier")
         }
     }

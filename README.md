@@ -160,6 +160,37 @@ ostt r -c            # Same as: ostt record -c
 ostt a               # Same as: ostt auth
 ```
 
+## Shell Completions
+
+ostt can generate completion scripts for your shell to enable tab completion of commands and options.
+
+**Bash:**
+```bash
+ostt completions bash > ostt.bash
+sudo cp ostt.bash /etc/bash_completion.d/
+```
+
+**Zsh:**
+```bash
+ostt completions zsh > _ostt
+# Copy to your zsh completions directory (location varies by system)
+sudo cp _ostt /usr/local/share/zsh/site-functions/
+```
+
+**Fish:**
+```bash
+ostt completions fish > ostt.fish
+cp ostt.fish ~/.config/fish/completions/
+```
+
+**PowerShell:**
+```powershell
+ostt completions powershell > ostt.ps1
+# Add to your PowerShell profile
+```
+
+After installation, restart your shell or source the completion file to enable completions.
+
 ## Configuration
 
 ostt uses a TOML configuration file at `~/.config/ostt/ostt.toml`.
