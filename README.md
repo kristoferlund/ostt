@@ -54,18 +54,6 @@ Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
 
-### macOS
-
-**Homebrew (Recommended):**
-```bash
-brew install kristoferlund/ostt/ostt
-```
-
-**Shell Installer:**
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
-```
-
 ### Linux
 
 **Arch Linux (AUR):**
@@ -74,6 +62,18 @@ yay -S ostt
 ```
 
 **Shell Installer (All Distributions):**
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
+```
+
+### macOS
+
+**Homebrew (Recommended):**
+```bash
+brew install kristoferlund/ostt/ostt
+```
+
+**Shell Installer:**
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
 ```
@@ -149,7 +149,47 @@ ostt list-devices    # List available audio input devices
 ostt logs            # View recent application logs
 ostt version         # Show version information
 ostt help            # Show all commands
+ostt -h              # Quick help
+ostt --help          # Detailed help with examples
 ```
+
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+
+```bash
+ostt r -c            # Same as: ostt record -c
+ostt a               # Same as: ostt auth
+```
+
+## Shell Completions
+
+ostt can generate completion scripts for your shell to enable tab completion of commands and options.
+
+**Bash:**
+```bash
+ostt completions bash > ostt.bash
+sudo cp ostt.bash /etc/bash_completion.d/
+```
+
+**Zsh:**
+```bash
+ostt completions zsh > _ostt
+# Copy to your zsh completions directory (location varies by system)
+sudo cp _ostt /usr/local/share/zsh/site-functions/
+```
+
+**Fish:**
+```bash
+ostt completions fish > ostt.fish
+cp ostt.fish ~/.config/fish/completions/
+```
+
+**PowerShell:**
+```powershell
+ostt completions powershell > ostt.ps1
+# Add to your PowerShell profile
+```
+
+After installation, restart your shell or source the completion file to enable completions.
 
 ## Configuration
 
