@@ -18,10 +18,13 @@ Add the following to your `~/.config/hypr/hyprland.conf`:
 # ostt - Speech-to-Text hotkey (clipboard output)
 bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
 
-# Window appearance (optional but recommended)
-windowrule = float, title:ostt
-windowrule = size 14% 8%, title:ostt
-windowrule = move 43% 90%, title:ostt
+# OSTT window overrides
+# Float the window
+windowrule = float on, match:title ostt
+# Resize with dynamic expressions (14% width, 8% height)
+windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
+# Position centered horizontally at bottom (90% from top)
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
 ```
 
 Then reload your Hyprland configuration:
@@ -66,16 +69,16 @@ bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -o ~/transcription.tx
 
 ### Window Position and Size
 
-Adjust the window rules in your `hyprland.conf` to change size and position:
+Adjust the window rules in your `hyprland.conf` to change size and position. Use dynamic expressions with `monitor_w`, `monitor_h`, `window_w`, and `window_h` for responsive sizing:
 
 ```hyprland
-# Default: small window at bottom-center
-windowrule = size 14% 8%, title:ostt
-windowrule = move 43% 90%, title:ostt
+# Default: 14% width, 8% height, centered horizontally at bottom
+windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
 
-# Example: larger centered window
-windowrule = size 50% 30%, title:ostt
-windowrule = move 25% 35%, title:ostt
+# Example: larger centered window (50% width, 30% height, centered)
+windowrule = size (monitor_w*0.5) (monitor_h*0.3), match:title ostt
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) ((monitor_h*0.5)-(window_h*0.5)), match:title ostt
 ```
 
 ### Terminal Appearance
@@ -93,40 +96,39 @@ bindd = CTRL_ALT, R, ostt, exec, bash ~/.local/bin/ostt-float
 
 ## Upgrading from 0.0.5
 
-If you're upgrading from ostt 0.0.5, you need to update your integration:
+If you're upgrading from ostt 0.0.5, you only need to update your Hyprland window rules. Everything else is handled automatically!
 
-### 1. Update the Shell Script
+> ⚠️ **BREAKING CHANGE:** Hyprland window rules syntax has changed. The old `windowrule` syntax is deprecated in recent Hyprland versions. You **must** update your window rules to the new syntax or the floating window will not appear correctly.
 
-The `ostt-float.sh` script has been updated to support command-line flags. Replace it with the new version:
+### Update Hyprland Window Rules (REQUIRED)
 
-```bash
-# Backup your current script (optional)
-cp ~/.local/bin/ostt-float ~/.local/bin/ostt-float.backup
+The window rule syntax has changed from the old format to a new format using `match:` patterns and dynamic expressions. Update your `hyprland.conf`:
 
-# Copy the new script from the repository
-cp ~/.config/ostt/ostt-float.sh ~/.local/bin/ostt-float
-chmod +x ~/.local/bin/ostt-float
-```
-
-### 2. Update Your Hyprland Config
-
-Update the bind command in `~/.config/hypr/hyprland.conf` to include the `-c` flag for clipboard output:
-
+**Old syntax (0.0.5):**
 ```hyprland
-# Old (0.0.5):
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float
-
-# New (0.0.6+):
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+windowrule = float, title:ostt
+windowrule = size 14% 8%, title:ostt
+windowrule = move 43% 90%, title:ostt
 ```
+
+**New syntax (0.0.6+):**
+```hyprland
+windowrule = float on, match:title ostt
+windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
+```
+
+Key changes:
+- Use `match:title ostt` instead of `title:ostt`
+- Add `on` parameter to the float rule: `float on`
+- Use dynamic expressions for responsive sizing: `(monitor_w*0.14)` instead of `14%`
+- Centering now uses expressions: `((monitor_w*0.5)-(window_w*0.5))` for horizontal centering
 
 Then reload your Hyprland configuration:
 
 ```bash
 hyprctl reload
 ```
-
-**Note:** Without the `-c` flag, transcriptions will output to stdout instead of clipboard.
 
 ## Troubleshooting
 
