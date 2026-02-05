@@ -156,6 +156,11 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
             e
         })?;
 
+    tracing::info!(
+        "Recording saved to: {}",
+        filepath.display()
+    );
+
     // Clean up old recordings to keep only 10 most recent
     if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
         let _ = recording_history.cleanup_old_recordings();
@@ -206,7 +211,7 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
             tracing::info!("Transcription copied to clipboard");
         } else {
             println!("{text}");
-            tracing::info!("Transcription printed to stdout");
+            tracing::debug!("Transcription printed to stdout");
         }
     }
 
@@ -313,7 +318,7 @@ async fn transcribe_recording_with_animation(
     match transcription_handle.await {
         Ok(Ok(text)) => {
             let trimmed_text = text.trim().to_string();
-            tracing::info!("Transcription completed: {}", trimmed_text);
+            tracing::debug!("Transcription completed: {}", trimmed_text);
 
             let data_dir = dirs::home_dir()
                 .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?

@@ -35,10 +35,10 @@ pub async fn handle_history() -> Result<(), anyhow::Error> {
             tracing::info!("Selected transcription copied to clipboard");
         }
         None => {
-            tracing::info!("History viewer exited without selection");
+            tracing::debug!("History viewer exited without selection");
         }
     }
 
-    tracing::info!("History viewer closed");
+    tracing::debug!("History viewer closed");
     Ok(())
 }
