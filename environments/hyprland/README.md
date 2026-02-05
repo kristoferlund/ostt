@@ -111,7 +111,7 @@ windowrule = size 14% 8%, title:ostt
 windowrule = move 43% 90%, title:ostt
 ```
 
-**New syntax (0.0.6+):**
+**New syntax (0.0.7+):**
 ```hyprland
 windowrule = float on, match:title ostt
 windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt

@@ -23,7 +23,7 @@
 - **Cross-platform support** - Linux and macOS
 
 > [!IMPORTANT]
-> **Upgrading from 0.0.5?** Version 0.0.6 introduces output flags (`-c`, `-o`) that change default behavior for popup integrations.
+> **Upgrading from 0.0.5?** Version 0.0.7 introduces output flags (`-c`, `-o`) that change default behavior for popup integrations.
 > - **Hyprland users**: See [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
 > - **macOS users**: See [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
 > 
