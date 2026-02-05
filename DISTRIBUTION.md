@@ -28,7 +28,7 @@ ostt/
 ### 1. Shell Installer (Linux/macOS) - Recommended
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/download/v0.0.1/ostt-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
 ```
 
 Then configure:
@@ -164,13 +164,21 @@ On first run, ostt automatically:
 
 ### Hyprland Integration
 
-If you're using Hyprland, add a keybinding to your Hyprland config after first run:
+If you're using Hyprland, add a keybinding and window rules to your Hyprland config after first run:
 
-```bash
-bind = $mainMod, R, exec, ~/.local/bin/ostt-float
+```hyprland
+# Keybinding for ostt (clipboard output)
+bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+
+# OSTT window rules
+windowrule = float on, match:title ostt
+windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
 ```
 
-This will launch ostt in a floating Alacritty terminal window.
+Then reload your Hyprland configuration: `hyprctl reload`
+
+This will launch ostt in a floating Alacritty terminal window, centered horizontally and positioned at the bottom of the screen.
 
 ## Distribution Details
 

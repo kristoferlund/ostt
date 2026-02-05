@@ -162,7 +162,7 @@ impl AudioRecorder {
 
         // Calculate and log recording duration
         let duration_secs = sample_count as f32 / self.sample_rate as f32;
-        tracing::info!(
+        tracing::debug!(
             "Recording stopped: {:.2}s ({} samples at {}Hz)",
             duration_secs,
             sample_count,
@@ -183,7 +183,7 @@ impl AudioRecorder {
 
             // Log final file info
             let file_size = std::fs::metadata(&output_file)?.len();
-            tracing::info!(
+            tracing::debug!(
                 "Audio saved: {} ({} bytes, format: {})",
                 output_file.display(),
                 file_size,

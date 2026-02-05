@@ -65,7 +65,7 @@ impl HistoryViewer {
             return Ok(None);
         }
 
-        tracing::info!("History viewer started with {} entries", self.entries.len());
+        tracing::debug!("History viewer started with {} entries", self.entries.len());
 
         let mut selected_text: Option<String> = None;
 
@@ -122,7 +122,7 @@ impl HistoryViewer {
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> Option<InputAction> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
-                tracing::info!("History viewer exited via Escape/q");
+                tracing::debug!("History viewer exited via Escape/q");
                 Some(InputAction::Exit)
             }
             KeyCode::Up => {
@@ -135,7 +135,7 @@ impl HistoryViewer {
             }
             KeyCode::Enter => {
                 if let Some(idx) = self.list_state.selected() {
-                    tracing::info!("Entry selected via Enter");
+                    tracing::debug!("Entry selected via Enter");
                     Some(InputAction::Select(self.entries[idx].text.clone()))
                 } else {
                     None
@@ -157,7 +157,7 @@ impl HistoryViewer {
             MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
                 if let Some(selected) = self.list_state.selected() {
                     self.pending_click = Some((selected, Instant::now()));
-                    tracing::info!("Item clicked, showing selection feedback");
+                    tracing::debug!("Item clicked, showing selection feedback");
                 }
             }
             _ => {}

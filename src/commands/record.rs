@@ -6,7 +6,7 @@
 use crate::clipboard::copy_to_clipboard;
 use crate::config;
 use crate::history::HistoryManager;
-use crate::recording::{AudioRecorder, OsttTui, RecordingCommand};
+use crate::recording::{AudioRecorder, OsttTui, RecordingCommand, RecordingHistory};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::ErrorScreen;
 use dirs;
@@ -16,7 +16,11 @@ use std::fs;
 ///
 /// Records audio with real-time waveform visualization, optionally transcribes the recording,
 /// and saves to history. Supports external triggers via SIGUSR1 signal.
-pub async fn handle_record() -> Result<(), anyhow::Error> {
+///
+/// # Arguments
+/// * `clipboard` - If true, copy to clipboard instead of stdout
+/// * `output_file` - Optional file path to write output to instead of stdout
+pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
 
     let config_data = match config::OsttConfig::load() {
@@ -44,7 +48,7 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
     let mut audio_recorder = AudioRecorder::new(config_data.audio.sample_rate, config_data.audio.device.clone());
 
     if let Err(e) = audio_recorder.start_recording() {
-        tracing::error!("Failed to start recording: {}", e);
+        tracing::error!("Failed to start recording: {e}");
         let error_message = format!(
             "Recording Error:\n\n{e}\n\nPlease check your audio configuration and try again."
         );
@@ -131,10 +135,19 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
         _ => codec,
     };
 
-    // Save to temp directory with ostt-recording prefix
-    let temp_dir = std::env::temp_dir();
-    let filename = format!("ostt-recording.{extension}");
-    let filepath = temp_dir.join(&filename);
+    // Prepare data directory for recordings
+    let data_dir = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+        .join(".local")
+        .join("share")
+        .join("ostt");
+
+    // Save to persistent recordings directory with timestamp
+    let recordings_dir = data_dir.join("recordings");
+    fs::create_dir_all(&recordings_dir)?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
+    let filename = format!("ostt-recording-{timestamp}.{extension}");
+    let filepath = recordings_dir.join(&filename);
 
     audio_recorder
         .stop_recording(Some(filepath.clone()), &config_data.audio.output_format)
@@ -143,13 +156,22 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
             e
         })?;
 
-    if should_transcribe {
-        // Get the selected model from secrets (stored when user runs 'ostt auth')
+    tracing::info!(
+        "Recording saved to: {}",
+        filepath.display()
+    );
+
+    // Clean up old recordings to keep only 10 most recent
+    if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
+        let _ = recording_history.cleanup_old_recordings();
+    }
+
+    let transcription_text = if should_transcribe {
         let selected_model_id = config::get_selected_model().ok().flatten();
 
         if let Some(model_id) = selected_model_id {
             let filepath_str = filepath.to_string_lossy().to_string();
-            if let Err(e) = transcribe_recording_with_animation(
+            match transcribe_recording_with_animation(
                 &mut tui,
                 &config_data,
                 &model_id,
@@ -157,8 +179,12 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
             )
             .await
             {
-                tracing::warn!("Transcription failed: {}", e);
-                eprintln!("Warning: Transcription failed: {e}");
+                Ok(text) => Some(text),
+                Err(e) => {
+                    tracing::warn!("Transcription failed: {}", e);
+                    eprintln!("Warning: Transcription failed: {e}");
+                    None
+                }
             }
         } else {
             tracing::debug!("No transcription model configured");
@@ -166,17 +192,37 @@ pub async fn handle_record() -> Result<(), anyhow::Error> {
             let mut error_screen = ErrorScreen::new()?;
             error_screen.show_error("Error: No transcription model configured.\n\nPlease run 'ostt auth' to select a model.")?;
             error_screen.cleanup()?;
+            None
         }
-    }
+    } else {
+        None
+    };
 
     tui.cleanup()
         .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+
+    // Output transcription after TUI is completely cleaned up
+    if let Some(text) = transcription_text {
+        if let Some(file_path) = output_file {
+            std::fs::write(&file_path, &text)?;
+            tracing::info!("Transcription written to file: {}", file_path);
+        } else if clipboard {
+            copy_to_clipboard(&text)?;
+            tracing::info!("Transcription copied to clipboard");
+        } else {
+            println!("{text}");
+            tracing::debug!("Transcription printed to stdout");
+        }
+    }
 
     tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
     Ok(())
 }
 
 /// Transcribes an audio recording with animated progress indicator.
+///
+/// # Arguments
+/// * `output_mode` - Optional override for output mode (clipboard or stdout)
 ///
 /// # Errors
 /// - If the model ID is invalid
@@ -187,7 +233,7 @@ async fn transcribe_recording_with_animation(
     config_data: &config::OsttConfig,
     model_id: &str,
     audio_filename: &str,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<String> {
     use crate::transcription;
 
     let model = match transcription::TranscriptionModel::from_id(model_id) {
@@ -272,7 +318,7 @@ async fn transcribe_recording_with_animation(
     match transcription_handle.await {
         Ok(Ok(text)) => {
             let trimmed_text = text.trim().to_string();
-            tracing::info!("Transcription completed: {}", trimmed_text);
+            tracing::debug!("Transcription completed: {}", trimmed_text);
 
             let data_dir = dirs::home_dir()
                 .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
@@ -285,16 +331,8 @@ async fn transcribe_recording_with_animation(
                 tracing::warn!("Failed to save transcription to history: {}", e);
             }
 
-            match copy_to_clipboard(&trimmed_text) {
-                Ok(_) => {
-                    tracing::debug!("Transcribed text copied to clipboard");
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to copy to clipboard: {}", e);
-                }
-            }
-
-            Ok(())
+            // Return the transcription text to be output after TUI cleanup
+            Ok(text)
         }
         Ok(Err(e)) => {
             tracing::error!("Transcription failed: {}", e);

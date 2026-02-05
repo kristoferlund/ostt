@@ -89,7 +89,7 @@ impl HistoryManager {
             params![text, timestamp],
         )?;
 
-        tracing::info!("Transcription saved to history");
+        tracing::debug!("Transcription saved to history");
         Ok(())
     }
 

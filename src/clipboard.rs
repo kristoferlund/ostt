@@ -26,7 +26,7 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
                     Ok(_) => {
                         drop(stdin);
                         thread::sleep(Duration::from_millis(100));
-                        tracing::info!("Transcribed text copied to clipboard via pbcopy");
+                        tracing::debug!("Transcribed text copied to clipboard via pbcopy");
                         return Ok(());
                     }
                     Err(e) => {
@@ -48,7 +48,7 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
                 Ok(_) => {
                     drop(stdin);
                     thread::sleep(Duration::from_millis(100));
-                    tracing::info!("Transcribed text copied to clipboard via wl-copy");
+                    tracing::debug!("Transcribed text copied to clipboard via wl-copy");
                     return Ok(());
                 }
                 Err(e) => {
@@ -70,7 +70,7 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
                 Ok(_) => {
                     drop(stdin);
                     thread::sleep(Duration::from_millis(100));
-                    tracing::info!("Transcribed text copied to clipboard via xclip");
+                    tracing::debug!("Transcribed text copied to clipboard via xclip");
                     return Ok(());
                 }
                 Err(e) => {

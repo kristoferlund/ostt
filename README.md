@@ -22,6 +22,13 @@
 - **Keyword management** for improved accuracy
 - **Cross-platform support** - Linux and macOS
 
+> [!IMPORTANT]
+> **Upgrading from 0.0.5?** Version 0.0.6 introduces output flags (`-c`, `-o`) that change default behavior for popup integrations.
+> - **Hyprland users**: See [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
+> - **macOS users**: See [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
+> 
+> Without updates, transcriptions will output to stdout instead of clipboard in popup windows.
+
 ## Supported Providers & Models
 
 ostt supports multiple AI transcription providers. Bring your own API key and choose from the following:
@@ -47,18 +54,6 @@ Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
 
-### macOS
-
-**Homebrew (Recommended):**
-```bash
-brew install kristoferlund/ostt/ostt
-```
-
-**Shell Installer:**
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
-```
-
 ### Linux
 
 **Arch Linux (AUR):**
@@ -67,6 +62,18 @@ yay -S ostt
 ```
 
 **Shell Installer (All Distributions):**
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
+```
+
+### macOS
+
+**Homebrew (Recommended):**
+```bash
+brew install kristoferlund/ostt/ostt
+```
+
+**Shell Installer:**
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
 ```
@@ -86,6 +93,13 @@ ffmpeg wl-clipboard  # For Wayland
 # OR
 ffmpeg xclip         # For X11
 ```
+
+**Optional (Recommended for better audio playback):**
+```bash
+mpv  # Recommended for best audio playback experience with ostt replay
+```
+
+> **Note on Audio Playback:** For the best experience when replaying recordings with `ostt replay`, we recommend installing `mpv`. It will be used as the primary audio player if available. Fallbacks include `vlc`, `ffplay`, and `paplay`. If none are installed, the system default application will be used.
 
 ## Quick Start
 
@@ -127,7 +141,16 @@ ostt works on all Linux distributions and macOS without additional setup. Simply
 ## Commands
 
 ```bash
+ostt                 # Record audio with real-time visualization (default)
 ostt record          # Record audio with real-time visualization
+                     # Output to stdout by default
+ostt -c              # Record and copy to clipboard (shorthand)
+ostt record -c       # Record and copy to clipboard (explicit)
+ostt -o file         # Record and write to file (shorthand)
+ostt record -o file  # Record and write to file (explicit)
+ostt retry [N]       # Re-transcribe recording #N (1=most recent)
+ostt retry -c        # Re-transcribe and copy to clipboard
+ostt replay [N]      # Play back recording #N
 ostt auth            # Configure transcription provider and API key
 ostt history         # Browse transcription history
 ostt keywords        # Manage keywords for improved accuracy
@@ -136,7 +159,54 @@ ostt list-devices    # List available audio input devices
 ostt logs            # View recent application logs
 ostt version         # Show version information
 ostt help            # Show all commands
+ostt -h              # Quick help
+ostt --help          # Detailed help with examples
 ```
+
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+
+```bash
+ostt r -c            # Same as: ostt record -c
+ostt a               # Same as: ostt auth
+```
+
+**Record Options:** The `-c` and `-o` flags can be used without explicitly saying `record` since it's the default command:
+
+```bash
+ostt -c              # Same as: ostt record -c
+ostt -o file.txt     # Same as: ostt record -o file.txt
+```
+
+## Shell Completions
+
+ostt can generate completion scripts for your shell to enable tab completion of commands and options.
+
+**Bash:**
+```bash
+ostt completions bash > ostt.bash
+sudo cp ostt.bash /etc/bash_completion.d/
+```
+
+**Zsh:**
+```bash
+ostt completions zsh > _ostt
+# Copy to your zsh completions directory (location varies by system)
+sudo cp _ostt /usr/local/share/zsh/site-functions/
+```
+
+**Fish:**
+```bash
+ostt completions fish > ostt.fish
+cp ostt.fish ~/.config/fish/completions/
+```
+
+**PowerShell:**
+```powershell
+ostt completions powershell > ostt.ps1
+# Add to your PowerShell profile
+```
+
+After installation, restart your shell or source the completion file to enable completions.
 
 ## Configuration
 
@@ -221,7 +291,12 @@ For detailed configuration options, see the config file comments or run `ostt co
 ### Recording
 
 ```bash
-ostt record
+ostt                 # Output to stdout (default)
+ostt record          # Output to stdout (explicit)
+ostt -c              # Copy to clipboard (shorthand)
+ostt record -c       # Copy to clipboard (explicit)
+ostt -o file         # Write to file (shorthand)
+ostt record -o file  # Write to file (explicit)
 ```
 
 **Keyboard Controls:**
@@ -274,14 +349,14 @@ Add technical terms, names, or domain-specific vocabulary to help the AI transcr
 └── credentials            # API keys (0600 permissions)
 
 ~/.local/state/ostt/
-└── ostt.log.*             # Daily-rotated logs
+└── ostt.log.*             # Daily-rotated logs (kept for 7 days, auto-cleanup on startup)
 ```
 
 ## Troubleshooting
 
 ### Logging
 
-ostt logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation. By default, logs are set to `info` level.
+ostt logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation and automatic cleanup. Log files are kept for the 7 most recent days and older logs are automatically deleted on startup. By default, logs are set to `info` level.
 
 **View recent logs:**
 ```bash

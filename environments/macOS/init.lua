@@ -1,6 +1,7 @@
 -- === Config ===
 local OSTT_BIN = "/opt/homebrew/bin/ostt"
 local GHOSTTY_BIN = "/Applications/Ghostty.app/Contents/MacOS/ghostty"
+local OSTT_ARGS = "-c"  -- Copy to clipboard by default. Use "" for stdout, or "-o file" for file output
 
 local function osttExists()
 	local attr = hs.fs.attributes(OSTT_BIN)
@@ -16,13 +17,8 @@ local function spawnOsttPopup()
 	-- Remember the currently focused app to restore later (optional)
 	local frontApp = hs.application.frontmostApplication()
 
-	-- Start Ghostty running OSTT with window-position/size flags
-	local task = hs.task.new(GHOSTTY_BIN, function(exitCode, stdOut, stdErr)
-		-- When Ghostty/OSTT exits, go back to the previous app
-		if frontApp then
-			frontApp:activate()
-		end
-	end, {
+	-- Build the command with args
+	local args = {
 		"--window-position-x=630",
 		"--window-position-y=790",
 		"--window-width=50",
@@ -33,7 +29,22 @@ local function spawnOsttPopup()
 		"--macos-window-shadow=false",
 		"-e",
 		OSTT_BIN,
-	})
+	}
+	
+	-- Add ostt arguments if specified
+	if OSTT_ARGS ~= "" then
+		for arg in string.gmatch(OSTT_ARGS, "%S+") do
+			table.insert(args, arg)
+		end
+	end
+
+	-- Start Ghostty running OSTT with window-position/size flags
+	local task = hs.task.new(GHOSTTY_BIN, function(exitCode, stdOut, stdErr)
+		-- When Ghostty/OSTT exits, go back to the previous app
+		if frontApp then
+			frontApp:activate()
+		end
+	end, args)
 
 	task:start()
 end

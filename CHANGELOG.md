@@ -7,10 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Output mode configuration** - Control transcription output destination with CLI flags:
+  - Default: outputs to stdout for piping to other commands
+  - `-c` flag: copy to clipboard
+  - `-o <file>` flag: write to file
+- **Top-level record options** - `-c` and `-o` flags now available at CLI top level without explicit `record` command (e.g., `ostt -c` equivalent to `ostt record -c`)
+- **Automatic log rotation** - Log files kept for 7 most recent days; older logs automatically deleted on startup
+- **Version tracking and auto-updates** - Application version tracked in config; app-managed files (float script, Alacritty config) automatically updated on version changes
+- **Retry command** - Re-transcribe previous recordings without re-recording audio (`ostt retry` or `ostt retry N`)
+- **Replay command** - Playback previous recordings using system audio player (`ostt replay` or `ostt replay N`)
+- **Recording history** - Maintains history of 10 most recent audio recordings with automatic rotation
+- **Command aliases** - Short aliases for common commands: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay)
+- **Rich help system** - Two-tier help with `-h` (short) and `--help` (long with examples)
+- **Improved error messages** - Typo suggestions and better command-not-found errors
+- **Shell completions** - Generate completion scripts for bash, zsh, fish, and PowerShell (`ostt completions <shell>`)
+
+### Changed
+
+- **CLI framework migration** - Migrated from manual argument parsing to clap for better UX and maintainability
+- `ostt record` now outputs to stdout by default (enables shell piping) instead of clipboard
+- **Audio player priority on Linux** - Replay command now prefers mpv for better user experience (falls back to vlc, ffplay, paplay, xdg-open)
+- **Hyprland window rules syntax** - Updated to new Hyprland window rule syntax with dynamic expressions and `match:` patterns (BREAKING CHANGE)
+- **Float script defaults to clipboard** - `ostt-float.sh` now defaults to `-c` (clipboard) if no arguments provided; existing Hyprland configs continue to work
+- **BREAKING CHANGE for Hyprland/macOS popup users**: Default output changed to stdout. Update your integration scripts to add `-c` flag for clipboard output. See upgrade guides:
+  - [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
+  - [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
+
 ### Fixed
 
 - Transcribed text no longer includes leading/trailing whitespace added by transcription models
-- Code quality improvements: fixed format string linting issues
+- Log rotation now properly removes old log files (previously accumulated indefinitely)
 
 ## [0.0.5] - 2025-12-27
 
