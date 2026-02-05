@@ -22,6 +22,53 @@ fn suppress_alsa_warnings() {
     }
 }
 
+/// Checks if setup is needed (version mismatch or missing config) and runs setup if required.
+///
+/// This is called early in the startup sequence, before command handling.
+/// It checks:
+/// 1. If config file doesn't exist, runs full setup
+/// 2. If config version is older than app version, runs setup and logs migration
+/// 3. If config version matches app version, does nothing
+async fn check_and_run_setup() -> Result<(), anyhow::Error> {
+    let config_path = dirs::home_dir()
+        .ok_or_else(|| anyhow!("Could not determine home directory"))?
+        .join(".config")
+        .join("ostt")
+        .join("ostt.toml");
+
+    match crate::setup::version::check_setup_needed(&config_path)? {
+        Some(old_version) => {
+            // Setup is needed - either config doesn't exist or version is older
+            tracing::info!(
+                "Setup needed - migrating from version {} to {}",
+                old_version,
+                env!("CARGO_PKG_VERSION")
+            );
+            crate::setup::run_setup().map_err(|e| {
+                tracing::error!("Setup failed: {e}");
+                anyhow!("Setup failed: {e}")
+            })?;
+            crate::setup::version::update_config_version(&config_path).map_err(|e| {
+                tracing::error!("Failed to update config version: {e}");
+                anyhow!("Failed to update config version: {e}")
+            })?;
+            tracing::info!(
+                "Setup completed successfully - migrated to version {}",
+                env!("CARGO_PKG_VERSION")
+            );
+        }
+        None => {
+            // Config exists and version matches, no setup needed
+            tracing::debug!(
+                "Config version up to date ({})",
+                env!("CARGO_PKG_VERSION")
+            );
+        }
+    }
+
+    Ok(())
+}
+
 /// A terminal-based speech-to-text recorder with real-time waveform visualization
 #[derive(Parser)]
 #[command(name = "ostt")]
@@ -183,20 +230,8 @@ pub async fn run() -> Result<(), anyhow::Error> {
     // Initialize logging for all other commands
     logging::init_logging()?;
 
-    // Ensure config file exists, run setup if needed
-    let config_path = dirs::home_dir()
-        .ok_or_else(|| anyhow!("Could not determine home directory"))?
-        .join(".config")
-        .join("ostt")
-        .join("ostt.toml");
-    if !config_path.exists() {
-        tracing::info!("Configuration file not found, running setup...");
-        crate::setup::run_setup().map_err(|e| {
-            tracing::error!("Setup failed: {e}");
-            anyhow!("Setup failed: {e}")
-        })?;
-        tracing::info!("Setup completed successfully");
-    }
+    // Check if setup is needed (version check or missing config)
+    check_and_run_setup().await?;
 
     // Route to appropriate command handler
     match cli.command {
