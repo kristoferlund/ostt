@@ -3,11 +3,16 @@
 //! Handles first-run setup by creating necessary config files and scripts
 //! based on the detected environment.
 
+pub mod version;
+
 use anyhow::anyhow;
 use std::path::Path;
 
 /// Embedded default configuration template.
 const DEFAULT_CONFIG: &str = include_str!("../../environments/ostt.toml");
+
+/// Current application version from Cargo.toml
+const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Embedded Alacritty configuration for Hyprland floating window.
 const ALACRITTY_FLOAT_CONFIG: &str =
@@ -31,9 +36,11 @@ pub fn run_setup() -> anyhow::Result<()> {
         .join("ostt");
     std::fs::create_dir_all(&config_dir)?;
 
-    // Write main config file
+    // Write main config file with version prefix
     let config_path = config_dir.join("ostt.toml");
-    std::fs::write(&config_path, DEFAULT_CONFIG)?;
+    let config_with_version = format!(r#"config_version = "{}""#, CURRENT_VERSION);
+    let full_config = format!("{}\n{}", config_with_version, DEFAULT_CONFIG);
+    std::fs::write(&config_path, full_config)?;
 
     // Check for Hyprland environment
     if is_hyprland() {

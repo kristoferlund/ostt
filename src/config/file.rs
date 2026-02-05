@@ -8,19 +8,14 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Visualization type for recording display.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum VisualizationType {
     /// Time-domain waveform showing amplitude over time
     Waveform,
     /// Frequency spectrum showing energy distribution across frequencies
+    #[default]
     Spectrum,
-}
-
-impl Default for VisualizationType {
-    fn default() -> Self {
-        Self::Spectrum
-    }
 }
 
 impl std::fmt::Display for VisualizationType {
