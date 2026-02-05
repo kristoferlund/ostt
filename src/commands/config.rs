@@ -19,7 +19,7 @@ pub fn handle_config() -> anyhow::Result<()> {
     tracing::info!("Opening config file: {}", config_path.display());
 
     let editor = find_editor()?;
-    tracing::info!("Using editor: {}", editor);
+    tracing::debug!("Using editor: {}", editor);
 
     let status = Command::new(&editor)
         .arg(&config_path)

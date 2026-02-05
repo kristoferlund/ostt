@@ -94,6 +94,13 @@ ffmpeg wl-clipboard  # For Wayland
 ffmpeg xclip         # For X11
 ```
 
+**Optional (Recommended for better audio playback):**
+```bash
+mpv  # Recommended for best audio playback experience with ostt replay
+```
+
+> **Note on Audio Playback:** For the best experience when replaying recordings with `ostt replay`, we recommend installing `mpv`. It will be used as the primary audio player if available. Fallbacks include `vlc`, `ffplay`, and `paplay`. If none are installed, the system default application will be used.
+
 ## Quick Start
 
 After installation, set up authentication and start recording:
@@ -342,14 +349,14 @@ Add technical terms, names, or domain-specific vocabulary to help the AI transcr
 └── credentials            # API keys (0600 permissions)
 
 ~/.local/state/ostt/
-└── ostt.log.*             # Daily-rotated logs
+└── ostt.log.*             # Daily-rotated logs (kept for 7 days, auto-cleanup on startup)
 ```
 
 ## Troubleshooting
 
 ### Logging
 
-ostt logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation. By default, logs are set to `info` level.
+ostt logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation and automatic cleanup. Log files are kept for the 7 most recent days and older logs are automatically deleted on startup. By default, logs are set to `info` level.
 
 **View recent logs:**
 ```bash

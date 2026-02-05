@@ -4,10 +4,11 @@ use crate::recording::RecordingHistory;
 use dirs;
 use std::process::Command;
 
-/// Plays back a previous recording using the system's default audio player.
+/// Plays back a previous recording using the system's best available audio player.
 ///
 /// On macOS: Uses `open` command to open with default application
-/// On Linux: Tries xdg-open first, then falls back to common audio players (mpv, vlc, ffplay, paplay)
+/// On Linux: Tries dedicated audio players first (mpv, vlc, ffplay, paplay) for better UX,
+///           then falls back to xdg-open if none are available
 ///
 /// # Arguments
 /// * `recording_index` - Optional index of recording to play (1 = most recent, None = most recent)
@@ -49,6 +50,10 @@ pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow:
         "Playing recording #{}",
         index
     );
+    tracing::info!(
+        "Audio file path: {}",
+        audio_path.display()
+    );
 
     // Platform-specific audio player invocation
     #[cfg(target_os = "macos")]
@@ -63,36 +68,35 @@ pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow:
 
     #[cfg(target_os = "linux")]
     {
-        let result = Command::new("xdg-open").arg(audio_path).spawn();
+        // Try dedicated audio players first (prefer nice UI), then fall back to xdg-open
+        let players = vec!["mpv", "vlc", "ffplay", "paplay"];
+        let mut played = false;
 
-        match result {
-            Ok(mut child) => {
+        for player in players {
+            if let Ok(mut child) = Command::new(player).arg(audio_path).spawn() {
+                let _ = child.wait();
+                played = true;
+                break;
+            }
+        }
+
+        // If no dedicated player found, try xdg-open as fallback
+        if !played {
+            if let Ok(mut child) = Command::new("xdg-open").arg(audio_path).spawn() {
                 child
                     .wait()
                     .map_err(|e| anyhow::anyhow!("Audio player error: {e}"))?;
+                played = true;
             }
-            Err(_) => {
-                // Fallback to common audio players if xdg-open fails
-                let players = vec!["mpv", "vlc", "ffplay", "paplay"];
-                let mut played = false;
+        }
 
-                for player in players {
-                    if let Ok(mut child) = Command::new(player).arg(audio_path).spawn() {
-                        let _ = child.wait();
-                        played = true;
-                        break;
-                    }
-                }
-
-                if !played {
-                    return Err(anyhow::anyhow!(
-                        "No audio player found. Install mpv, vlc, ffplay, or paplay"
-                    ));
-                }
-            }
+        if !played {
+            return Err(anyhow::anyhow!(
+                "No audio player found. Install mpv, vlc, ffplay, or paplay"
+            ));
         }
     }
 
-    tracing::info!("Playback finished for recording #{}", index);
+    tracing::debug!("Playback finished for recording #{}", index);
     Ok(())
 }

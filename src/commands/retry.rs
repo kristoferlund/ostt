@@ -110,11 +110,11 @@ pub async fn handle_retry(
         );
 
         // Transcribe
-        tracing::info!("Starting transcription for retry...");
+        tracing::debug!("Starting transcription for retry...");
         match transcription::transcribe(&transcription_config, audio_path).await {
             Ok(text) => {
                 let trimmed_text = text.trim().to_string();
-                tracing::info!("Retry transcription completed: {}", trimmed_text);
+                tracing::debug!("Retry transcription completed: {}", trimmed_text);
 
                 // Save to history
                 let mut history_manager = HistoryManager::new(&data_dir)?;
