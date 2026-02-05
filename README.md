@@ -464,6 +464,13 @@ Contributions are welcome! Please open an issue or submit a pull request.
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/kristofernoaccess">
+                    <img src="https://avatars.githubusercontent.com/u/46928173?v=4" width="100;" alt="kristofernoaccess"/>
+                    <br />
+                    <sub><b>kristofernoaccess</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/axo-bot">
                     <img src="https://avatars.githubusercontent.com/u/142847116?v=4" width="100;" alt="axo-bot"/>
                     <br />
