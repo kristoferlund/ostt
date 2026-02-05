@@ -74,11 +74,19 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
 #[command(name = "ostt")]
 #[command(version)]
 #[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
-#[command(long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config")]
+#[command(long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config")]
 #[command(
     after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
 )]
 struct Cli {
+    /// Copy transcription to clipboard instead of stdout (record default command)
+    #[arg(short, long, global = true)]
+    clipboard: bool,
+
+    /// Write transcription to file instead of stdout (record default command)
+    #[arg(short, long, value_name = "FILE", global = true)]
+    output: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -237,9 +245,11 @@ pub async fn run() -> Result<(), anyhow::Error> {
     match cli.command {
         None | Some(Commands::Record { .. }) => {
             // Default command is record
+            // Merge top-level options with explicit record command options
+            // If both are specified, the explicit record command options take precedence
             let (clipboard, output) = match cli.command {
                 Some(Commands::Record { clipboard, output }) => (clipboard, output),
-                None => (false, None),
+                None => (cli.clipboard, cli.output),
                 _ => unreachable!(),
             };
             commands::handle_record(clipboard, output).await?;

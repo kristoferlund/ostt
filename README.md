@@ -134,10 +134,13 @@ ostt works on all Linux distributions and macOS without additional setup. Simply
 ## Commands
 
 ```bash
+ostt                 # Record audio with real-time visualization (default)
 ostt record          # Record audio with real-time visualization
                      # Output to stdout by default
-ostt record -c       # Record and copy to clipboard
-ostt record -o file  # Record and write to file
+ostt -c              # Record and copy to clipboard (shorthand)
+ostt record -c       # Record and copy to clipboard (explicit)
+ostt -o file         # Record and write to file (shorthand)
+ostt record -o file  # Record and write to file (explicit)
 ostt retry [N]       # Re-transcribe recording #N (1=most recent)
 ostt retry -c        # Re-transcribe and copy to clipboard
 ostt replay [N]      # Play back recording #N
@@ -158,6 +161,13 @@ ostt --help          # Detailed help with examples
 ```bash
 ostt r -c            # Same as: ostt record -c
 ostt a               # Same as: ostt auth
+```
+
+**Record Options:** The `-c` and `-o` flags can be used without explicitly saying `record` since it's the default command:
+
+```bash
+ostt -c              # Same as: ostt record -c
+ostt -o file.txt     # Same as: ostt record -o file.txt
 ```
 
 ## Shell Completions
@@ -274,9 +284,12 @@ For detailed configuration options, see the config file comments or run `ostt co
 ### Recording
 
 ```bash
-ostt record          # Output to stdout (default)
-ostt record -c       # Copy to clipboard
-ostt record -o file  # Write to file
+ostt                 # Output to stdout (default)
+ostt record          # Output to stdout (explicit)
+ostt -c              # Copy to clipboard (shorthand)
+ostt record -c       # Copy to clipboard (explicit)
+ostt -o file         # Write to file (shorthand)
+ostt record -o file  # Write to file (explicit)
 ```
 
 **Keyboard Controls:**
