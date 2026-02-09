@@ -57,34 +57,127 @@ visualization = "spectrum"
 # Provider-specific settings
 # Each provider can have its own configuration section
 
+
+# =============================================================================
+# Deepgram Configuration
+# =============================================================================
+
 [providers.deepgram]
-# Include filler words in transcript (uh, um, etc.)
+
+# Include filler words (disfluencies) in the transcript
+# When true, transcribes filler words like "uh", "um", "mhmm", "uh-huh", and
+# "nuh-uh". These words are always transcribed with consistent spelling regardless
+# of spoken duration. When false, filler words are stripped to improve readability.
+# Only available for Nova, Nova-2, and Nova-3 models.
 filler_words = false
 
-# Convert spoken measurements to their abbreviations
+# Convert spoken measurement units to their abbreviations
+# When true, converts terms like "milligrams" to "mg", "kilometers" to "km",
+# "liters" to "l", etc. Supported units include: mg, cg, g, kg, ml, cl, l, kl,
+# mm, cm, m, km. Only available for English language models.
 measurements = false
 
-# Convert numbers from written format to numerical format
+# Convert spoken numbers to numerical format
+# When true, converts written numbers like "nine hundred" to "900". Supports
+# Danish, Dutch, English, French, German, Italian, Norwegian, Polish, Portuguese,
+# Spanish, and Swedish. Useful for phone numbers, addresses, and account IDs.
 numerals = false
 
-# Split audio into paragraphs to improve transcript readability
+# Split transcript into paragraphs for improved readability
+# When true, adds paragraph breaks based on punctuation and pauses. Paragraphs
+# will also be influenced by speaker changes (if diarization is enabled) and
+# channel changes (if multichannel is enabled). Note: Paragraphs requires
+# Punctuation to be enabled (enabled automatically when this is true).
 paragraphs = false
 
-# Apply profanity filter to transcript
+# Apply profanity filtering to the transcript
+# When true, masks offensive language with asterisks (e.g., "****"). Available
+# for English, German, Swiss German, Polish, Portuguese, Spanish, and Swedish.
+# Words are replaced with a censored placeholder to maintain timing and structure.
 profanity_filter = false
 
-# Add punctuation and capitalization to transcript
+# Add punctuation and capitalization to the transcript
+# When true, adds sentence boundaries (periods, commas, question marks) and
+# capitalizes the first word of sentences and proper nouns. Available for
+# all supported languages. If Smart Format is enabled, you don't need to
+# also enable Punctuation.
 punctuate = true
 
-# Apply smart formatting to transcript output for improved readability
+# Apply comprehensive smart formatting to the transcript
+# When true, applies enhanced formatting including punctuation, paragraphs,
+# and entity formatting (dates like "November 2, 2022", times like "8:37 PM",
+# currency, phone numbers, emails, URLs). Available for all languages, with
+# the most comprehensive support for English. Note: Smart Format enables
+# Punctuation automatically.
 smart_format = false
 
-# Segment speech into meaningful semantic units
+# Segment speech into meaningful semantic units (utterances)
+# When true, divides speech into natural conversational segments based on pauses,
+# sentence restarts, and reformulations. Each utterance includes start/end times,
+# confidence scores, and word-level details. Useful for analyzing conversational
+# speech patterns, turn-taking, and dialogue structure. Only available for
+# pre-recorded audio with Nova models.
 utterances = false
 
-# Seconds to wait before detecting pause between words (range: 0.5-3.0)
+# Duration of silence (in seconds) to trigger a new utterance
+# Sets the pause length between words after which Deepgram decides a new utterance
+# should begin. Range: 0.5 to 3.0 seconds. Default is 0.8 seconds. Lower values
+# create more utterance breaks (better for fast-paced dialogue), higher values
+# create fewer breaks (better for speeches with deliberate pauses). Only takes
+# effect when utterances is enabled.
 utt_split = 0.8
 
-# Opt out from Deepgram Model Improvement Program
+# Enable automatic language detection
+# When true, Deepgram will automatically detect the spoken language
+# and transcribe in that language. When false, assumes English (en).
+detect_language = true
+
+# Opt out from Deepgram Model Improvement Program (MIP)
+# When true, prevents Deepgram from using your audio data to improve their models.
 # WARNING: This may impact pricing. See docs at https://dpgr.am/deepgram-mip
 mip_opt_out = false
+
+
+# =============================================================================
+# AssemblyAI Configuration
+# =============================================================================
+
+[providers.assemblyai]
+
+# Format text with punctuation, casing, and numeral conversion
+# When true, the transcript will include proper punctuation (periods, commas,
+# question marks), capitalization of sentences and proper nouns, and convert
+# spoken numbers to their numeric form (e.g., "twenty-three" → "23")
+format_text = true
+
+# Enable automatic punctuation
+# When true, adds sentence boundaries with periods, commas, question marks,
+# and exclamation points. Available for all supported languages.
+# Note: If format_text is enabled, you don't need to also enable punctuate.
+punctuate = true
+
+# Include disfluencies (filler words) in the transcript
+# When true, filler words like "um", "uh", "ah", "er", and false starts
+# are preserved in the output. When false, these are removed.
+# Useful for verbatim transcription or speech analysis.
+disfluencies = false
+
+# Filter profanity from the transcript
+# When true, profane words are replaced with asterisks (e.g., "***")
+# to censor offensive language from the output.
+filter_profanity = false
+
+# Enable automatic language detection
+# When true, AssemblyAI will automatically detect the spoken language
+# and transcribe in that language. When false, assumes English (en).
+# Supports 99+ languages. Detection may add slight latency.
+language_detection = true
+
+# Language detection options (optional)
+# Configure expected languages and fallback behavior.
+# When unspecified, AssemblyAI defaults to ["all"] for expected_languages
+# and "auto" for fallback_language.
+#
+# [providers.assemblyai.language_detection_options]
+# expected_languages = ["en", "es", "fr"]  # Only expect these languages
+# fallback_language = "auto"               # "auto" or specific code like "en"
