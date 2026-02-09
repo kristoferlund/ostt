@@ -148,6 +148,9 @@ ostt -c              # Record and copy to clipboard (shorthand)
 ostt record -c       # Record and copy to clipboard (explicit)
 ostt -o file         # Record and write to file (shorthand)
 ostt record -o file  # Record and write to file (explicit)
+ostt transcribe file # Transcribe a pre-recorded audio file
+ostt transcribe f -c # Transcribe and copy to clipboard
+ostt transcribe f -o # Transcribe and write to file
 ostt retry [N]       # Re-transcribe recording #N (1=most recent)
 ostt retry -c        # Re-transcribe and copy to clipboard
 ostt replay [N]      # Play back recording #N
@@ -163,7 +166,7 @@ ostt -h              # Quick help
 ostt --help          # Detailed help with examples
 ```
 
-**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
 
 ```bash
 ostt r -c            # Same as: ostt record -c
