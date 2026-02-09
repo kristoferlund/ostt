@@ -141,6 +141,9 @@ pub struct AssemblyAIConfig {
     /// Enable automatic language detection
     #[serde(default = "default_true")]
     pub language_detection: bool,
+    /// Enable automatic punctuation
+    #[serde(default = "default_true")]
+    pub punctuate: bool,
 }
 
 fn default_true() -> bool {
@@ -154,6 +157,7 @@ impl Default for AssemblyAIConfig {
             disfluencies: false,
             filter_profanity: false,
             language_detection: true,
+            punctuate: true,
         }
     }
 }

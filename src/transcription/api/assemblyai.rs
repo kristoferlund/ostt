@@ -51,6 +51,8 @@ struct TranscriptRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     language_detection: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    punctuate: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     keyterms_prompt: Option<Vec<String>>,
 }
 
@@ -99,6 +101,7 @@ pub async fn transcribe(
         disfluencies: Some(assemblyai_config.disfluencies),
         filter_profanity: Some(assemblyai_config.filter_profanity),
         language_detection: Some(assemblyai_config.language_detection),
+        punctuate: Some(assemblyai_config.punctuate),
         keyterms_prompt: None,
     };
 

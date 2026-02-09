@@ -127,6 +127,11 @@ utterances = false
 # effect when utterances is enabled.
 utt_split = 0.8
 
+# Enable automatic language detection
+# When true, Deepgram will automatically detect the spoken language
+# and transcribe in that language. When false, assumes English (en).
+detect_language = true
+
 # Opt out from Deepgram Model Improvement Program (MIP)
 # When true, prevents Deepgram from using your audio data to improve their models.
 # WARNING: This may impact pricing. See docs at https://dpgr.am/deepgram-mip
@@ -144,6 +149,12 @@ mip_opt_out = false
 # question marks), capitalization of sentences and proper nouns, and convert
 # spoken numbers to their numeric form (e.g., "twenty-three" → "23")
 format_text = true
+
+# Enable automatic punctuation
+# When true, adds sentence boundaries with periods, commas, question marks,
+# and exclamation points. Available for all supported languages.
+# Note: If format_text is enabled, you don't need to also enable punctuate.
+punctuate = true
 
 # Include disfluencies (filler words) in the transcript
 # When true, filler words like "um", "uh", "ah", "er", and false starts
