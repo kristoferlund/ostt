@@ -36,9 +36,7 @@ struct TranscriptRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     language_detection: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    word_boost: Option<Vec<String>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    boost_param: Option<String>,
+    keyterms_prompt: Option<Vec<String>>,
 }
 
 /// Response from the transcription endpoint (both submit and poll)
@@ -111,14 +109,12 @@ pub async fn transcribe(
         disfluencies: Some(assemblyai_config.disfluencies),
         filter_profanity: Some(assemblyai_config.filter_profanity),
         language_detection: Some(assemblyai_config.language_detection),
-        word_boost: None,
-        boost_param: None,
+        keyterms_prompt: None,
     };
 
-    // Add keywords as word_boost if any
+    // Add keywords as keyterms_prompt if any
     if !config.keywords.is_empty() {
-        request.word_boost = Some(config.keywords.clone());
-        request.boost_param = Some("high".to_string());
+        request.keyterms_prompt = Some(config.keywords.clone());
     }
 
     tracing::debug!("Submitting transcription request...");

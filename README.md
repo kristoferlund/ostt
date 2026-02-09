@@ -52,7 +52,6 @@ ostt supports multiple AI transcription providers. Bring your own API key and ch
 
 ### AssemblyAI
 - **assemblyai-universal-3-pro** - Best accuracy, latest model
-- **assemblyai-universal-2** - Previous generation model
 
 Configure your preferred provider and model using `ostt auth`.
 
