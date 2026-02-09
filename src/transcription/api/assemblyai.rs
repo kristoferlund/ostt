@@ -36,6 +36,15 @@ struct UploadResponse {
     upload_url: String,
 }
 
+/// Options for language detection
+#[derive(Debug, Serialize)]
+struct LanguageDetectionOptionsRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_languages: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallback_language: Option<String>,
+}
+
 /// Request body for the transcription endpoint
 #[derive(Debug, Serialize)]
 struct TranscriptRequest {
@@ -50,6 +59,8 @@ struct TranscriptRequest {
     filter_profanity: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     language_detection: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language_detection_options: Option<LanguageDetectionOptionsRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     punctuate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -94,6 +105,18 @@ pub async fn transcribe(
     // Step 2: Submit transcription request
     let assemblyai_config = &config.providers.assemblyai;
 
+    // Build language_detection_options if any values are set
+    let language_detection_options = if assemblyai_config.language_detection_options.expected_languages.is_some()
+        || assemblyai_config.language_detection_options.fallback_language.is_some()
+    {
+        Some(LanguageDetectionOptionsRequest {
+            expected_languages: assemblyai_config.language_detection_options.expected_languages.clone(),
+            fallback_language: assemblyai_config.language_detection_options.fallback_language.clone(),
+        })
+    } else {
+        None
+    };
+
     let mut request = TranscriptRequest {
         audio_url: upload_url,
         speech_models: Some(vec![config.model.api_model_name().to_string()]),
@@ -101,6 +124,7 @@ pub async fn transcribe(
         disfluencies: Some(assemblyai_config.disfluencies),
         filter_profanity: Some(assemblyai_config.filter_profanity),
         language_detection: Some(assemblyai_config.language_detection),
+        language_detection_options,
         punctuate: Some(assemblyai_config.punctuate),
         keyterms_prompt: None,
     };

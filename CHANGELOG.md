@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `disfluencies` — Include filler words like "uh" and "um" (default: false)
   - `filter_profanity` — Filter profanity from transcript (default: false)
   - `language_detection` — Automatic language detection (default: true)
+  - `language_detection_options` — Constrain detection to expected languages with fallback:
+    - `expected_languages` — List of expected language codes (e.g., `["en", "es", "fr"]`)
+    - `fallback_language` — Fallback when detected language isn't expected (use `"auto"` or specific code)
 - **AssemblyAI keyword boosting** — Keywords from the keywords file are passed as `keyterms_prompt` to improve transcription accuracy
 
 ## 0.0.7 - 2026-02-05

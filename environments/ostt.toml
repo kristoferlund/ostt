@@ -172,3 +172,12 @@ filter_profanity = false
 # and transcribe in that language. When false, assumes English (en).
 # Supports 99+ languages. Detection may add slight latency.
 language_detection = true
+
+# Language detection options (optional)
+# Configure expected languages and fallback behavior.
+# When unspecified, AssemblyAI defaults to ["all"] for expected_languages
+# and "auto" for fallback_language.
+#
+# [providers.assemblyai.language_detection_options]
+# expected_languages = ["en", "es", "fr"]  # Only expect these languages
+# fallback_language = "auto"               # "auto" or specific code like "en"

@@ -291,6 +291,11 @@ format_text = true        # Punctuation, casing, and numeral formatting
 disfluencies = false      # Include filler words (uh, um)
 filter_profanity = false  # Filter profanity from transcript
 language_detection = true  # Automatic language detection
+
+# Optional: constrain language detection to expected languages
+[providers.assemblyai.language_detection_options]
+expected_languages = ["en", "es", "de"]  # Only detect these languages
+fallback_language = "auto"                 # "auto" or specific language code
 ```
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.
