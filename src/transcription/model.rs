@@ -28,6 +28,8 @@ pub enum TranscriptionModel {
     GroqWhisperLargeV3,
     /// Groq Whisper Large V3 Turbo model (faster)
     GroqWhisperLargeV3Turbo,
+    /// Berget Whisper KB Large model (Swedish optimized)
+    BergetWhisperKBLarge,
 }
 
 impl TranscriptionModel {
@@ -44,6 +46,7 @@ impl TranscriptionModel {
             | TranscriptionModel::DeepInfraWhisperBase => TranscriptionProvider::DeepInfra,
             TranscriptionModel::GroqWhisperLargeV3
             | TranscriptionModel::GroqWhisperLargeV3Turbo => TranscriptionProvider::Groq,
+            TranscriptionModel::BergetWhisperKBLarge => TranscriptionProvider::Berget,
         }
     }
 
@@ -59,6 +62,7 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase => "deepinfra-whisper-base",
             TranscriptionModel::GroqWhisperLargeV3 => "groq-whisper-large-v3",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "groq-whisper-large-v3-turbo",
+            TranscriptionModel::BergetWhisperKBLarge => "berget-whisper-kb-large",
         }
     }
 
@@ -74,6 +78,7 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase => "Whisper Base (fast, lightweight)",
             TranscriptionModel::GroqWhisperLargeV3 => "Whisper Large V3 (high accuracy)",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "Whisper Large V3 Turbo (fastest)",
+            TranscriptionModel::BergetWhisperKBLarge => "KB Whisper Large (Swedish optimized)",
         }
     }
 
@@ -89,7 +94,12 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperLargeV3
             | TranscriptionModel::DeepInfraWhisperBase => "https://api.deepinfra.com/v1/inference",
             TranscriptionModel::GroqWhisperLargeV3
-            | TranscriptionModel::GroqWhisperLargeV3Turbo => "https://api.groq.com/openai/v1/audio/transcriptions",
+            | TranscriptionModel::GroqWhisperLargeV3Turbo => {
+                "https://api.groq.com/openai/v1/audio/transcriptions"
+            }
+            TranscriptionModel::BergetWhisperKBLarge => {
+                "https://api.berget.ai/v1/audio/transcriptions"
+            }
         }
     }
 
@@ -105,6 +115,7 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase => "openai/whisper-base",
             TranscriptionModel::GroqWhisperLargeV3 => "whisper-large-v3",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "whisper-large-v3-turbo",
+            TranscriptionModel::BergetWhisperKBLarge => "KBLab/kb-whisper-large",
         }
     }
 
@@ -120,6 +131,7 @@ impl TranscriptionModel {
             "deepinfra-whisper-base" => Some(TranscriptionModel::DeepInfraWhisperBase),
             "groq-whisper-large-v3" => Some(TranscriptionModel::GroqWhisperLargeV3),
             "groq-whisper-large-v3-turbo" => Some(TranscriptionModel::GroqWhisperLargeV3Turbo),
+            "berget-whisper-kb-large" => Some(TranscriptionModel::BergetWhisperKBLarge),
             _ => None,
         }
     }
@@ -136,6 +148,7 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase,
             TranscriptionModel::GroqWhisperLargeV3,
             TranscriptionModel::GroqWhisperLargeV3Turbo,
+            TranscriptionModel::BergetWhisperKBLarge,
         ]
     }
 
