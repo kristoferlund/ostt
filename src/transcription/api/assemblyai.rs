@@ -23,7 +23,7 @@ struct UploadResponse {
 struct TranscriptRequest {
     audio_url: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    speech_model: Option<String>,
+    speech_models: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     format_text: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -102,7 +102,7 @@ pub async fn transcribe(
 
     let mut request = TranscriptRequest {
         audio_url: upload.upload_url,
-        speech_model: Some(config.model.api_model_name().to_string()),
+        speech_models: Some(vec![config.model.api_model_name().to_string()]),
         format_text: Some(assemblyai_config.format_text),
         disfluencies: Some(assemblyai_config.disfluencies),
         filter_profanity: Some(assemblyai_config.filter_profanity),

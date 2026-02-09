@@ -139,7 +139,7 @@ pub struct AssemblyAIConfig {
     #[serde(default)]
     pub filter_profanity: bool,
     /// Enable automatic language detection
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub language_detection: bool,
 }
 
@@ -153,7 +153,7 @@ impl Default for AssemblyAIConfig {
             format_text: true,
             disfluencies: false,
             filter_profanity: false,
-            language_detection: false,
+            language_detection: true,
         }
     }
 }
