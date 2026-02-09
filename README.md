@@ -291,7 +291,7 @@ filler_words = false
 format_text = true        # Punctuation, casing, and numeral formatting
 disfluencies = false      # Include filler words (uh, um)
 filter_profanity = false  # Filter profanity from transcript
-language_detection = false # Automatic language detection
+language_detection = true  # Automatic language detection
 ```
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.
