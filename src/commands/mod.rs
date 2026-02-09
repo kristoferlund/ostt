@@ -23,6 +23,7 @@ pub mod list_devices;
 pub mod logs;
 pub mod retry;
 pub mod replay;
+pub mod transcribe;
 
 pub use auth::handle_auth;
 pub use record::handle_record;
@@ -33,3 +34,4 @@ pub use list_devices::handle_list_devices;
 pub use logs::handle_logs;
 pub use retry::handle_retry;
 pub use replay::handle_replay;
+pub use transcribe::handle_transcribe;

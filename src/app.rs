@@ -10,6 +10,7 @@ use clap_complete::{generate, Shell};
 use dirs;
 use std::env;
 use std::io;
+use std::path::PathBuf;
 use std::process;
 
 /// Suppress ALSA library warnings that are not relevant to the user.
@@ -178,6 +179,31 @@ enum Commands {
     /// Useful for troubleshooting issues.
     Logs,
 
+    /// Transcribe a pre-recorded audio file
+    ///
+    /// Transcribe an existing audio file using the configured provider/model.
+    /// Supports the same output options as record and retry.
+    ///
+    /// Examples:
+    ///   ostt transcribe recording.ogg
+    ///   ostt transcribe voice-memo.mp3 -c
+    ///   ostt transcribe meeting.wav -o transcript.txt
+    ///   ostt transcribe audio.ogg | grep keyword
+    #[command(visible_alias = "t")]
+    Transcribe {
+        /// Path to the audio file to transcribe
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Copy transcription to clipboard instead of stdout
+        #[arg(short, long)]
+        clipboard: bool,
+
+        /// Write transcription to file instead of stdout
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
+
     /// Generate shell completion script
     ///
     /// Generate completion script for your shell. Save the output to your
@@ -263,6 +289,13 @@ pub async fn run() -> Result<(), anyhow::Error> {
         }
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;
+        }
+        Some(Commands::Transcribe {
+            file,
+            clipboard,
+            output,
+        }) => {
+            commands::handle_transcribe(file, clipboard, output).await?;
         }
         Some(Commands::Auth) => {
             if let Err(e) = commands::handle_auth().await {
