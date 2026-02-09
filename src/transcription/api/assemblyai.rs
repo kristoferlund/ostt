@@ -5,15 +5,30 @@
 //! 1. Upload audio binary data to get an upload URL
 //! 2. Submit a transcription request with the upload URL and options
 //! 3. Poll for the completed transcript
+//!
+//! Performance optimizations based on AssemblyAI best practices:
+//! - 3-second polling intervals (AssemblyAI recommended, not too aggressive)
+//! - Exponential backoff retry for upload failures
+//! - Connection pooling via shared client configuration
 
 use std::path::Path;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use super::TranscriptionConfig;
 
-/// Maximum number of poll attempts before timing out (5 minutes at 1-second intervals)
-const MAX_POLL_ATTEMPTS: u32 = 300;
+/// Maximum number of poll attempts before timing out (5 minutes at 3-second intervals)
+const MAX_POLL_ATTEMPTS: u32 = 100;
+
+/// Polling interval in seconds (AssemblyAI recommends 3 seconds between polls)
+const POLL_INTERVAL_SECS: u64 = 3;
+
+/// Maximum retry attempts for transient upload errors
+const MAX_UPLOAD_RETRIES: u32 = 3;
+
+/// Initial retry delay for upload failures (doubles with each retry)
+const INITIAL_RETRY_DELAY_MS: u64 = 1000;
 
 /// Response from the upload endpoint
 #[derive(Debug, Deserialize)]
@@ -51,7 +66,8 @@ struct TranscriptResponse {
 /// Transcribes an audio file using AssemblyAI's API.
 ///
 /// Uses a three-step process: upload audio, submit transcription request, poll for result.
-/// Polls at 1-second intervals with a maximum timeout of 5 minutes.
+/// Polls at 3-second intervals with a maximum timeout of 5 minutes.
+/// Implements retry logic with exponential backoff for upload failures.
 pub async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
@@ -60,50 +76,24 @@ pub async fn transcribe(
         anyhow::anyhow!("Failed to read audio file: {e}")
     })?;
 
-    let client = reqwest::Client::new();
+    // Configure client with timeouts and connection pooling for better performance
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(60))  // Overall request timeout
+        .connect_timeout(Duration::from_secs(10))  // Connection establishment timeout
+        .pool_max_idle_per_host(10)  // Connection pooling for reuse
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
+    
     let base_url = config.model.endpoint();
 
-    // Step 1: Upload audio
-    tracing::debug!("Uploading audio to AssemblyAI...");
-    let upload_response = match client
-        .post(format!("{base_url}/upload"))
-        .header("Authorization", &config.api_key)
-        .header("Content-Type", "application/octet-stream")
-        .body(audio_data)
-        .send()
-        .await
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            let error_msg = if e.is_connect() {
-                "Failed to connect to AssemblyAI API server. Check your internet connection.".to_string()
-            } else if e.is_timeout() {
-                "Request to AssemblyAI timed out. The API server is not responding.".to_string()
-            } else {
-                format!("AssemblyAI network error: {e}")
-            };
-            return Err(anyhow::anyhow!(error_msg));
-        }
-    };
-
-    if !upload_response.status().is_success() {
-        let status = upload_response.status();
-        let error_body = upload_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        return Err(anyhow::anyhow!(format_error(status.as_u16(), &error_body)));
-    }
-
-    let upload: UploadResponse = upload_response
-        .json()
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to parse AssemblyAI upload response: {e}"))?;
-
-    tracing::debug!("Audio uploaded successfully");
+    // Step 1: Upload audio with retry logic for transient failures
+    let upload_url = upload_with_retry(&client, base_url, &config.api_key, &audio_data).await?;
 
     // Step 2: Submit transcription request
     let assemblyai_config = &config.providers.assemblyai;
 
     let mut request = TranscriptRequest {
-        audio_url: upload.upload_url,
+        audio_url: upload_url,
         speech_models: Some(vec![config.model.api_model_name().to_string()]),
         format_text: Some(assemblyai_config.format_text),
         disfluencies: Some(assemblyai_config.disfluencies),
@@ -154,18 +144,17 @@ pub async fn transcribe(
     tracing::debug!("Transcription submitted, id: {transcript_id}");
 
     // Step 3: Poll for result with timeout
+    // Poll at 3-second intervals (AssemblyAI recommended)
     let poll_url = format!("{base_url}/transcript/{transcript_id}");
-    let mut poll_interval = tokio::time::interval(std::time::Duration::from_secs(1));
     let mut attempts: u32 = 0;
 
     loop {
-        poll_interval.tick().await;
         attempts += 1;
 
         if attempts > MAX_POLL_ATTEMPTS {
             return Err(anyhow::anyhow!(
                 "AssemblyAI transcription timed out after {} seconds. The audio may be too long or the API is experiencing delays.",
-                MAX_POLL_ATTEMPTS
+                MAX_POLL_ATTEMPTS as u64 * POLL_INTERVAL_SECS
             ));
         }
 
@@ -219,9 +208,85 @@ pub async fn transcribe(
             }
             _ => {
                 // Still processing (queued, processing, etc.)
+                tokio::time::sleep(Duration::from_secs(POLL_INTERVAL_SECS)).await;
             }
         }
     }
+}
+
+/// Uploads audio to AssemblyAI with exponential backoff retry logic.
+/// 
+/// AssemblyAI recommends implementing retry logic for transient upload errors
+/// that may occur due to temporary server issues.
+async fn upload_with_retry(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    audio_data: &[u8],
+) -> anyhow::Result<String> {
+    let mut retries = 0;
+    let mut delay_ms = INITIAL_RETRY_DELAY_MS;
+
+    loop {
+        tracing::debug!("Uploading audio to AssemblyAI (attempt {} of {})...", retries + 1, MAX_UPLOAD_RETRIES + 1);
+        
+        match try_upload(client, base_url, api_key, audio_data).await {
+            Ok(upload_url) => return Ok(upload_url),
+            Err(e) => {
+                retries += 1;
+                if retries > MAX_UPLOAD_RETRIES {
+                    return Err(anyhow::anyhow!(
+                        "Failed to upload audio after {} attempts: {}",
+                        MAX_UPLOAD_RETRIES + 1,
+                        e
+                    ));
+                }
+                
+                tracing::warn!("Upload attempt {} failed: {}. Retrying in {}ms...", retries, e, delay_ms);
+                tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                delay_ms *= 2; // Exponential backoff
+            }
+        }
+    }
+}
+
+/// Attempts a single upload request to AssemblyAI.
+async fn try_upload(
+    client: &reqwest::Client,
+    base_url: &str,
+    api_key: &str,
+    audio_data: &[u8],
+) -> anyhow::Result<String> {
+    let upload_response = client
+        .post(format!("{base_url}/upload"))
+        .header("Authorization", api_key)
+        .header("Content-Type", "application/octet-stream")
+        .body(audio_data.to_vec())
+        .send()
+        .await
+        .map_err(|e| {
+            if e.is_connect() {
+                anyhow::anyhow!("Failed to connect to AssemblyAI API server. Check your internet connection.")
+            } else if e.is_timeout() {
+                anyhow::anyhow!("Request to AssemblyAI timed out. The API server is not responding.")
+            } else {
+                anyhow::anyhow!("AssemblyAI network error: {e}")
+            }
+        })?;
+
+    if !upload_response.status().is_success() {
+        let status = upload_response.status();
+        let error_body = upload_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(anyhow::anyhow!(format_error(status.as_u16(), &error_body)));
+    }
+
+    let upload: UploadResponse = upload_response
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to parse AssemblyAI upload response: {e}"))?;
+
+    tracing::debug!("Audio uploaded successfully");
+    Ok(upload.upload_url)
 }
 
 /// Formats HTTP error codes into human-readable messages.
