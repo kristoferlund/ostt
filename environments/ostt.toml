@@ -88,3 +88,8 @@ utt_split = 0.8
 # Opt out from Deepgram Model Improvement Program
 # WARNING: This may impact pricing. See docs at https://dpgr.am/deepgram-mip
 mip_opt_out = false
+
+# Restrict automatic language detection to specific languages
+# When not set, all supported languages can be detected
+# Example: detect_language_codes = ["en", "es"]  # Only English or Spanish
+# detect_language_codes = []

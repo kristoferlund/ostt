@@ -282,6 +282,8 @@ visualization = "spectrum"  # "spectrum" for frequency display, "waveform" for a
 punctuate = true
 smart_format = false
 filler_words = false
+detect_language = true  # Automatic language detection (default: true)
+# detect_language_codes = ["en", "es"]  # Restrict to specific languages only
 ```
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.

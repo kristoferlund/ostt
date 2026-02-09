@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deepgram language detection** - Enable automatic language detection with `detect_language` option (default: true). Previously Deepgram defaulted to English only.
+- **Deepgram language detection restriction** - Restrict detectable languages with `detect_language_codes` option. For example, `detect_language_codes = ["en", "es"]` will only detect English or Spanish.
+
 ## 0.0.7 - 2026-02-05
 
 ### Added
