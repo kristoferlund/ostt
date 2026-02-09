@@ -8,6 +8,7 @@ use crate::config;
 use crate::history::HistoryManager;
 use crate::keywords::KeywordsManager;
 use crate::transcription;
+use crate::ui::ErrorScreen;
 use dirs;
 use std::path::PathBuf;
 
@@ -42,6 +43,12 @@ pub async fn handle_transcribe(
         Ok(config) => config,
         Err(err) => {
             tracing::error!("Failed to load configuration: {err}");
+            let error_message = format!(
+                "Configuration Error:\n\n{err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again."
+            );
+            let mut error_screen = ErrorScreen::new()?;
+            error_screen.show_error(&error_message)?;
+            error_screen.cleanup()?;
             return Err(anyhow::anyhow!("Configuration error: {err}"));
         }
     };
@@ -105,14 +112,23 @@ pub async fn handle_transcribe(
 
     // Determine output destination: file > clipboard > stdout (default)
     if let Some(file_path) = output_file {
-        std::fs::write(&file_path, &trimmed_text)
-            .map_err(|e| anyhow::anyhow!("Failed to write to file '{file_path}': {e}"))?;
-        tracing::debug!("Transcribed text written to file: {file_path}");
+        match std::fs::write(&file_path, &trimmed_text) {
+            Ok(_) => {
+                tracing::debug!("Transcribed text written to file: {file_path}");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to write to file '{file_path}': {e}");
+                return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
+            }
+        }
     } else if clipboard {
-        if let Err(e) = copy_to_clipboard(&trimmed_text) {
-            tracing::warn!("Failed to copy to clipboard: {e}");
-        } else {
-            tracing::debug!("Transcription copied to clipboard");
+        match copy_to_clipboard(&trimmed_text) {
+            Ok(_) => {
+                tracing::debug!("Transcription copied to clipboard");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to copy to clipboard: {e}");
+            }
         }
     } else {
         // Default: stdout

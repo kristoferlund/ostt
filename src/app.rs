@@ -200,7 +200,7 @@ enum Commands {
         clipboard: bool,
 
         /// Write transcription to file instead of stdout
-        #[arg(short, long, value_name = "OUTPUT")]
+        #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
     },
 
