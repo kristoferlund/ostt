@@ -85,6 +85,9 @@ pub async fn transcribe(
     if deepgram_config.utt_split != 0.8 {
         url.push_str(&format!("&utt_split={}", deepgram_config.utt_split));
     }
+    if deepgram_config.detect_language {
+        url.push_str("&detect_language=true");
+    }
     if deepgram_config.mip_opt_out {
         url.push_str("&mip_opt_out=true");
     }

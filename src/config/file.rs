@@ -93,9 +93,16 @@ pub struct DeepgramConfig {
     /// Seconds to wait before detecting pause between words
     #[serde(default = "default_utt_split")]
     pub utt_split: f64,
+    /// Enable automatic language detection
+    #[serde(default = "default_true")]
+    pub detect_language: bool,
     /// Opt out from Deepgram Model Improvement Program
     #[serde(default)]
     pub mip_opt_out: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_utt_split() -> f64 {
@@ -114,6 +121,7 @@ impl Default for DeepgramConfig {
             smart_format: false,
             utterances: false,
             utt_split: default_utt_split(),
+            detect_language: true,
             mip_opt_out: false,
         }
     }
