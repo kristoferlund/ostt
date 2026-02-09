@@ -96,6 +96,10 @@ pub struct DeepgramConfig {
     /// Enable automatic language detection
     #[serde(default = "default_true")]
     pub detect_language: bool,
+    /// Restrict language detection to specific languages (e.g., ["en", "es"])
+    /// When empty, all languages can be detected
+    #[serde(default)]
+    pub detect_language_codes: Vec<String>,
     /// Opt out from Deepgram Model Improvement Program
     #[serde(default)]
     pub mip_opt_out: bool,
@@ -122,6 +126,7 @@ impl Default for DeepgramConfig {
             utterances: false,
             utt_split: default_utt_split(),
             detect_language: true,
+            detect_language_codes: Vec::new(),
             mip_opt_out: false,
         }
     }
