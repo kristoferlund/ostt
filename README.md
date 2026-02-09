@@ -50,6 +50,9 @@ ostt supports multiple AI transcription providers. Bring your own API key and ch
 - **groq-whisper-large-v3** - High accuracy processing
 - **groq-whisper-large-v3-turbo** - Fastest transcription speed
 
+### Berget
+- **berget-whisper-kb-large** - KB Whisper Large (Swedish optimized)
+
 Configure your preferred provider and model using `ostt auth`.
 
 ## Installation

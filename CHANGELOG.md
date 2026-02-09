@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Berget provider** - Added support for Berget transcription service with Swedish-optimized KB Whisper Large model
+
 ## 0.0.7 - 2026-02-05
 
 ### Added
