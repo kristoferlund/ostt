@@ -12,6 +12,9 @@ use serde::{Deserialize, Serialize};
 
 use super::TranscriptionConfig;
 
+/// Maximum number of poll attempts before timing out (5 minutes at 1-second intervals)
+const MAX_POLL_ATTEMPTS: u32 = 300;
+
 /// Response from the upload endpoint
 #[derive(Debug, Deserialize)]
 struct UploadResponse {
@@ -50,6 +53,7 @@ struct TranscriptResponse {
 /// Transcribes an audio file using AssemblyAI's API.
 ///
 /// Uses a three-step process: upload audio, submit transcription request, poll for result.
+/// Polls at 1-second intervals with a maximum timeout of 5 minutes.
 pub async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
@@ -65,8 +69,8 @@ pub async fn transcribe(
     tracing::debug!("Uploading audio to AssemblyAI...");
     let upload_response = match client
         .post(format!("{base_url}/upload"))
-        .header("authorization", &config.api_key)
-        .header("content-type", "application/octet-stream")
+        .header("Authorization", &config.api_key)
+        .header("Content-Type", "application/octet-stream")
         .body(audio_data)
         .send()
         .await
@@ -120,15 +124,22 @@ pub async fn transcribe(
     tracing::debug!("Submitting transcription request...");
     let submit_response = match client
         .post(format!("{base_url}/transcript"))
-        .header("authorization", &config.api_key)
-        .header("content-type", "application/json")
+        .header("Authorization", &config.api_key)
+        .header("Content-Type", "application/json")
         .json(&request)
         .send()
         .await
     {
         Ok(resp) => resp,
         Err(e) => {
-            return Err(anyhow::anyhow!("AssemblyAI submit error: {e}"));
+            let error_msg = if e.is_connect() {
+                "Failed to connect to AssemblyAI API server. Check your internet connection.".to_string()
+            } else if e.is_timeout() {
+                "Request to AssemblyAI timed out. The API server is not responding.".to_string()
+            } else {
+                format!("AssemblyAI network error: {e}")
+            };
+            return Err(anyhow::anyhow!(error_msg));
         }
     };
 
@@ -146,19 +157,40 @@ pub async fn transcribe(
     let transcript_id = transcript.id;
     tracing::debug!("Transcription submitted, id: {transcript_id}");
 
-    // Step 3: Poll for result
+    // Step 3: Poll for result with timeout
     let poll_url = format!("{base_url}/transcript/{transcript_id}");
     let mut poll_interval = tokio::time::interval(std::time::Duration::from_secs(1));
+    let mut attempts: u32 = 0;
 
     loop {
         poll_interval.tick().await;
+        attempts += 1;
 
-        let poll_response = client
+        if attempts > MAX_POLL_ATTEMPTS {
+            return Err(anyhow::anyhow!(
+                "AssemblyAI transcription timed out after {} seconds. The audio may be too long or the API is experiencing delays.",
+                MAX_POLL_ATTEMPTS
+            ));
+        }
+
+        let poll_response = match client
             .get(&poll_url)
-            .header("authorization", &config.api_key)
+            .header("Authorization", &config.api_key)
             .send()
             .await
-            .map_err(|e| anyhow::anyhow!("AssemblyAI poll error: {e}"))?;
+        {
+            Ok(resp) => resp,
+            Err(e) => {
+                let error_msg = if e.is_connect() {
+                    "Failed to connect to AssemblyAI API server while polling. Check your internet connection.".to_string()
+                } else if e.is_timeout() {
+                    "AssemblyAI poll request timed out. The API server is not responding.".to_string()
+                } else {
+                    format!("AssemblyAI poll network error: {e}")
+                };
+                return Err(anyhow::anyhow!(error_msg));
+            }
+        };
 
         if !poll_response.status().is_success() {
             let status = poll_response.status();
@@ -171,18 +203,26 @@ pub async fn transcribe(
             .await
             .map_err(|e| anyhow::anyhow!("Failed to parse AssemblyAI poll response: {e}"))?;
 
+        tracing::debug!(
+            "Poll attempt {}/{}: status={}, id={}",
+            attempts, MAX_POLL_ATTEMPTS, result.status, result.id
+        );
+
         match result.status.as_str() {
             "completed" => {
-                let text = result.text.unwrap_or_default();
-                tracing::debug!("Transcription completed: {} chars", text.len());
-                return Ok(text.trim().to_string());
+                let text = result.text.ok_or_else(|| {
+                    anyhow::anyhow!("AssemblyAI returned completed status but no transcript text")
+                })?;
+                let trimmed = text.trim().to_string();
+                tracing::debug!("Transcription completed: {} chars", trimmed.len());
+                return Ok(trimmed);
             }
             "error" => {
                 let error = result.error.unwrap_or_else(|| "Unknown transcription error".to_string());
                 return Err(anyhow::anyhow!("AssemblyAI transcription failed: {error}"));
             }
-            status => {
-                tracing::debug!("Transcription status: {status}, polling...");
+            _ => {
+                // Still processing (queued, processing, etc.)
             }
         }
     }
