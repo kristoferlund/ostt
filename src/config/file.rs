@@ -126,6 +126,38 @@ pub struct OpenAiConfig {
     // Add here as OpenAI features become configurable
 }
 
+/// AssemblyAI API configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssemblyAIConfig {
+    /// Apply text formatting (punctuation, casing, numerals)
+    #[serde(default = "default_true")]
+    pub format_text: bool,
+    /// Include disfluencies (uh, um) in transcript
+    #[serde(default)]
+    pub disfluencies: bool,
+    /// Filter profanity from transcript
+    #[serde(default)]
+    pub filter_profanity: bool,
+    /// Enable automatic language detection
+    #[serde(default)]
+    pub language_detection: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for AssemblyAIConfig {
+    fn default() -> Self {
+        Self {
+            format_text: true,
+            disfluencies: false,
+            filter_profanity: false,
+            language_detection: false,
+        }
+    }
+}
+
 /// Provider-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProviderConfig {
@@ -144,6 +176,8 @@ pub struct ProvidersConfig {
     pub deepgram: DeepgramConfig,
     #[serde(default)]
     pub openai: OpenAiConfig,
+    #[serde(default)]
+    pub assemblyai: AssemblyAIConfig,
 }
 
 /// Complete application configuration.

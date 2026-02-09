@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **AssemblyAI provider support** - New transcription provider with two models:
+  - `universal-3-pro` — AssemblyAI's latest, highest accuracy model
+  - `universal-2` — Previous generation model
+- **AssemblyAI configuration options** - Configurable via `[providers.assemblyai]` in `ostt.toml`:
+  - `format_text` — Text formatting with punctuation and casing (default: true)
+  - `disfluencies` — Include filler words like "uh" and "um" (default: false)
+  - `filter_profanity` — Filter profanity from transcript (default: false)
+  - `language_detection` — Automatic language detection (default: false)
+- **AssemblyAI keyword boosting** — Keywords from the keywords file are passed as `word_boost` to improve transcription accuracy
+
 ## 0.0.7 - 2026-02-05
 
 ### Added

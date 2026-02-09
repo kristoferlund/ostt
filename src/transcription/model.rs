@@ -28,6 +28,10 @@ pub enum TranscriptionModel {
     GroqWhisperLargeV3,
     /// Groq Whisper Large V3 Turbo model (faster)
     GroqWhisperLargeV3Turbo,
+    /// AssemblyAI Universal 3 Pro model (best accuracy)
+    AssemblyAIUniversal3Pro,
+    /// AssemblyAI Universal 2 model (previous generation)
+    AssemblyAIUniversal2,
 }
 
 impl TranscriptionModel {
@@ -44,6 +48,8 @@ impl TranscriptionModel {
             | TranscriptionModel::DeepInfraWhisperBase => TranscriptionProvider::DeepInfra,
             TranscriptionModel::GroqWhisperLargeV3
             | TranscriptionModel::GroqWhisperLargeV3Turbo => TranscriptionProvider::Groq,
+            TranscriptionModel::AssemblyAIUniversal3Pro
+            | TranscriptionModel::AssemblyAIUniversal2 => TranscriptionProvider::AssemblyAI,
         }
     }
 
@@ -59,6 +65,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase => "deepinfra-whisper-base",
             TranscriptionModel::GroqWhisperLargeV3 => "groq-whisper-large-v3",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "groq-whisper-large-v3-turbo",
+            TranscriptionModel::AssemblyAIUniversal3Pro => "assemblyai-universal-3-pro",
+            TranscriptionModel::AssemblyAIUniversal2 => "assemblyai-universal-2",
         }
     }
 
@@ -74,6 +82,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase => "Whisper Base (fast, lightweight)",
             TranscriptionModel::GroqWhisperLargeV3 => "Whisper Large V3 (high accuracy)",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "Whisper Large V3 Turbo (fastest)",
+            TranscriptionModel::AssemblyAIUniversal3Pro => "Universal 3 Pro (best accuracy)",
+            TranscriptionModel::AssemblyAIUniversal2 => "Universal 2 (previous generation)",
         }
     }
 
@@ -90,6 +100,8 @@ impl TranscriptionModel {
             | TranscriptionModel::DeepInfraWhisperBase => "https://api.deepinfra.com/v1/inference",
             TranscriptionModel::GroqWhisperLargeV3
             | TranscriptionModel::GroqWhisperLargeV3Turbo => "https://api.groq.com/openai/v1/audio/transcriptions",
+            TranscriptionModel::AssemblyAIUniversal3Pro
+            | TranscriptionModel::AssemblyAIUniversal2 => "https://api.assemblyai.com/v2",
         }
     }
 
@@ -105,6 +117,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase => "openai/whisper-base",
             TranscriptionModel::GroqWhisperLargeV3 => "whisper-large-v3",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "whisper-large-v3-turbo",
+            TranscriptionModel::AssemblyAIUniversal3Pro => "universal-3-pro",
+            TranscriptionModel::AssemblyAIUniversal2 => "universal-2",
         }
     }
 
@@ -120,6 +134,8 @@ impl TranscriptionModel {
             "deepinfra-whisper-base" => Some(TranscriptionModel::DeepInfraWhisperBase),
             "groq-whisper-large-v3" => Some(TranscriptionModel::GroqWhisperLargeV3),
             "groq-whisper-large-v3-turbo" => Some(TranscriptionModel::GroqWhisperLargeV3Turbo),
+            "assemblyai-universal-3-pro" => Some(TranscriptionModel::AssemblyAIUniversal3Pro),
+            "assemblyai-universal-2" => Some(TranscriptionModel::AssemblyAIUniversal2),
             _ => None,
         }
     }
@@ -136,6 +152,8 @@ impl TranscriptionModel {
             TranscriptionModel::DeepInfraWhisperBase,
             TranscriptionModel::GroqWhisperLargeV3,
             TranscriptionModel::GroqWhisperLargeV3Turbo,
+            TranscriptionModel::AssemblyAIUniversal3Pro,
+            TranscriptionModel::AssemblyAIUniversal2,
         ]
     }
 
