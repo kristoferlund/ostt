@@ -9,7 +9,6 @@
 //! Performance optimizations based on AssemblyAI best practices:
 //! - 3-second polling intervals (AssemblyAI recommended, not too aggressive)
 //! - Exponential backoff retry for upload failures
-//! - Connection pooling via shared client configuration
 
 use std::path::Path;
 use std::time::Duration;
@@ -85,22 +84,20 @@ pub async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
 ) -> anyhow::Result<String> {
-    let audio_data = std::fs::read(audio_path).map_err(|e| {
-        anyhow::anyhow!("Failed to read audio file: {e}")
-    })?;
+    let audio_data = std::fs::read(audio_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
-    // Configure client with timeouts and connection pooling for better performance
+    // Configure client with timeouts
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(60))  // Overall request timeout
-        .connect_timeout(Duration::from_secs(10))  // Connection establishment timeout
-        .pool_max_idle_per_host(10)  // Connection pooling for reuse
+        .timeout(Duration::from_secs(60))
+        .connect_timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
     
     let base_url = config.model.endpoint();
 
     // Step 1: Upload audio with retry logic for transient failures
-    let upload_url = upload_with_retry(&client, base_url, &config.api_key, &audio_data).await?;
+    let upload_url = upload_with_retry(&client, base_url, &config.api_key, audio_data).await?;
 
     // Step 2: Submit transcription request
     let assemblyai_config = &config.providers.assemblyai;
@@ -249,7 +246,7 @@ async fn upload_with_retry(
     client: &reqwest::Client,
     base_url: &str,
     api_key: &str,
-    audio_data: &[u8],
+    audio_data: Vec<u8>,
 ) -> anyhow::Result<String> {
     let mut retries = 0;
     let mut delay_ms = INITIAL_RETRY_DELAY_MS;
@@ -257,7 +254,7 @@ async fn upload_with_retry(
     loop {
         tracing::debug!("Uploading audio to AssemblyAI (attempt {} of {})...", retries + 1, MAX_UPLOAD_RETRIES + 1);
         
-        match try_upload(client, base_url, api_key, audio_data).await {
+        match try_upload(client, base_url, api_key, &audio_data).await {
             Ok(upload_url) => return Ok(upload_url),
             Err(e) => {
                 retries += 1;

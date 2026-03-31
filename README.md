@@ -151,6 +151,9 @@ ostt -c              # Record and copy to clipboard (shorthand)
 ostt record -c       # Record and copy to clipboard (explicit)
 ostt -o file         # Record and write to file (shorthand)
 ostt record -o file  # Record and write to file (explicit)
+ostt transcribe file # Transcribe a pre-recorded audio file
+ostt transcribe f -c # Transcribe and copy to clipboard
+ostt transcribe f -o out.txt # Transcribe and write to file
 ostt retry [N]       # Re-transcribe recording #N (1=most recent)
 ostt retry -c        # Re-transcribe and copy to clipboard
 ostt replay [N]      # Play back recording #N
@@ -166,11 +169,20 @@ ostt -h              # Quick help
 ostt --help          # Detailed help with examples
 ```
 
-**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
 
 ```bash
 ostt r -c            # Same as: ostt record -c
 ostt a               # Same as: ostt auth
+```
+
+**Transcribe:** The `transcribe` command enables use of ostt's transcription pipeline for pre-recorded audio files, without interactive recording. This is useful for non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts where you have an existing audio file and want to leverage ostt's multi-provider transcription infrastructure.
+
+```bash
+ostt transcribe recording.ogg              # Transcribe to stdout
+ostt transcribe voice-memo.mp3 -c          # Transcribe and copy to clipboard
+ostt transcribe meeting.wav -o transcript.txt  # Transcribe and write to file
+ostt transcribe audio.ogg | grep keyword   # Pipe to other commands
 ```
 
 **Record Options:** The `-c` and `-o` flags can be used without explicitly saying `record` since it's the default command:
@@ -285,17 +297,14 @@ visualization = "spectrum"  # "spectrum" for frequency display, "waveform" for a
 punctuate = true
 smart_format = false
 filler_words = false
+detect_language = true  # Automatic language detection (default: true)
+# detect_language_codes = ["en", "es"]  # Restrict to specific languages only
 
 [providers.assemblyai]
 format_text = true        # Punctuation, casing, and numeral formatting
 disfluencies = false      # Include filler words (uh, um)
 filter_profanity = false  # Filter profanity from transcript
 language_detection = true  # Automatic language detection
-
-# Optional: constrain language detection to expected languages
-[providers.assemblyai.language_detection_options]
-expected_languages = ["en", "es", "de"]  # Only detect these languages
-fallback_language = "auto"                 # "auto" or specific language code
 ```
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.
@@ -468,6 +477,13 @@ Contributions are welcome! Please open an issue or submit a pull request.
                     <img src="https://avatars.githubusercontent.com/u/9698363?v=4" width="100;" alt="kristoferlund"/>
                     <br />
                     <sub><b>Kristofer</b></sub>
+                </a>
+            </td>
+            <td align="center">
+                <a href="https://github.com/claw-fmckl">
+                    <img src="https://avatars.githubusercontent.com/u/260451250?v=4" width="100;" alt="claw-fmckl"/>
+                    <br />
+                    <sub><b>Kristofer Claw</b></sub>
                 </a>
             </td>
             <td align="center">
