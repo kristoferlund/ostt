@@ -89,6 +89,11 @@ utt_split = 0.8
 # WARNING: This may impact pricing. See docs at https://dpgr.am/deepgram-mip
 mip_opt_out = false
 
+# Enable automatic language detection
+# When true, Deepgram will automatically detect the spoken language
+# When false, assumes English (en)
+detect_language = true
+
 # Restrict automatic language detection to specific languages
 # When not set, all supported languages can be detected
 # Example: detect_language_codes = ["en", "es"]  # Only English or Spanish
