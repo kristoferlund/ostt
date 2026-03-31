@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Transcribe command** - Transcribe pre-recorded audio files without recording (`ostt transcribe <file>`). Supports the same output flags as `record` and `retry` (`-c` for clipboard, `-o` for file, stdout by default). Alias: `t`.
+- **Transcribe command** - Transcribe pre-recorded audio files without recording (`ostt transcribe <file>`). Enables use of ostt's transcription pipeline in non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts. Supports the same output flags as `record` and `retry` (`-c` for clipboard, `-o` for file, stdout by default). Alias: `t`.
 
 ## 0.0.7 - 2026-02-05
 

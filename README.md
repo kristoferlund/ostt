@@ -150,7 +150,7 @@ ostt -o file         # Record and write to file (shorthand)
 ostt record -o file  # Record and write to file (explicit)
 ostt transcribe file # Transcribe a pre-recorded audio file
 ostt transcribe f -c # Transcribe and copy to clipboard
-ostt transcribe f -o # Transcribe and write to file
+ostt transcribe f -o out.txt # Transcribe and write to file
 ostt retry [N]       # Re-transcribe recording #N (1=most recent)
 ostt retry -c        # Re-transcribe and copy to clipboard
 ostt replay [N]      # Play back recording #N
@@ -171,6 +171,15 @@ ostt --help          # Detailed help with examples
 ```bash
 ostt r -c            # Same as: ostt record -c
 ostt a               # Same as: ostt auth
+```
+
+**Transcribe:** The `transcribe` command enables use of ostt's transcription pipeline for pre-recorded audio files, without interactive recording. This is useful for non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts where you have an existing audio file and want to leverage ostt's multi-provider transcription infrastructure.
+
+```bash
+ostt transcribe recording.ogg              # Transcribe to stdout
+ostt transcribe voice-memo.mp3 -c          # Transcribe and copy to clipboard
+ostt transcribe meeting.wav -o transcript.txt  # Transcribe and write to file
+ostt transcribe audio.ogg | grep keyword   # Pipe to other commands
 ```
 
 **Record Options:** The `-c` and `-o` flags can be used without explicitly saying `record` since it's the default command:
