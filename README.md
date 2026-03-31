@@ -50,6 +50,9 @@ ostt supports multiple AI transcription providers. Bring your own API key and ch
 - **groq-whisper-large-v3** - High accuracy processing
 - **groq-whisper-large-v3-turbo** - Fastest transcription speed
 
+### AssemblyAI
+- **assemblyai-universal-3-pro** - Best accuracy, latest model
+
 Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
@@ -296,6 +299,12 @@ smart_format = false
 filler_words = false
 detect_language = true  # Automatic language detection (default: true)
 # detect_language_codes = ["en", "es"]  # Restrict to specific languages only
+
+[providers.assemblyai]
+format_text = true        # Punctuation, casing, and numeral formatting
+disfluencies = false      # Include filler words (uh, um)
+filter_profanity = false  # Filter profanity from transcript
+language_detection = true  # Automatic language detection
 ```
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.

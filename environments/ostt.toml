@@ -98,3 +98,29 @@ detect_language = true
 # When not set, all supported languages can be detected
 # Example: detect_language_codes = ["en", "es"]  # Only English or Spanish
 # detect_language_codes = []
+
+# =============================================================================
+# AssemblyAI Configuration
+# =============================================================================
+
+[providers.assemblyai]
+
+# Format text with punctuation, casing, and numeral conversion
+format_text = true
+
+# Enable automatic punctuation
+punctuate = true
+
+# Include disfluencies (filler words) in the transcript
+disfluencies = false
+
+# Filter profanity from the transcript
+filter_profanity = false
+
+# Enable automatic language detection
+language_detection = true
+
+# Language detection options (optional)
+# [providers.assemblyai.language_detection_options]
+# expected_languages = ["en", "es", "fr"]  # Only expect these languages
+# fallback_language = "auto"               # "auto" or specific code like "en"

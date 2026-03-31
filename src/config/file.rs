@@ -139,15 +139,54 @@ pub struct OpenAiConfig {
     // Add here as OpenAI features become configurable
 }
 
-/// Provider-specific configuration
+/// Options for AssemblyAI automatic language detection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LanguageDetectionOptions {
+    /// List of languages expected in the audio file.
+    /// Defaults to ["all"] when unspecified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_languages: Option<Vec<String>>,
+    /// Fallback language if detected language is not in expected_languages.
+    /// Use "auto" to let the model choose from expected_languages with highest confidence.
+    /// Defaults to "auto".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_language: Option<String>,
+}
+
+/// AssemblyAI API configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProviderConfig {
-    /// Deepgram provider configuration
-    #[serde(rename = "deepgram")]
-    Deepgram(DeepgramConfig),
-    /// OpenAI provider configuration
-    #[serde(rename = "openai")]
-    OpenAi(OpenAiConfig),
+pub struct AssemblyAIConfig {
+    /// Apply text formatting (punctuation, casing, numerals)
+    #[serde(default = "default_true")]
+    pub format_text: bool,
+    /// Include disfluencies (uh, um) in transcript
+    #[serde(default)]
+    pub disfluencies: bool,
+    /// Filter profanity from transcript
+    #[serde(default)]
+    pub filter_profanity: bool,
+    /// Enable automatic language detection
+    #[serde(default = "default_true")]
+    pub language_detection: bool,
+    /// Options for automatic language detection
+    #[serde(default)]
+    pub language_detection_options: LanguageDetectionOptions,
+    /// Enable automatic punctuation
+    #[serde(default = "default_true")]
+    pub punctuate: bool,
+}
+
+impl Default for AssemblyAIConfig {
+    fn default() -> Self {
+        Self {
+            format_text: true,
+            disfluencies: false,
+            filter_profanity: false,
+            language_detection: true,
+            language_detection_options: LanguageDetectionOptions::default(),
+            punctuate: true,
+        }
+    }
 }
 
 /// All provider configurations
@@ -157,6 +196,8 @@ pub struct ProvidersConfig {
     pub deepgram: DeepgramConfig,
     #[serde(default)]
     pub openai: OpenAiConfig,
+    #[serde(default)]
+    pub assemblyai: AssemblyAIConfig,
 }
 
 /// Complete application configuration.
