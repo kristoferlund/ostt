@@ -10,6 +10,7 @@ use clap_complete::{generate, Shell};
 use dirs;
 use std::env;
 use std::io;
+use std::path::PathBuf;
 use std::process;
 
 /// Suppress ALSA library warnings that are not relevant to the user.
@@ -74,7 +75,7 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
 #[command(name = "ostt")]
 #[command(version)]
 #[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
-#[command(long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config")]
+#[command(long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config")]
 #[command(
     after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
 )]
@@ -116,6 +117,31 @@ enum Commands {
         /// Recording index (1 = most recent, 2 = second most recent, etc.)
         #[arg(value_name = "N")]
         index: Option<usize>,
+
+        /// Copy transcription to clipboard instead of stdout
+        #[arg(short, long)]
+        clipboard: bool,
+
+        /// Write transcription to file instead of stdout
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
+
+    /// Transcribe a pre-recorded audio file
+    ///
+    /// Transcribe an existing audio file using the configured provider/model.
+    /// Supports the same output options as record and retry.
+    ///
+    /// Examples:
+    ///   ostt transcribe recording.ogg
+    ///   ostt transcribe voice-memo.mp3 -c
+    ///   ostt transcribe meeting.wav -o transcript.txt
+    ///   ostt transcribe audio.ogg | grep keyword
+    #[command(visible_alias = "t")]
+    Transcribe {
+        /// Path to the audio file to transcribe
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
 
         /// Copy transcription to clipboard instead of stdout
         #[arg(short, long)]
@@ -260,6 +286,13 @@ pub async fn run() -> Result<(), anyhow::Error> {
             output,
         }) => {
             commands::handle_retry(index, clipboard, output).await?;
+        }
+        Some(Commands::Transcribe {
+            file,
+            clipboard,
+            output,
+        }) => {
+            commands::handle_transcribe(file, clipboard, output).await?;
         }
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;
