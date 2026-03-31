@@ -303,6 +303,7 @@ async fn transcribe_recording_with_animation(
         transcription::transcribe(&transcription_config, filename.as_ref()).await
     });
 
+    let mut cancelled = false;
     loop {
         if let Err(e) = tui.render_transcription_animation(&mut animation) {
             tracing::warn!("Failed to render animation: {}", e);
@@ -312,7 +313,38 @@ async fn transcribe_recording_with_animation(
             break;
         }
 
+        // Check for cancel input (Escape, 'q', or Ctrl+C)
+        if crossterm::event::poll(std::time::Duration::from_millis(0))
+            .unwrap_or(false)
+        {
+            if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                match key.code {
+                    crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {
+                        tracing::info!("Transcription cancelled by user");
+                        transcription_handle.abort();
+                        cancelled = true;
+                        break;
+                    }
+                    crossterm::event::KeyCode::Char('c')
+                        if key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    {
+                        tracing::info!("Transcription cancelled by user (Ctrl+C)");
+                        transcription_handle.abort();
+                        cancelled = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    if cancelled {
+        return Err(anyhow::anyhow!("Transcription cancelled"));
     }
 
     match transcription_handle.await {

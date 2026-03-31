@@ -18,7 +18,8 @@ struct BergetResponse {
 /// Uses multipart form data with bearer token authentication.
 /// Berget provides an OpenAI-compatible API endpoint.
 ///
-/// Keywords are passed as the `prompt` parameter to guide transcription context.
+/// Keywords are passed as the `hotwords` parameter (Berget's dedicated keyword boosting)
+/// and as the `prompt` parameter (Whisper-compatible context hint).
 pub async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
@@ -49,12 +50,14 @@ pub async fn transcribe(
         format!("model={}", config.model.api_model_name()),
     ];
 
-    // Add keywords as prompt for better transcription context
+    // Add keywords as hotwords (Berget-specific) and prompt (Whisper-compatible)
     if !config.keywords.is_empty() {
-        let prompt = config.keywords.join(", ");
-        form = form.text("prompt", prompt.clone());
-        debug_params.push(format!("prompt={prompt}"));
-        tracing::debug!("Keywords used as prompt for Berget model: {:?}", config.keywords);
+        let keywords_csv = config.keywords.join(", ");
+        form = form.text("hotwords", keywords_csv.clone());
+        form = form.text("prompt", keywords_csv.clone());
+        debug_params.push(format!("hotwords={keywords_csv}"));
+        debug_params.push(format!("prompt={keywords_csv}"));
+        tracing::debug!("Keywords used for Berget model: {:?}", config.keywords);
     }
 
     let endpoint = config.model.endpoint();
