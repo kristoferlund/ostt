@@ -36,6 +36,10 @@ pub enum TranscriptionModel {
     BergetWhisperNBLarge,
     /// Berget Whisper Large V3 model (general-purpose, OpenAI)
     BergetWhisperLargeV3,
+    /// ElevenLabs Scribe v2 model (highest accuracy, 99 languages)
+    ElevenLabsScribeV2,
+    /// ElevenLabs Scribe v1 model (previous generation)
+    ElevenLabsScribeV1,
 }
 
 impl TranscriptionModel {
@@ -56,6 +60,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperKBLarge
             | TranscriptionModel::BergetWhisperNBLarge
             | TranscriptionModel::BergetWhisperLargeV3 => TranscriptionProvider::Berget,
+            TranscriptionModel::ElevenLabsScribeV2
+            | TranscriptionModel::ElevenLabsScribeV1 => TranscriptionProvider::ElevenLabs,
         }
     }
 
@@ -75,6 +81,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperKBLarge => "berget-whisper-kb-large",
             TranscriptionModel::BergetWhisperNBLarge => "berget-whisper-nb-large",
             TranscriptionModel::BergetWhisperLargeV3 => "berget-whisper-large-v3",
+            TranscriptionModel::ElevenLabsScribeV2 => "elevenlabs-scribe-v2",
+            TranscriptionModel::ElevenLabsScribeV1 => "elevenlabs-scribe-v1",
         }
     }
 
@@ -94,6 +102,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperKBLarge => "KB Whisper Large (Swedish optimized)",
             TranscriptionModel::BergetWhisperNBLarge => "NB Whisper Large (Norwegian optimized)",
             TranscriptionModel::BergetWhisperLargeV3 => "Whisper Large V3 (general-purpose)",
+            TranscriptionModel::ElevenLabsScribeV2 => "Scribe v2 (highest accuracy, 99 languages)",
+            TranscriptionModel::ElevenLabsScribeV1 => "Scribe v1 (previous generation)",
         }
     }
 
@@ -118,6 +128,8 @@ impl TranscriptionModel {
             | TranscriptionModel::BergetWhisperLargeV3 => {
                 "https://api.berget.ai/v1/audio/transcriptions"
             }
+            TranscriptionModel::ElevenLabsScribeV2
+            | TranscriptionModel::ElevenLabsScribeV1 => "https://api.elevenlabs.io/v1/speech-to-text",
         }
     }
 
@@ -137,6 +149,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperKBLarge => "KBLab/kb-whisper-large",
             TranscriptionModel::BergetWhisperNBLarge => "NbAiLab/nb-whisper-large",
             TranscriptionModel::BergetWhisperLargeV3 => "openai/whisper-large-v3",
+            TranscriptionModel::ElevenLabsScribeV2 => "scribe_v2",
+            TranscriptionModel::ElevenLabsScribeV1 => "scribe_v1",
         }
     }
 
@@ -156,6 +170,8 @@ impl TranscriptionModel {
             "berget-whisper-kb-large" => Some(TranscriptionModel::BergetWhisperKBLarge),
             "berget-whisper-nb-large" => Some(TranscriptionModel::BergetWhisperNBLarge),
             "berget-whisper-large-v3" => Some(TranscriptionModel::BergetWhisperLargeV3),
+            "elevenlabs-scribe-v2" => Some(TranscriptionModel::ElevenLabsScribeV2),
+            "elevenlabs-scribe-v1" => Some(TranscriptionModel::ElevenLabsScribeV1),
             _ => None,
         }
     }
@@ -176,6 +192,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperKBLarge,
             TranscriptionModel::BergetWhisperNBLarge,
             TranscriptionModel::BergetWhisperLargeV3,
+            TranscriptionModel::ElevenLabsScribeV2,
+            TranscriptionModel::ElevenLabsScribeV1,
         ]
     }
 
