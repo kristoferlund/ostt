@@ -9,6 +9,7 @@ mod deepgram;
 mod deepinfra;
 mod groq;
 mod assemblyai;
+mod berget;
 
 use serde::Deserialize;
 use std::path::Path;
@@ -89,6 +90,9 @@ pub async fn transcribe(
         }
         TranscriptionProvider::AssemblyAI => {
             assemblyai::transcribe(config, audio_path).await
+        }
+        TranscriptionProvider::Berget => {
+            berget::transcribe(config, audio_path).await
         }
     }?;
 

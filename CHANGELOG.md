@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deepgram language detection** - Enable automatic language detection with `detect_language` option (default: true). Previously Deepgram defaulted to English only.
 - **Deepgram language detection restriction** - Restrict detectable languages with `detect_language_codes` option. For example, `detect_language_codes = ["en", "es"]` will only detect English or Spanish.
 - **AssemblyAI provider** - New transcription provider with the `universal-3-pro` model. Configurable via `[providers.assemblyai]` in `ostt.toml`.
+- **Berget provider** - New transcription provider with 3 models: KB Whisper Large (Swedish optimized), NB Whisper Large (Norwegian optimized), and Whisper Large V3 (general-purpose). All data stays within Sweden.
 
 ## 0.0.7 - 2026-02-05
 

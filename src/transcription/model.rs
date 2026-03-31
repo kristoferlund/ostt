@@ -30,6 +30,12 @@ pub enum TranscriptionModel {
     GroqWhisperLargeV3Turbo,
     /// AssemblyAI Universal 3 Pro model (best accuracy)
     AssemblyAIUniversal3Pro,
+    /// Berget KB Whisper Large model (Swedish optimized)
+    BergetWhisperKBLarge,
+    /// Berget NB Whisper Large model (Norwegian optimized)
+    BergetWhisperNBLarge,
+    /// Berget Whisper Large V3 model (general-purpose, OpenAI)
+    BergetWhisperLargeV3,
 }
 
 impl TranscriptionModel {
@@ -47,6 +53,9 @@ impl TranscriptionModel {
             TranscriptionModel::GroqWhisperLargeV3
             | TranscriptionModel::GroqWhisperLargeV3Turbo => TranscriptionProvider::Groq,
             TranscriptionModel::AssemblyAIUniversal3Pro => TranscriptionProvider::AssemblyAI,
+            TranscriptionModel::BergetWhisperKBLarge
+            | TranscriptionModel::BergetWhisperNBLarge
+            | TranscriptionModel::BergetWhisperLargeV3 => TranscriptionProvider::Berget,
         }
     }
 
@@ -63,6 +72,9 @@ impl TranscriptionModel {
             TranscriptionModel::GroqWhisperLargeV3 => "groq-whisper-large-v3",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "groq-whisper-large-v3-turbo",
             TranscriptionModel::AssemblyAIUniversal3Pro => "assemblyai-universal-3-pro",
+            TranscriptionModel::BergetWhisperKBLarge => "berget-whisper-kb-large",
+            TranscriptionModel::BergetWhisperNBLarge => "berget-whisper-nb-large",
+            TranscriptionModel::BergetWhisperLargeV3 => "berget-whisper-large-v3",
         }
     }
 
@@ -79,6 +91,9 @@ impl TranscriptionModel {
             TranscriptionModel::GroqWhisperLargeV3 => "Whisper Large V3 (high accuracy)",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "Whisper Large V3 Turbo (fastest)",
             TranscriptionModel::AssemblyAIUniversal3Pro => "Universal 3 Pro (best accuracy)",
+            TranscriptionModel::BergetWhisperKBLarge => "KB Whisper Large (Swedish optimized)",
+            TranscriptionModel::BergetWhisperNBLarge => "NB Whisper Large (Norwegian optimized)",
+            TranscriptionModel::BergetWhisperLargeV3 => "Whisper Large V3 (general-purpose)",
         }
     }
 
@@ -98,6 +113,11 @@ impl TranscriptionModel {
                 "https://api.groq.com/openai/v1/audio/transcriptions"
             }
             TranscriptionModel::AssemblyAIUniversal3Pro => "https://api.assemblyai.com/v2",
+            TranscriptionModel::BergetWhisperKBLarge
+            | TranscriptionModel::BergetWhisperNBLarge
+            | TranscriptionModel::BergetWhisperLargeV3 => {
+                "https://api.berget.ai/v1/audio/transcriptions"
+            }
         }
     }
 
@@ -114,6 +134,9 @@ impl TranscriptionModel {
             TranscriptionModel::GroqWhisperLargeV3 => "whisper-large-v3",
             TranscriptionModel::GroqWhisperLargeV3Turbo => "whisper-large-v3-turbo",
             TranscriptionModel::AssemblyAIUniversal3Pro => "universal-3-pro",
+            TranscriptionModel::BergetWhisperKBLarge => "KBLab/kb-whisper-large",
+            TranscriptionModel::BergetWhisperNBLarge => "NbAiLab/nb-whisper-large",
+            TranscriptionModel::BergetWhisperLargeV3 => "openai/whisper-large-v3",
         }
     }
 
@@ -130,6 +153,9 @@ impl TranscriptionModel {
             "groq-whisper-large-v3" => Some(TranscriptionModel::GroqWhisperLargeV3),
             "groq-whisper-large-v3-turbo" => Some(TranscriptionModel::GroqWhisperLargeV3Turbo),
             "assemblyai-universal-3-pro" => Some(TranscriptionModel::AssemblyAIUniversal3Pro),
+            "berget-whisper-kb-large" => Some(TranscriptionModel::BergetWhisperKBLarge),
+            "berget-whisper-nb-large" => Some(TranscriptionModel::BergetWhisperNBLarge),
+            "berget-whisper-large-v3" => Some(TranscriptionModel::BergetWhisperLargeV3),
             _ => None,
         }
     }
@@ -147,6 +173,9 @@ impl TranscriptionModel {
             TranscriptionModel::GroqWhisperLargeV3,
             TranscriptionModel::GroqWhisperLargeV3Turbo,
             TranscriptionModel::AssemblyAIUniversal3Pro,
+            TranscriptionModel::BergetWhisperKBLarge,
+            TranscriptionModel::BergetWhisperNBLarge,
+            TranscriptionModel::BergetWhisperLargeV3,
         ]
     }
 

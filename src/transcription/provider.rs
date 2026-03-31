@@ -13,6 +13,7 @@ pub enum TranscriptionProvider {
     DeepInfra,
     Groq,
     AssemblyAI,
+    Berget,
 }
 
 impl TranscriptionProvider {
@@ -23,6 +24,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::DeepInfra => "deepinfra",
             TranscriptionProvider::Groq => "groq",
             TranscriptionProvider::AssemblyAI => "assemblyai",
+            TranscriptionProvider::Berget => "berget",
         }
     }
 
@@ -33,6 +35,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::DeepInfra => "DeepInfra",
             TranscriptionProvider::Groq => "Groq",
             TranscriptionProvider::AssemblyAI => "AssemblyAI",
+            TranscriptionProvider::Berget => "Berget",
         }
     }
 
@@ -43,6 +46,7 @@ impl TranscriptionProvider {
             "deepinfra" => Some(TranscriptionProvider::DeepInfra),
             "groq" => Some(TranscriptionProvider::Groq),
             "assemblyai" => Some(TranscriptionProvider::AssemblyAI),
+            "berget" => Some(TranscriptionProvider::Berget),
             _ => None,
         }
     }
@@ -54,6 +58,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::DeepInfra,
             TranscriptionProvider::Groq,
             TranscriptionProvider::AssemblyAI,
+            TranscriptionProvider::Berget,
         ]
     }
 }
