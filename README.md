@@ -54,7 +54,12 @@ ostt supports multiple AI transcription providers. Bring your own API key and ch
 - **assemblyai-universal-3-pro** - Best accuracy, latest model
 
 ### Berget
-- **berget-whisper-kb-large** - KB Whisper Large (Swedish optimized)
+
+Berget is a Swedish cloud provider guaranteeing that data never leaves Sweden. All models are hosted within Swedish borders.
+
+- **berget-whisper-kb-large** - KB Whisper Large, developed by the National Library of Sweden. Trained on 50,000+ hours of Swedish speech, reduces WER by 47% compared to OpenAI's whisper-large-v3 on Swedish.
+- **berget-whisper-nb-large** - NB Whisper Large, developed by the National Library of Norway. Trained on 66,000 hours of Norwegian speech, optimized for Norwegian ASR.
+- **berget-whisper-large-v3** - OpenAI Whisper Large V3, general-purpose multilingual model hosted on Berget infrastructure.
 
 Configure your preferred provider and model using `ostt auth`.
 
