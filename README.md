@@ -469,6 +469,13 @@ Contributions are welcome! Please open an issue or submit a pull request.
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/claw-fmckl">
+                    <img src="https://avatars.githubusercontent.com/u/260451250?v=4" width="100;" alt="claw-fmckl"/>
+                    <br />
+                    <sub><b>Kristofer Claw</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/andrepadez">
                     <img src="https://avatars.githubusercontent.com/u/1013997?v=4" width="100;" alt="andrepadez"/>
                     <br />
