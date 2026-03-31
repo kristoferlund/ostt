@@ -13,16 +13,6 @@ struct BergetResponse {
     text: String,
 }
 
-/// Berget API error response
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct BergetErrorResponse {
-    code: String,
-    error: String,
-    #[serde(default)]
-    details: Option<String>,
-}
-
 /// Transcribes an audio file using Berget's Whisper API.
 ///
 /// Uses multipart form data with bearer token authentication.
@@ -46,7 +36,7 @@ pub async fn transcribe(
         .to_string();
 
     let file_part = reqwest::multipart::Part::bytes(audio_data)
-        .file_name(file_name.clone())
+        .file_name(file_name)
         .mime_str("audio/mpeg")
         .map_err(|e| anyhow::anyhow!("Failed to create file part for upload: {e}"))?;
 
@@ -99,15 +89,17 @@ pub async fn transcribe(
 
     if !response.status().is_success() {
         let status = response.status();
-        
-        // Parse the JSON error response - all errors follow the same structure
-        let error_message = response
-            .json::<BergetErrorResponse>()
-            .await
-            .map(|e| e.error)
-            .unwrap_or_else(|_| format!("HTTP {status}"));
+        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
 
-        return Err(anyhow::anyhow!("Berget API error: {error_message}"));
+        let human_readable = match status.as_u16() {
+            401 => "Berget API key is invalid or expired. Please run 'ostt auth' to update your API key.".to_string(),
+            403 => "You don't have permission to use Berget's API. Check your API key and account status.".to_string(),
+            429 => "Too many requests to Berget. You've hit the API rate limit. Please wait and try again.".to_string(),
+            500 | 502 | 503 | 504 => "Berget API server is experiencing issues. Please try again later.".to_string(),
+            _ => format!("Berget API error (status {status}): {error_body}"),
+        };
+
+        return Err(anyhow::anyhow!(human_readable));
     }
 
     let berget_response: BergetResponse = response
