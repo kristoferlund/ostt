@@ -10,6 +10,7 @@ mod deepinfra;
 mod groq;
 mod assemblyai;
 mod berget;
+mod elevenlabs;
 
 use serde::Deserialize;
 use std::path::Path;
@@ -93,6 +94,9 @@ pub async fn transcribe(
         }
         TranscriptionProvider::Berget => {
             berget::transcribe(config, audio_path).await
+        }
+        TranscriptionProvider::ElevenLabs => {
+            elevenlabs::transcribe(config, audio_path).await
         }
     }?;
 
