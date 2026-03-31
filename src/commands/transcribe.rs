@@ -8,7 +8,6 @@ use crate::config;
 use crate::history::HistoryManager;
 use crate::keywords::KeywordsManager;
 use crate::transcription;
-use crate::ui::ErrorScreen;
 use dirs;
 use std::path::PathBuf;
 
@@ -39,19 +38,10 @@ pub async fn handle_transcribe(
     tracing::info!("Transcribing file: {}", file.display());
 
     // Load configuration
-    let config_data = match config::OsttConfig::load() {
-        Ok(config) => config,
-        Err(err) => {
-            tracing::error!("Failed to load configuration: {err}");
-            let error_message = format!(
-                "Configuration Error:\n\n{err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again."
-            );
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&error_message)?;
-            error_screen.cleanup()?;
-            return Err(anyhow::anyhow!("Configuration error: {err}"));
-        }
-    };
+    let config_data = config::OsttConfig::load().map_err(|err| {
+        tracing::error!("Failed to load configuration: {err}");
+        anyhow::anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
+    })?;
 
     // Get the selected model from config
     let selected_model_id = config::get_selected_model().ok().flatten();
