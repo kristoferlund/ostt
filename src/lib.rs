@@ -13,6 +13,7 @@
 //! interface for recording, provider authentication, model selection, and history browsing.
 
 pub mod app;
+pub mod auth;
 pub mod clipboard;
 pub mod commands;
 pub mod config;
