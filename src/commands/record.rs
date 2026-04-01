@@ -9,6 +9,8 @@ use crate::history::HistoryManager;
 use crate::recording::{AudioRecorder, OsttTui, RecordingCommand, RecordingHistory};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::ErrorScreen;
+use cliclack::{confirm, intro, outro};
+use console::style;
 use dirs;
 use std::fs;
 
@@ -76,7 +78,9 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
         "Entering recording loop. Press 'Enter' to transcribe or 'Escape'/'q' to cancel."
     );
     let mut frame_count = 0u64;
+    #[allow(unused_assignments)]
     let mut should_transcribe = false;
+    let mut tui_cleanup_done = false;
 
     loop {
         if term.load(std::sync::atomic::Ordering::Relaxed) {
@@ -103,7 +107,39 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
                 break;
             }
             Ok(RecordingCommand::Cancel) => {
-                break;
+                // User pressed ESC or q - show confirmation dialog
+                tracing::debug!("Escape or 'q' pressed: showing confirmation dialog");
+
+                // Exit TUI before showing dialog
+                tui.cleanup().ok();
+                tui_cleanup_done = true;
+
+                // Show confirmation dialog
+                intro(style(" Recording ").on_white().black())?;
+                let should_proceed = confirm("Do you want to transcribe this recording?")
+                    .initial_value(true)
+                    .interact()
+                    .map_err(|e| anyhow::anyhow!("Confirmation cancelled: {e}"))?;
+
+                if should_proceed {
+                    // User wants to transcribe - recreate TUI for animation
+                    tracing::debug!("User chose to transcribe - recreating TUI");
+                    tui = OsttTui::new(
+                        actual_sample_rate,
+                        config_data.audio.peak_volume_threshold,
+                        config_data.audio.reference_level_db,
+                        config_data.audio.visualization,
+                    )
+                    .map_err(|e| anyhow::anyhow!("Failed to reinitialize UI: {e}"))?;
+
+                    should_transcribe = true;
+                    break;
+                } else {
+                    // User wants to cancel - delete the recording and exit
+                    outro("Recording cancelled.")?;
+                    audio_recorder.stop_recording(None, &config_data.audio.output_format).ok();
+                    return Ok(());
+                }
             }
             Ok(RecordingCommand::TogglePause) => {
                 audio_recorder.toggle_pause();
@@ -188,7 +224,9 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
             }
         } else {
             tracing::debug!("No transcription model configured");
-            tui.cleanup().ok();
+            if !tui_cleanup_done {
+                tui.cleanup().ok();
+            }
             let mut error_screen = ErrorScreen::new()?;
             error_screen.show_error("Error: No transcription model configured.\n\nPlease run 'ostt auth' to select a model.")?;
             error_screen.cleanup()?;
@@ -198,8 +236,11 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
         None
     };
 
-    tui.cleanup()
-        .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+    // Only cleanup TUI if it hasn't been done already (e.g., in Cancel handler)
+    if !tui_cleanup_done {
+        tui.cleanup()
+            .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+    }
 
     // Output transcription after TUI is completely cleaned up
     if let Some(text) = transcription_text {
