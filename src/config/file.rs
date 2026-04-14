@@ -200,12 +200,127 @@ pub struct ProvidersConfig {
     pub assemblyai: AssemblyAIConfig,
 }
 
+/// The role of an input message sent to an LLM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputRole {
+    System,
+    User,
+}
+
+/// A special source that provides dynamic content at runtime.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum InputSource {
+    /// The transcribed text from the recording
+    Transcription,
+    /// The user's configured keyword list
+    Keywords,
+}
+
+/// The content source for an action input message.
+///
+/// Uses `#[serde(untagged)]` so that TOML input entries are disambiguated by
+/// field name alone — the user writes `source = "transcription"`, `file = "~/prompt.txt"`,
+/// or `content = "literal text"` and serde matches the correct variant.
+///
+/// Variant order defines precedence: if a user specifies multiple fields on the
+/// same input (e.g. both `source` and `content`), serde picks the first matching
+/// variant silently. Precedence: `source` > `file` > `content`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum InputContent {
+    /// Dynamic source: transcription or keywords
+    Source { source: InputSource },
+    /// Path to a file whose contents become the message content
+    File { file: String },
+    /// Literal text content
+    Literal { content: String },
+}
+
+/// A single input entry for an AI action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActionInput {
+    /// Message role: "system" or "user" — enforced by `InputRole` enum.
+    pub role: InputRole,
+    /// The content source — exactly one of: literal content, a special source, or a file path.
+    /// Enforced at the type level via `InputContent` enum.
+    #[serde(flatten)]
+    pub input_content: InputContent,
+}
+
+/// Type-specific fields for a processing action.
+///
+/// Uses `#[serde(tag = "type")]` so the TOML `type` field drives which variant
+/// serde expects. Required fields for each variant are enforced at deserialization
+/// time — no runtime validation needed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum ActionDetails {
+    /// A bash command that receives transcription via stdin
+    Bash {
+        /// Shell command to execute
+        command: String,
+    },
+    /// An AI chat completion action
+    Ai {
+        /// Provider/model string (e.g. "openai/gpt-4o")
+        model: String,
+        /// Input messages for the LLM
+        inputs: Vec<ActionInput>,
+    },
+}
+
+/// A single processing action.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProcessAction {
+    /// Unique identifier for this action (used in CLI: `-p clean`)
+    pub id: String,
+    /// Human-readable display name (shown in action picker)
+    pub name: String,
+    /// Action type and its type-specific configuration.
+    /// The TOML `type` field ("bash" or "ai") determines which fields are required.
+    #[serde(flatten)]
+    pub details: ActionDetails,
+}
+
+/// Top-level process configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ProcessConfig {
+    /// List of configured processing actions
+    #[serde(default)]
+    pub actions: Vec<ProcessAction>,
+}
+
+impl ProcessAction {
+    /// Validates this action's configuration.
+    ///
+    /// Returns an error if an AI action has an empty `inputs` list.
+    pub fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if let ActionDetails::Ai { inputs, .. } = &self.details {
+            if inputs.is_empty() {
+                return Err(format!("AI action '{}' must have at least one input", self.id).into());
+            }
+        }
+        Ok(())
+    }
+}
+
+impl ProcessConfig {
+    /// Finds an action by its `id` field.
+    pub fn get_action(&self, id: &str) -> Option<&ProcessAction> {
+        self.actions.iter().find(|a| a.id == id)
+    }
+}
+
 /// Complete application configuration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OsttConfig {
     pub audio: AudioConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
+    #[serde(default)]
+    pub process: ProcessConfig,
 }
 
 impl OsttConfig {
@@ -219,6 +334,9 @@ impl OsttConfig {
         let config_path = get_config_path()?;
         let config_content = fs::read_to_string(&config_path)?;
         let config: OsttConfig = toml::from_str(&config_content)?;
+        for action in &config.process.actions {
+            action.validate()?;
+        }
         Ok(config)
     }
 
@@ -248,6 +366,7 @@ impl OsttConfig {
                 visualization: VisualizationType::default(),
             },
             providers: ProvidersConfig::default(),
+            process: ProcessConfig::default(),
         }
     }
 }
@@ -280,4 +399,369 @@ fn get_config_path() -> Result<PathBuf, std::io::Error> {
 /// - If the config file cannot be written
 pub fn save_config(config: &OsttConfig) -> anyhow::Result<()> {
     config.save()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Helper: deserialize just a ProcessConfig from a TOML string ──
+
+    fn parse_process_config(toml_str: &str) -> Result<ProcessConfig, toml::de::Error> {
+        toml::from_str(toml_str)
+    }
+
+    fn parse_action(toml_str: &str) -> Result<ProcessAction, toml::de::Error> {
+        toml::from_str(toml_str)
+    }
+
+    fn parse_input(toml_str: &str) -> Result<ActionInput, toml::de::Error> {
+        toml::from_str(toml_str)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 1.1.14 — Valid configurations
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn valid_bash_action() {
+        let toml_str = r#"
+            id = "copy"
+            name = "Copy to clipboard"
+            type = "bash"
+            command = "xclip -selection clipboard"
+        "#;
+        let action = parse_action(toml_str).unwrap();
+        assert_eq!(action.id, "copy");
+        assert_eq!(action.name, "Copy to clipboard");
+        assert!(
+            matches!(action.details, ActionDetails::Bash { ref command } if command == "xclip -selection clipboard")
+        );
+    }
+
+    #[test]
+    fn valid_ai_action() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean transcript"
+            type = "ai"
+            model = "openai/gpt-4o"
+
+            [[inputs]]
+            role = "system"
+            content = "You are a helpful assistant."
+
+            [[inputs]]
+            role = "user"
+            source = "transcription"
+        "#;
+        let action = parse_action(toml_str).unwrap();
+        assert_eq!(action.id, "clean");
+        assert_eq!(action.name, "Clean transcript");
+        match &action.details {
+            ActionDetails::Ai { model, inputs } => {
+                assert_eq!(model, "openai/gpt-4o");
+                assert_eq!(inputs.len(), 2);
+            }
+            _ => panic!("expected Ai variant"),
+        }
+    }
+
+    #[test]
+    fn valid_mixed_actions() {
+        let toml_str = r#"
+            [[actions]]
+            id = "copy"
+            name = "Copy"
+            type = "bash"
+            command = "xclip"
+
+            [[actions]]
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+            model = "openai/gpt-4o"
+
+            [[actions.inputs]]
+            role = "user"
+            source = "transcription"
+        "#;
+        let config = parse_process_config(toml_str).unwrap();
+        assert_eq!(config.actions.len(), 2);
+        assert!(matches!(
+            config.actions[0].details,
+            ActionDetails::Bash { .. }
+        ));
+        assert!(matches!(
+            config.actions[1].details,
+            ActionDetails::Ai { .. }
+        ));
+    }
+
+    #[test]
+    fn missing_process_section_defaults_to_empty() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+        "#;
+        let config: OsttConfig = toml::from_str(toml_str).unwrap();
+        assert!(config.process.actions.is_empty());
+    }
+
+    #[test]
+    fn input_role_system_with_content() {
+        let toml_str = r#"
+            role = "system"
+            content = "You are a helpful assistant."
+        "#;
+        let input = parse_input(toml_str).unwrap();
+        assert!(matches!(input.role, InputRole::System));
+        assert!(
+            matches!(input.input_content, InputContent::Literal { ref content } if content == "You are a helpful assistant.")
+        );
+    }
+
+    #[test]
+    fn input_role_user_with_content() {
+        let toml_str = r#"
+            role = "user"
+            content = "Hello world"
+        "#;
+        let input = parse_input(toml_str).unwrap();
+        assert!(matches!(input.role, InputRole::User));
+        assert!(
+            matches!(input.input_content, InputContent::Literal { ref content } if content == "Hello world")
+        );
+    }
+
+    #[test]
+    fn input_source_transcription() {
+        let toml_str = r#"
+            role = "user"
+            source = "transcription"
+        "#;
+        let input = parse_input(toml_str).unwrap();
+        assert!(matches!(
+            input.input_content,
+            InputContent::Source {
+                source: InputSource::Transcription
+            }
+        ));
+    }
+
+    #[test]
+    fn input_source_keywords() {
+        let toml_str = r#"
+            role = "user"
+            source = "keywords"
+        "#;
+        let input = parse_input(toml_str).unwrap();
+        assert!(matches!(
+            input.input_content,
+            InputContent::Source {
+                source: InputSource::Keywords
+            }
+        ));
+    }
+
+    #[test]
+    fn input_file() {
+        let toml_str = r#"
+            role = "system"
+            file = "~/prompts/clean.txt"
+        "#;
+        let input = parse_input(toml_str).unwrap();
+        assert!(matches!(
+            input.input_content,
+            InputContent::File { ref file } if file == "~/prompts/clean.txt"
+        ));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 1.1.15 — Invalid ProcessAction configurations
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn invalid_action_missing_type() {
+        let toml_str = r#"
+            id = "copy"
+            name = "Copy"
+            command = "xclip"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_action_unknown_type() {
+        let toml_str = r#"
+            id = "run"
+            name = "Run"
+            type = "python"
+            command = "print('hi')"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_action_missing_id() {
+        let toml_str = r#"
+            name = "Copy"
+            type = "bash"
+            command = "xclip"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_action_missing_name() {
+        let toml_str = r#"
+            id = "copy"
+            type = "bash"
+            command = "xclip"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_bash_missing_command() {
+        let toml_str = r#"
+            id = "copy"
+            name = "Copy"
+            type = "bash"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_ai_missing_model() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+
+            [[inputs]]
+            role = "user"
+            source = "transcription"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_ai_missing_inputs() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+            model = "openai/gpt-4o"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_ai_missing_model_and_inputs() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 1.1.16 — Invalid ActionInput configurations
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn invalid_input_missing_role() {
+        let toml_str = r#"
+            content = "Hello"
+        "#;
+        assert!(parse_input(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_input_unknown_role() {
+        let toml_str = r#"
+            role = "admin"
+            content = "Hello"
+        "#;
+        assert!(parse_input(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_input_no_content_field() {
+        let toml_str = r#"
+            role = "user"
+        "#;
+        assert!(parse_input(toml_str).is_err());
+    }
+
+    #[test]
+    fn invalid_input_unknown_source() {
+        let toml_str = r#"
+            role = "user"
+            source = "bogus"
+        "#;
+        assert!(parse_input(toml_str).is_err());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 1.1.17 — Edge cases
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn empty_inputs_deserializes_but_fails_validate() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+            model = "openai/gpt-4o"
+            inputs = []
+        "#;
+        let action = parse_action(toml_str).unwrap();
+        assert!(action.validate().is_err());
+    }
+
+    #[test]
+    fn multiple_content_fields_uses_highest_precedence() {
+        // source > file > content — so `source` wins
+        let toml_str = r#"
+            role = "user"
+            source = "transcription"
+            content = "ignored"
+        "#;
+        let input = parse_input(toml_str).unwrap();
+        assert!(matches!(
+            input.input_content,
+            InputContent::Source {
+                source: InputSource::Transcription
+            }
+        ));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 1.1.18 — get_action lookup
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn get_action_returns_matching_action() {
+        let toml_str = r#"
+            [[actions]]
+            id = "clean"
+            name = "Clean transcript"
+            type = "bash"
+            command = "sed 's/um//g'"
+        "#;
+        let config = parse_process_config(toml_str).unwrap();
+        let action = config.get_action("clean");
+        assert!(action.is_some());
+        assert_eq!(action.unwrap().id, "clean");
+    }
+
+    #[test]
+    fn get_action_returns_none_for_nonexistent() {
+        let config = ProcessConfig::default();
+        assert!(config.get_action("nonexistent").is_none());
+    }
 }
