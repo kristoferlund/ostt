@@ -47,7 +47,7 @@ None. All tasks completed without issues.
 
 ### Out-of-scope observations
 
-- The `-p` flag on the top-level `Cli` struct is not marked `global = true` (matching the spec). It is independent from the `-p` on each subcommand, and the routing code merges them the same way it merges `-c` and `-o`.
+- DOES THIS NEED FIXING?: The `-p` flag on the top-level `Cli` struct is not marked `global = true` (matching the spec). It is independent from the `-p` on each subcommand, and the routing code merges them the same way it merges `-c` and `-o`.
 
 ## Session 3: Spec 5.2.B — Handler updates for handle_transcribe and handle_retry
 

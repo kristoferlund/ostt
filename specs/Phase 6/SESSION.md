@@ -20,7 +20,6 @@ None. All tasks completed on first attempt without issues.
 
 ### Out-of-scope observations
 
-- The transcription animation loop in `record.rs` and the new processing animation loop in `execute.rs` share the same pattern (spawn task, render loop, poll cancel, sleep 50ms) but use different terminal owners (OsttTui's terminal vs. standalone terminal). The spec explicitly notes this duplication is acceptable and explains why unification was not pursued.
 - The `execute_action_with_animation` function is not yet called by any command handler — that will happen in section 6.1.B.
 
 ## Session 2: Spec 6.1.B — Update all callers to use execute_action_with_animation

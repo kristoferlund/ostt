@@ -74,12 +74,23 @@ Add status label to the logo animation for visual phase distinction.
 
 Implementation plan: [Phase 6 Plan](Phase%206/PLAN.md)
 
-### Phase 7 — Documentation
-Update README and CHANGELOG to document the processing pipeline feature.
+### Phase 7 — Polish & Fixes
+Code cleanup, UX improvements, and bug fixes discovered during implementation.
 
 | # | Item | Priority | Effort |
 |---|------|----------|--------|
-| 7.1 | [Update README](Phase%207/7.1%20—%20Update%20README.md) | High | Small |
-| 7.2 | [Update CHANGELOG](Phase%207/7.2%20—%20Update%20CHANGELOG.md) | High | Small |
+| 7.1 | [Unified TUI Lifecycle for Record Flow](Phase%207/7.1%20—%20Unified%20TUI%20Lifecycle%20for%20Record%20Flow.md) | High | Medium |
+| 7.2 | [Miscellaneous Fixes](Phase%207/7.2%20—%20Miscellaneous%20Fixes.md) | Medium | Small |
+| 7.3 | [Mouse Hover Highlight](Phase%207/7.3%20—%20Mouse%20Hover%20Highlight.md) | Medium | Small |
 
 Implementation plan: [Phase 7 Plan](Phase%207/PLAN.md)
+
+### Phase 8 — Documentation
+Update README and CHANGELOG after manual testing confirms everything works.
+
+| # | Item | Priority | Effort |
+|---|------|----------|--------|
+| 8.1 | [Update README](Phase%208/8.1%20—%20Update%20README.md) | High | Small |
+| 8.2 | [Update CHANGELOG](Phase%208/8.2%20—%20Update%20CHANGELOG.md) | High | Small |
+
+Implementation plan: [Phase 8 Plan](Phase%208/PLAN.md)

@@ -21,7 +21,7 @@ I have a set of specification files that I want to turn into a structured implem
 Instructions:
 
 1. Read every spec file in the specs folder.
-2. Read the target codebase to understand its current structure, files, and patterns.
+2. Read only the source files that are explicitly referenced in the spec files (check the "Files Modified" and "Specification" sections for file paths). Do NOT do a full codebase exploration — the specs already contain the relevant file paths and context. Read each referenced file to understand its current state, types, and patterns.
 3. Analyze dependencies between specs — which specs must be completed before others.
 4. Determine an execution order: start with the smallest, most isolated changes first, then build toward larger changes. Specs with dependencies on other specs go after their dependencies.
 5. Decompose each spec into atomic implementation tasks. Each task should be:
