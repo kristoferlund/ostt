@@ -253,6 +253,7 @@ pub struct ActionInput {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AiTool {
+    #[serde(rename = "opencode")]
     OpenCode,
     ClaudeCode,
     GeminiCli,
@@ -280,10 +281,10 @@ impl AiTool {
         match self {
             AiTool::OpenCode => {
                 vec![
+                    "--pure".to_string(),
                     "run".to_string(),
                     "--model".to_string(),
                     model.to_string(),
-                    "--pure".to_string(),
                 ]
             }
             AiTool::ClaudeCode => {
@@ -515,7 +516,7 @@ mod tests {
             id = "clean"
             name = "Clean transcript"
             type = "ai"
-            tool = "open-code"
+            tool = "opencode"
             model = "openai/gpt-4o"
 
             [[inputs]]
@@ -717,7 +718,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
-            tool = "open-code"
+            tool = "opencode"
 
             [[inputs]]
             role = "user"
@@ -732,7 +733,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
-            tool = "open-code"
+            tool = "opencode"
             model = "openai/gpt-4o"
         "#;
         assert!(parse_action(toml_str).is_err());
@@ -744,7 +745,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
-            tool = "open-code"
+            tool = "opencode"
         "#;
         assert!(parse_action(toml_str).is_err());
     }
@@ -797,7 +798,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
-            tool = "open-code"
+            tool = "opencode"
             model = "openai/gpt-4o"
             inputs = []
         "#;
@@ -840,7 +841,7 @@ mod tests {
     #[test]
     fn ai_tool_deserializes_all_kebab_case_variants() {
         let cases = [
-            ("open-code", "OpenCode"),
+            ("opencode", "OpenCode"),
             ("claude-code", "ClaudeCode"),
             ("gemini-cli", "GeminiCli"),
             ("codex-cli", "CodexCli"),
@@ -885,7 +886,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
-            tool = "open-code"
+            tool = "opencode"
             model = "openai/gpt-4o"
 
             [[inputs]]

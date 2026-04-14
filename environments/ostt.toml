@@ -198,7 +198,7 @@ language_detection = true
 #   - "ai":   an AI CLI tool invocation (OpenCode, Claude Code, Gemini CLI, Codex CLI)
 #
 # Supported AI tools:
-#   tool = "open-code"    # OpenCode  (https://opencode.ai)
+#   tool = "opencode"    # OpenCode  (https://opencode.ai)
 #   tool = "claude-code"  # Claude Code (https://docs.anthropic.com/en/docs/claude-code)
 #   tool = "gemini-cli"   # Gemini CLI (https://github.com/google-gemini/gemini-cli)
 #   tool = "codex-cli"    # Codex CLI (https://github.com/openai/codex)
@@ -213,7 +213,7 @@ language_detection = true
 id = "clean"
 name = "Clean up text"
 type = "ai"
-tool = "open-code"
+tool = "opencode"
 model = "anthropic/claude-sonnet-4-6"
 
 [[process.actions.inputs]]
@@ -228,7 +228,7 @@ source = "transcription"
 id = "cmd"
 name = "Generate CLI command"
 type = "ai"
-tool = "open-code"
+tool = "opencode"
 model = "anthropic/claude-sonnet-4-6"
 
 [[process.actions.inputs]]
