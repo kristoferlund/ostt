@@ -186,3 +186,64 @@ language_detection = true
 # [providers.assemblyai.language_detection_options]
 # expected_languages = ["en", "es", "fr"]  # Only expect these languages
 # fallback_language = "auto"               # "auto" or specific code like "en"
+
+
+# =============================================================================
+# Processing Actions
+# =============================================================================
+#
+# Actions that can be applied to transcriptions via `ostt process` or `ostt -p`.
+# Each action is either:
+#   - "bash": a shell command that receives text on stdin and outputs to stdout
+#   - "ai":   an AI CLI tool invocation (OpenCode, Claude Code, Gemini CLI, Codex CLI)
+#
+# Supported AI tools:
+#   tool = "open-code"    # OpenCode  (https://opencode.ai)
+#   tool = "claude-code"  # Claude Code (https://docs.anthropic.com/en/docs/claude-code)
+#   tool = "gemini-cli"   # Gemini CLI (https://github.com/google-gemini/gemini-cli)
+#   tool = "codex-cli"    # Codex CLI (https://github.com/openai/codex)
+#
+# Use `ostt process --list` to see all configured actions.
+# Use `ostt process -a <id>` to run a specific action.
+# Use `ostt -p` to process immediately after recording.
+
+# --- AI Actions ---
+
+[[process.actions]]
+id = "clean"
+name = "Clean up text"
+type = "ai"
+tool = "open-code"
+model = "anthropic/claude-sonnet-4-6"
+
+[[process.actions.inputs]]
+role = "system"
+content = "Clean up the following transcribed text. Remove filler words (uh, um, like), fix grammar, improve phrasing, and remove false starts or repetitions. Keep the original meaning and tone. Output only the cleaned text, nothing else."
+
+[[process.actions.inputs]]
+role = "user"
+source = "transcription"
+
+[[process.actions]]
+id = "cmd"
+name = "Generate CLI command"
+type = "ai"
+tool = "open-code"
+model = "anthropic/claude-sonnet-4-6"
+
+[[process.actions.inputs]]
+role = "system"
+content = "The user described a task via voice. Generate the exact CLI command(s) to accomplish it. Output only the command(s), one per line. No explanation, no markdown fences, no commentary. If multiple commands are needed, separate them with && on a single line."
+
+[[process.actions.inputs]]
+role = "user"
+source = "transcription"
+
+# --- Bash Actions ---
+
+[[process.actions]]
+id = "upper"
+name = "UPPERCASE"
+type = "bash"
+command = "tr '[:lower:]' '[:upper:]'"
+
