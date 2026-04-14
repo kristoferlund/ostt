@@ -4,22 +4,33 @@
 //! Handles real-time display updates, volume metering, and user input during recording.
 
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self, Event, KeyCode, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
     prelude::*,
     style::{Color, Style},
-    widgets::Sparkline,
+    widgets::{ListState, Sparkline},
 };
 use std::error::Error;
 use std::io::{stdout, Stdout};
 
+use crate::config::file::ProcessAction;
 use crate::config::VisualizationType;
+use crate::process::picker::render_picker_frame;
 use crate::transcription::TranscriptionAnimation;
 
-use super::visualizations::{SpectrumAnalyzer, update_waveform, resize_waveform};
+use super::visualizations::{resize_waveform, update_waveform, SpectrumAnalyzer};
+
+/// Result of a single frame of the action picker rendered through OsttTui.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickerEvent {
+    /// User selected an action — contains the action's ID.
+    Selected(String),
+    /// User cancelled (Esc/q/Ctrl+C).
+    Cancelled,
+}
 
 /// User input command during recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,7 +148,7 @@ impl OsttTui {
                     update_waveform(&mut self.display_data, current_volume, self.terminal_width);
                 }
             }
-            
+
             self.last_sample_time = std::time::Instant::now();
         }
 
@@ -146,11 +157,16 @@ impl OsttTui {
 
         if current_width != self.terminal_width {
             self.terminal_width = current_width;
-            
+
             match self.visualization_type {
                 VisualizationType::Spectrum => {
                     if let Some(analyzer) = &mut self.spectrum_analyzer {
-                        analyzer.resize(current_width, samples, self.sample_rate, self.reference_level_db);
+                        analyzer.resize(
+                            current_width,
+                            samples,
+                            self.sample_rate,
+                            self.reference_level_db,
+                        );
                         self.display_data = analyzer.data().to_vec();
                     }
                 }
@@ -405,6 +421,71 @@ impl OsttTui {
         })?;
         animation.update();
         Ok(())
+    }
+
+    /// Renders one frame of the action picker and polls for input.
+    ///
+    /// Returns `Ok(Some(PickerEvent))` if the user made a selection or cancelled,
+    /// `Ok(None)` if the event loop should continue (no actionable input).
+    ///
+    /// # Errors
+    /// - If terminal rendering fails
+    /// - If event polling fails
+    pub fn render_action_picker(
+        &mut self,
+        actions: &[ProcessAction],
+        list_state: &mut ListState,
+    ) -> Result<Option<PickerEvent>, Box<dyn Error>> {
+        // Render one frame
+        let actions_ref = actions.to_vec();
+        self.terminal.draw(|frame| {
+            let area = frame.area();
+            render_picker_frame(frame, area, &actions_ref, list_state);
+        })?;
+
+        // Poll for input with 50ms timeout
+        if event::poll(std::time::Duration::from_millis(50))? {
+            match event::read()? {
+                Event::Key(key) => match key.code {
+                    KeyCode::Up | KeyCode::Char('k') => {
+                        list_state.select_previous();
+                    }
+                    KeyCode::Down | KeyCode::Char('j') => {
+                        list_state.select_next();
+                    }
+                    KeyCode::Enter => {
+                        if let Some(idx) = list_state.selected() {
+                            if idx < actions.len() {
+                                return Ok(Some(PickerEvent::Selected(actions[idx].id.clone())));
+                            }
+                        }
+                    }
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        return Ok(Some(PickerEvent::Cancelled));
+                    }
+                    KeyCode::Char('c')
+                        if key
+                            .modifiers
+                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
+                    {
+                        return Ok(Some(PickerEvent::Cancelled));
+                    }
+                    _ => {}
+                },
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        list_state.select_previous();
+                    }
+                    MouseEventKind::ScrollDown => {
+                        list_state.select_next();
+                    }
+                    _ => {}
+                },
+                _ => {}
+            }
+        }
+
+        Ok(None)
     }
 
     /// Cleans up terminal state and exits alternate screen mode.

@@ -32,6 +32,7 @@ pub struct HistoryViewer {
     list_state: ListState,
     notification: Option<(String, Instant)>,
     pending_click: Option<(usize, Instant)>,
+    cleaned_up: bool,
 }
 
 impl HistoryViewer {
@@ -55,6 +56,7 @@ impl HistoryViewer {
             list_state,
             notification: None,
             pending_click: None,
+            cleaned_up: false,
         })
     }
 
@@ -270,6 +272,11 @@ impl HistoryViewer {
 
     /// Cleans up terminal and restores normal mode.
     fn cleanup(&mut self) -> Result<()> {
+        if self.cleaned_up {
+            return Ok(());
+        }
+        self.cleaned_up = true;
+
         disable_raw_mode()?;
         execute!(
             self.terminal.backend_mut(),

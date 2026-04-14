@@ -51,11 +51,13 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
     // Check exit status
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let code = output
-            .status
-            .code()
-            .map(|c| c.to_string())
-            .unwrap_or_else(|| "unknown".to_string());
+        let code = output.status.code().unwrap_or(-1);
+        if code == 127 {
+            anyhow::bail!(
+                "Command not found. Make sure the command is installed.\nShell output: {}",
+                stderr.trim()
+            );
+        }
         anyhow::bail!("Command exited with status {code}:\n{}", stderr.trim());
     }
 
@@ -103,12 +105,8 @@ mod tests {
         let result = execute_bash_action("nonexistent_command_xyz", "").await;
         let err = result.unwrap_err().to_string();
         assert!(
-            err.contains("Command exited with status"),
-            "error should mention exit status, got: {err}"
-        );
-        assert!(
-            err.contains("not found"),
-            "error should mention 'not found', got: {err}"
+            err.contains("Command not found"),
+            "error should mention 'Command not found', got: {err}"
         );
     }
 }

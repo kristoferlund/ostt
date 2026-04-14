@@ -12,7 +12,7 @@ pub use file::{
     ActionDetails, ActionInput, AiTool, InputContent, InputRole, InputSource, ProcessAction,
     ProcessConfig,
 };
-pub use file::{AudioConfig, OsttConfig, VisualizationType};
+pub use file::{AudioConfig, OsttConfig, ProvidersConfig, VisualizationType};
 pub use secrets::{
     clear_api_key, get_api_key, get_authorized_providers, get_selected_model, save_api_key,
     save_selected_model,

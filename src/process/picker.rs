@@ -6,7 +6,9 @@
 use crate::config::file::ProcessAction;
 use anyhow::Result;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyEvent},
+    event::{
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -20,6 +22,67 @@ const BG: Color = Color::Rgb(0, 0, 0);
 const FG: Color = Color::Rgb(255, 255, 255);
 const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
 const HELP_FG: Color = Color::Rgb(100, 100, 100);
+
+/// Renders the action picker UI into the given frame area.
+///
+/// Shared rendering logic used by both the standalone `ActionPicker`
+/// and `OsttTui::render_action_picker()`.
+pub fn render_picker_frame(
+    frame: &mut Frame,
+    area: Rect,
+    actions: &[ProcessAction],
+    list_state: &mut ListState,
+) {
+    let padding_block = Block::default()
+        .padding(Padding::uniform(1))
+        .style(Style::default().bg(BG));
+    frame.render_widget(&padding_block, area);
+    let padded_area = padding_block.inner(area);
+
+    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+    frame.render_widget(&main_block, padded_area);
+    let inner_area = main_block.inner(padded_area);
+
+    // Split into header, list, and footer areas
+    let [header_area, list_area, footer_area] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+        Constraint::Length(1),
+    ])
+    .areas(inner_area);
+
+    // Render ostt logo header
+    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+        .style(Style::default().fg(FG))
+        .alignment(Alignment::Left);
+    frame.render_widget(header, header_area);
+
+    // Build list items from action names
+    let items: Vec<ListItem> = actions
+        .iter()
+        .map(|action| ListItem::new(action.name.clone()))
+        .collect();
+
+    // Render list with title
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title(" Process action ")
+                .borders(Borders::ALL),
+        )
+        .highlight_style(Style::default().bg(HIGHLIGHT_BG))
+        .highlight_symbol("> ")
+        .highlight_spacing(HighlightSpacing::Always);
+
+    frame.render_stateful_widget(list, list_area, list_state);
+
+    // Render help footer
+    let help_text = "↑/↓ select, ↵ confirm, esc/q cancel";
+    let help_paragraph = Paragraph::new(help_text)
+        .alignment(Alignment::Center)
+        .style(Style::default().fg(HELP_FG));
+    frame.render_widget(help_paragraph, footer_area);
+}
 
 /// Result of the action picker interaction.
 pub enum PickerResult {
@@ -45,7 +108,7 @@ impl ActionPicker {
     fn new(actions: Vec<ProcessAction>) -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
 
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
@@ -63,59 +126,11 @@ impl ActionPicker {
 
     /// Renders the current state of the action picker.
     fn draw(&mut self) -> Result<()> {
+        let actions = &self.actions;
+        let list_state = &mut self.list_state;
         self.terminal.draw(|frame| {
             let area = frame.area();
-
-            let padding_block = Block::default()
-                .padding(Padding::uniform(1))
-                .style(Style::default().bg(BG));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            // Split into header, list, and footer areas
-            let [header_area, list_area, footer_area] = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
-            .areas(inner_area);
-
-            // Render ostt logo header
-            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-                .style(Style::default().fg(FG))
-                .alignment(Alignment::Left);
-            frame.render_widget(header, header_area);
-
-            // Build list items from action names
-            let items: Vec<ListItem> = self
-                .actions
-                .iter()
-                .map(|action| ListItem::new(action.name.clone()))
-                .collect();
-
-            // Render list with title
-            let list = List::new(items)
-                .block(
-                    Block::default()
-                        .title(" Process action ")
-                        .borders(Borders::ALL),
-                )
-                .highlight_style(Style::default().bg(HIGHLIGHT_BG))
-                .highlight_symbol("> ")
-                .highlight_spacing(HighlightSpacing::Always);
-
-            frame.render_stateful_widget(list, list_area, &mut self.list_state);
-
-            // Render help footer
-            let help_text = "↑/↓ select, ↵ confirm, esc/q cancel";
-            let help_paragraph = Paragraph::new(help_text)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(HELP_FG));
-            frame.render_widget(help_paragraph, footer_area);
+            render_picker_frame(frame, area, actions, list_state);
         })?;
 
         Ok(())
@@ -130,7 +145,11 @@ impl ActionPicker {
         self.cleaned_up = true;
 
         disable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
+        execute!(
+            self.terminal.backend_mut(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        )?;
         self.terminal.show_cursor()?;
         Ok(())
     }
@@ -143,13 +162,25 @@ impl ActionPicker {
         let result = loop {
             self.draw()?;
 
-            if let Event::Key(key) = event::read()? {
-                if let Some(action) = self.handle_key(key) {
-                    match action {
-                        PickerAction::Exit => break PickerResult::Cancelled,
-                        PickerAction::Select(id) => break PickerResult::Selected(id),
+            match event::read()? {
+                Event::Key(key) => {
+                    if let Some(action) = self.handle_key(key) {
+                        match action {
+                            PickerAction::Exit => break PickerResult::Cancelled,
+                            PickerAction::Select(id) => break PickerResult::Selected(id),
+                        }
                     }
                 }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollUp => {
+                        self.list_state.select_previous();
+                    }
+                    MouseEventKind::ScrollDown => {
+                        self.list_state.select_next();
+                    }
+                    _ => {}
+                },
+                _ => {}
             }
         };
 
