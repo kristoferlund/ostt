@@ -19,10 +19,14 @@ understand what has already been accomplished and any obstacles encountered.
 
 Implement tasks in the exact order listed in PLAN.md. Do not skip or reorder tasks.
 
+CRITICAL — Update PLAN.md after EVERY completed task:
+  After finishing each task, IMMEDIATELY edit PLAN.md to change `- [ ]` to `- [x]`
+  for that task BEFORE starting the next task. This is essential for crash recovery —
+  if the session is interrupted, the plan must reflect what has already been done.
+  Do NOT batch these updates. Do NOT wait until the end of the sub-section.
+
 After each verification task (cargo check, cargo clippy, cargo test), confirm it passes
 before moving on.
-
-Mark each task complete in PLAN.md by changing `- [ ]` to `- [x]` as you finish it.
 
 Rules:
 - SCOPE: Complete only ONE sub-section per session (at most 10 tasks). A sub-section
@@ -46,5 +50,3 @@ Include in the summary:
 - What was accomplished
 - Obstacles encountered
 - Out-of-scope observations (things noticed but not acted on)
-```
-
