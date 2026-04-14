@@ -21,7 +21,7 @@ if [ -e "$OSTT_BIN" ]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ALACRITTY_CONFIG="${HOME}/.config/ostt/alacritty-float.toml"
+GHOSTTY_CONFIG="${HOME}/.config/ostt/ghostty-float.conf"
 STATE_FILE="/tmp/ostt_active.pid"
 
 # --- Helpers -----------------------------------------------------------------
@@ -58,11 +58,11 @@ if [ -f "$STATE_FILE" ]; then
     fi
 fi
 
-# ostt not running → spawn new window with Alacritty config
+# ostt not running → spawn new floating Ghostty window
 # Pass all script arguments to ostt, default to -c (clipboard) if no arguments provided
 OSTT_ARGS="${*:--c}"
 hyprctl dispatch exec \
-  "[float] alacritty --config-file \"$ALACRITTY_CONFIG\" --title ostt -e \"$OSTT_BIN\" $OSTT_ARGS"
+  "[float] ghostty --title=ostt --config-default-files=false --config-file=$GHOSTTY_CONFIG -e \"$OSTT_BIN\" $OSTT_ARGS"
 
 # small delay so the process exists and we can grab PID
 sleep 0.5

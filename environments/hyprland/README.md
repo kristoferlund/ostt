@@ -83,7 +83,7 @@ windowrule = move ((monitor_w*0.5)-(window_w*0.5)) ((monitor_h*0.5)-(window_h*0.
 
 ### Terminal Appearance
 
-The terminal appearance can be customized by editing `~/.config/ostt/alacritty-float.toml`.
+The terminal appearance can be customized by editing `~/.config/ostt/ghostty-float.conf`.
 
 ### Different Hotkey
 
