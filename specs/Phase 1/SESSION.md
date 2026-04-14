@@ -22,7 +22,7 @@ None. All tasks completed on the first attempt without issues.
 ### Out-of-scope observations
 
 - `OsttConfig::default()` is defined as `pub(crate) fn default()` rather than implementing the `Default` trait. This is unconventional but intentional — `AudioConfig` has required fields with no `Default` impl, so a trait impl on `OsttConfig` would need to pick arbitrary defaults for `device`, `sample_rate`, etc. The manual method with `#[allow(dead_code)]` works but could be revisited.
-- The `ProvidersConfig` re-export is not in `config/mod.rs` despite being a public type. Might want to add it for consistency with the new `ProcessConfig` re-export.
+- FIX THIS: The `ProvidersConfig` re-export is not in `config/mod.rs` despite being a public type. Might want to add it for consistency with the new `ProcessConfig` re-export.
 
 ## Session 2: Spec 1.2 — Input Resolution
 

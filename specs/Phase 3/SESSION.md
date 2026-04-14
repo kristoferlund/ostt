@@ -20,7 +20,8 @@ None. Implementation was straightforward — the patterns from `ai.rs` (timeout,
 
 ### Out-of-scope observations
 
-- The spec mentions "Command failed to start" as the error for non-existent commands, but since we use `sh -c <command>`, `sh` itself spawns successfully and the non-existent command appears as a non-zero exit with stderr from the shell (e.g., "sh: 1: nonexistent_command_xyz: not found"). The spawn error path would only trigger if `sh` itself were missing from the system. The test was written to match the actual behavior (non-zero exit path) rather than the spawn-failure path.
+- FIX THIS: The spec mentions "Command failed to start" as the error for non-existent commands, but since we use `sh -c <command>`, `sh` itself spawns successfully and the non-existent command appears as a non-zero exit with stderr from the shell (e.g., "sh: 1: nonexistent_command_xyz: not found"). The spawn error path would only trigger if `sh` itself were missing from the system. The test was written to match the actual behavior (non-zero exit path) rather than the spawn-failure path.
+
 
 ## Session 2: Spec 3.2.A — Action Dispatcher
 

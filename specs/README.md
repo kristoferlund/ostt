@@ -73,3 +73,13 @@ Add status label to the logo animation for visual phase distinction.
 | 6.1 | [Processing Animation with Status Label](Phase%206/6.1%20—%20Processing%20Animation%20with%20Status%20Label.md) | Medium | Small |
 
 Implementation plan: [Phase 6 Plan](Phase%206/PLAN.md)
+
+### Phase 7 — Documentation
+Update README and CHANGELOG to document the processing pipeline feature.
+
+| # | Item | Priority | Effort |
+|---|------|----------|--------|
+| 7.1 | [Update README](Phase%207/7.1%20—%20Update%20README.md) | High | Small |
+| 7.2 | [Update CHANGELOG](Phase%207/7.2%20—%20Update%20CHANGELOG.md) | High | Small |
+
+Implementation plan: [Phase 7 Plan](Phase%207/PLAN.md)

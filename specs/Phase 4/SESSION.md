@@ -26,5 +26,6 @@ None. Implementation was straightforward — the existing `HistoryViewer` and `K
 
 ### Out-of-scope observations
 
-- `HistoryViewer` does not have a `cleaned_up` guard in its `cleanup()` method (unlike `KeywordsViewer`). This is not a problem since `HistoryViewer.cleanup()` is idempotent in practice, but it's an inconsistency.
+- FIX THIS: `HistoryViewer` does not have a `cleaned_up` guard in its `cleanup()` method (unlike `KeywordsViewer`). This is not a problem since `HistoryViewer.cleanup()` is idempotent in practice, but it's an inconsistency.
 - The picker does not use mouse capture, which is consistent with the spec. The history and keywords viewers do use mouse capture.
+- We should add mouse support.
