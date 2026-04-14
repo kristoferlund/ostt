@@ -276,16 +276,19 @@ impl AiTool {
     /// - Claude Code: `["-p", "--system-prompt", system, "--model", model]`
     /// - Gemini CLI: `["-p", system, "-m", model]`
     /// - Codex CLI: `["exec", system, "--model", model]`
-    pub fn build_required_args(&self, model: &str, system_prompt: &str) -> Vec<String> {
+    pub fn build_required_args(&self, model: &str) -> Vec<String> {
         match self {
             AiTool::OpenCode => {
-                vec!["run".to_string(), "--model".to_string(), model.to_string()]
+                vec![
+                    "run".to_string(),
+                    "--model".to_string(),
+                    model.to_string(),
+                    "--pure".to_string(),
+                ]
             }
             AiTool::ClaudeCode => {
                 vec![
                     "-p".to_string(),
-                    "--system-prompt".to_string(),
-                    system_prompt.to_string(),
                     "--model".to_string(),
                     model.to_string(),
                     "--no-session-persistence".to_string(),
@@ -297,20 +300,10 @@ impl AiTool {
                 ]
             }
             AiTool::GeminiCli => {
-                vec![
-                    "-p".to_string(),
-                    system_prompt.to_string(),
-                    "-m".to_string(),
-                    model.to_string(),
-                ]
+                vec!["-p".to_string(), "-m".to_string(), model.to_string()]
             }
             AiTool::CodexCli => {
-                vec![
-                    "exec".to_string(),
-                    system_prompt.to_string(),
-                    "--model".to_string(),
-                    model.to_string(),
-                ]
+                vec!["exec".to_string(), "--model".to_string(), model.to_string()]
             }
         }
     }

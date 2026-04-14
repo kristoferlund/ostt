@@ -36,25 +36,19 @@ pub(crate) fn build_prompts(messages: &[ResolvedMessage]) -> (String, String) {
 
 /// Builds the stdin content to pipe to the CLI tool.
 ///
-/// All tools wrap the user prompt in `<text>` XML tags to clearly delimit it as
-/// data to process (not instructions to follow). This prevents the model from
-/// interpreting transcribed text as a prompt — e.g., translating a question
-/// literally rather than answering it.
-///
-/// - OpenCode: includes system prompt in stdin since it doesn't support
-///   `--system-prompt` as a CLI flag.
-/// - All other tools: user prompt only (system prompt is passed via CLI flags).
+/// All tools receive a single combined message containing the processing
+/// instructions followed by the user's text wrapped in `<text>` XML tags.
+/// This approach is more reliable than using `--system-prompt` flags because
+/// coding agents (Claude Code, OpenCode, etc.) have their own internal system
+/// prompts that can override or dilute a user-provided system prompt.
+/// By putting everything in the user message, our instructions are treated
+/// as the primary task.
 pub(crate) fn build_stdin_content(
-    tool: &AiTool,
+    _tool: &AiTool,
     system_prompt: &str,
     user_prompt: &str,
 ) -> String {
-    match tool {
-        AiTool::OpenCode => {
-            format!("[System]\n{system_prompt}\n\n[User]\n<text>\n{user_prompt}\n</text>")
-        }
-        _ => format!("<text>\n{user_prompt}\n</text>"),
-    }
+    format!("{system_prompt}\n\n<text>\n{user_prompt}\n</text>")
 }
 
 /// Executes an AI action by invoking the specified CLI tool in non-interactive mode.
@@ -97,8 +91,8 @@ pub async fn execute_ai_action(
     // Determine binary: use tool_binary override, or default for the tool
     let binary = tool_binary.unwrap_or(tool.default_binary());
 
-    // Build required args for this tool (model, system prompt, etc.)
-    let mut args = tool.build_required_args(model, &system_prompt);
+    // Build required args for this tool (model, flags, etc.)
+    let mut args = tool.build_required_args(model);
 
     // Append user-provided extra args, if any
     if let Some(extra) = tool_args {
@@ -231,18 +225,15 @@ mod tests {
     #[test]
     fn build_required_args_returns_correct_args_for_each_tool() {
         let model = "test-model";
-        let system = "system prompt";
 
         assert_eq!(
-            AiTool::OpenCode.build_required_args(model, system),
-            vec!["run", "--model", "test-model"]
+            AiTool::OpenCode.build_required_args(model),
+            vec!["run", "--model", "test-model", "--pure"]
         );
         assert_eq!(
-            AiTool::ClaudeCode.build_required_args(model, system),
+            AiTool::ClaudeCode.build_required_args(model),
             vec![
                 "-p",
-                "--system-prompt",
-                "system prompt",
                 "--model",
                 "test-model",
                 "--no-session-persistence",
@@ -254,43 +245,37 @@ mod tests {
             ]
         );
         assert_eq!(
-            AiTool::GeminiCli.build_required_args(model, system),
-            vec!["-p", "system prompt", "-m", "test-model"]
+            AiTool::GeminiCli.build_required_args(model),
+            vec!["-p", "-m", "test-model"]
         );
         assert_eq!(
-            AiTool::CodexCli.build_required_args(model, system),
-            vec!["exec", "system prompt", "--model", "test-model"]
+            AiTool::CodexCli.build_required_args(model),
+            vec!["exec", "--model", "test-model"]
         );
     }
 
     #[test]
-    fn opencode_stdin_includes_system_prompt_and_wrapped_user() {
-        let stdin = build_stdin_content(
-            &AiTool::OpenCode,
-            "You are a helpful assistant.",
-            "Hello world",
-        );
-        assert_eq!(
-            stdin,
-            "[System]\nYou are a helpful assistant.\n\n[User]\n<text>\nHello world\n</text>"
-        );
-    }
-
-    #[test]
-    fn non_opencode_tools_stdin_wraps_user_prompt_in_xml_tags() {
+    fn all_tools_stdin_combines_system_prompt_and_wrapped_user() {
         let system = "You are a helpful assistant.";
         let user = "Hello world";
-        let expected = "<text>\nHello world\n</text>";
+        let expected = "You are a helpful assistant.\n\n<text>\nHello world\n</text>";
 
-        for tool in [AiTool::ClaudeCode, AiTool::GeminiCli, AiTool::CodexCli] {
+        for tool in [
+            AiTool::OpenCode,
+            AiTool::ClaudeCode,
+            AiTool::GeminiCli,
+            AiTool::CodexCli,
+        ] {
             let stdin = build_stdin_content(&tool, system, user);
             assert_eq!(
                 stdin, expected,
-                "{:?} stdin should wrap user prompt in <text> tags",
+                "{:?} stdin should combine system prompt and wrapped user text",
                 tool
             );
         }
     }
+
+
 
     #[tokio::test]
     async fn tool_binary_override_changes_binary_used() {
@@ -322,18 +307,15 @@ mod tests {
     #[test]
     fn tool_args_appended_after_required_args() {
         let model = "test-model";
-        let system = "system prompt";
         let extra = vec!["--flag".to_string(), "value".to_string()];
 
-        let mut args = AiTool::ClaudeCode.build_required_args(model, system);
+        let mut args = AiTool::ClaudeCode.build_required_args(model);
         args.extend(extra.iter().cloned());
 
         assert_eq!(
             args,
             vec![
                 "-p",
-                "--system-prompt",
-                "system prompt",
                 "--model",
                 "test-model",
                 "--no-session-persistence",
