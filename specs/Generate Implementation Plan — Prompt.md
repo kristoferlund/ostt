@@ -11,7 +11,7 @@ Before using this prompt, you need:
 
 ## The Prompt
 
-Copy everything between the `---` markers and paste it into a new agent session. Replace the three placeholder values in `[BRACKETS]`.
+Copy everything between the `---` markers and paste it into a new agent session. 
 
 ---
 

@@ -1,29 +1,45 @@
-
-~~~
 Read the implementation plan at:
-  /Users/kristoferlund/gh/ostt/specs/Phase 1/PLAN.md
+  /home/kristoferlund/gh/ostt/specs/Phase 1/PLAN.md
 
-Find the first spec group that has incomplete tasks (unchecked `- [ ]` items).
-Read the corresponding spec file in:
-  /Users/kristoferlund/gh/ostt/specs/Phase 1/
+Read the session notes at:
+  /home/kristoferlund/gh/ostt/specs/Phase 1/SESSION.md
 
-Study the relevant source files in the target codebase at:
-  /Users/kristoferlund/gh/ostt/
+Read every spec file in:
+  /home/kristoferlund/gh/ostt/specs/Phase 1/
 
-Read SESSION.md in the same directory as PLAN.md for notes from previous sessions.
+Find the next incomplete spec group in PLAN.md (the first group that has unchecked tasks).
+Read the corresponding spec file for that group.
 
-Then implement the tasks for that ONE spec group, in order. Follow these rules:
+Study the relevant source files in the target codebase at /home/kristoferlund/gh/ostt/src/
+before making any changes. Understand existing patterns, imports, and conventions.
 
-1. Implement tasks sequentially — no skipping, no reordering.
-2. After each task, run the verification command (`cargo check`, `cargo clippy -- -D warnings`, or `cargo test` as appropriate).
-3. Mark each task complete in PLAN.md (`- [x]`) as you finish it.
-4. If verification fails, fix the issue and retry. If it fails twice on the same task, mark it with `- [!]` in PLAN.md, git commit partial work, and STOP.
-5. Only modify files in the target codebase (`/Users/kristoferlund/gh/ostt/`), PLAN.md, and SESSION.md. Do not modify the spec files.
-6. When all tasks in the spec group are done, run the full verification protocol:
-   ```
-   cargo check && cargo clippy -- -D warnings && cargo test
-   ```
-7. Git commit all changes with a descriptive message.
-8. APPEND a session summary to the END of SESSION.md (do NOT overwrite — read first, then add after the last line). Use heading `## Session N: Spec X.Y — <title>` (increment N). Include: what was accomplished, obstacles encountered, out-of-scope observations.
-9. STOP. Do not continue to the next spec group.
-~~~
+Read the session notes from previous sessions in SESSION.md (if the file exists) to
+understand what has already been accomplished and any obstacles encountered.
+
+Implement tasks in the exact order listed in PLAN.md. Do not skip or reorder tasks.
+
+After each verification task (cargo check, cargo clippy, cargo test), confirm it passes
+before moving on.
+
+Mark each task complete in PLAN.md by changing `- [ ]` to `- [x]` as you finish it.
+
+Rules:
+- Do not skip tasks. Do not reorder tasks.
+- Only modify files in the target codebase (/home/kristoferlund/gh/ostt/src/), PLAN.md,
+  and SESSION.md. Do not create or modify any other files.
+- If a verification step fails, fix the issue and retry. If it fails a second time on
+  the same task, mark the task with `[!]` in PLAN.md, git commit all partial work, and
+  STOP the session.
+- After completing all tasks in the current spec group, git commit all changes.
+- STOP after completing one spec group. Do not continue to the next spec group.
+
+After stopping, APPEND a session summary to the end of:
+  /home/kristoferlund/gh/ostt/specs/Phase 1/SESSION.md
+
+Use the heading format: ## Session N: Spec X.Y — <title>
+(Increment N based on how many sessions already exist in the file.)
+
+Include in the summary:
+- What was accomplished
+- Obstacles encountered
+- Out-of-scope observations (things noticed but not acted on)
