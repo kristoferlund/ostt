@@ -47,15 +47,15 @@ Phase 2 contains only one spec (2.1), so there are no intra-phase dependencies.
 
 #### 2.1.B — Config type tests
 
-- [ ] **2.1.10** Add test: `AiTool` deserializes all four kebab-case variants (`open-code`, `claude-code`, `gemini-cli`, `codex-cli`)
-- [ ] **2.1.11** Add test: unknown tool value (e.g., `tool = "vim"`) fails deserialization
-- [ ] **2.1.12** Add test: `ActionDetails::Ai` without `tool` field fails deserialization
-- [ ] **2.1.13** Add test: `tool_binary` and `tool_args` are optional — omitting them deserializes to `None`
-- [ ] **2.1.14** Add test: `tool_binary = "/custom/path"` and `tool_args = ["--flag", "value"]` deserialize correctly
-- [ ] **2.1.15** Add test: `AiTool::default_binary()` returns the expected binary name for each variant
-- [ ] **2.1.16** Verify: `cargo check` passes
-- [ ] **2.1.17** Verify: `cargo clippy -- -D warnings` passes
-- [ ] **2.1.18** Verify: `cargo test` passes
+- [x] **2.1.10** Add test: `AiTool` deserializes all four kebab-case variants (`open-code`, `claude-code`, `gemini-cli`, `codex-cli`)
+- [x] **2.1.11** Add test: unknown tool value (e.g., `tool = "vim"`) fails deserialization
+- [x] **2.1.12** Add test: `ActionDetails::Ai` without `tool` field fails deserialization
+- [x] **2.1.13** Add test: `tool_binary` and `tool_args` are optional — omitting them deserializes to `None`
+- [x] **2.1.14** Add test: `tool_binary = "/custom/path"` and `tool_args = ["--flag", "value"]` deserialize correctly
+- [x] **2.1.15** Add test: `AiTool::default_binary()` returns the expected binary name for each variant
+- [x] **2.1.16** Verify: `cargo check` passes
+- [x] **2.1.17** Verify: `cargo clippy -- -D warnings` passes
+- [x] **2.1.18** Verify: `cargo test` passes
 
 #### 2.1.C — AI executor module (`src/process/ai.rs`)
 

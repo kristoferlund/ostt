@@ -785,6 +785,135 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════════
+    // 2.1.B — AiTool and AI config tests
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Helper wrapper for deserializing a bare `AiTool` value from TOML.
+    #[derive(Deserialize)]
+    struct AiToolWrapper {
+        tool: AiTool,
+    }
+
+    fn parse_ai_tool(toml_str: &str) -> Result<AiTool, toml::de::Error> {
+        let wrapper: AiToolWrapper = toml::from_str(toml_str)?;
+        Ok(wrapper.tool)
+    }
+
+    #[test]
+    fn ai_tool_deserializes_all_kebab_case_variants() {
+        let cases = [
+            ("open-code", "OpenCode"),
+            ("claude-code", "ClaudeCode"),
+            ("gemini-cli", "GeminiCli"),
+            ("codex-cli", "CodexCli"),
+        ];
+        for (kebab, expected_debug) in cases {
+            let toml_str = format!("tool = \"{}\"", kebab);
+            let tool = parse_ai_tool(&toml_str)
+                .unwrap_or_else(|e| panic!("failed to parse '{}': {}", kebab, e));
+            assert_eq!(
+                format!("{:?}", tool),
+                expected_debug,
+                "variant mismatch for '{}'",
+                kebab
+            );
+        }
+    }
+
+    #[test]
+    fn ai_tool_unknown_variant_fails_deserialization() {
+        let toml_str = r#"tool = "vim""#;
+        assert!(parse_ai_tool(toml_str).is_err());
+    }
+
+    #[test]
+    fn ai_action_missing_tool_fails_deserialization() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+            model = "openai/gpt-4o"
+
+            [[inputs]]
+            role = "user"
+            source = "transcription"
+        "#;
+        assert!(parse_action(toml_str).is_err());
+    }
+
+    #[test]
+    fn ai_action_optional_fields_default_to_none() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+            tool = "open-code"
+            model = "openai/gpt-4o"
+
+            [[inputs]]
+            role = "user"
+            source = "transcription"
+        "#;
+        let action = parse_action(toml_str).unwrap();
+        match &action.details {
+            ActionDetails::Ai {
+                tool_binary,
+                tool_args,
+                ..
+            } => {
+                assert!(tool_binary.is_none(), "tool_binary should default to None");
+                assert!(tool_args.is_none(), "tool_args should default to None");
+            }
+            _ => panic!("expected Ai variant"),
+        }
+    }
+
+    #[test]
+    fn ai_tool_default_binary_returns_expected_names() {
+        assert_eq!(AiTool::OpenCode.default_binary(), "opencode");
+        assert_eq!(AiTool::ClaudeCode.default_binary(), "claude");
+        assert_eq!(AiTool::GeminiCli.default_binary(), "gemini");
+        assert_eq!(AiTool::CodexCli.default_binary(), "codex");
+    }
+
+    #[test]
+    fn ai_action_tool_binary_and_tool_args_deserialize_correctly() {
+        let toml_str = r#"
+            id = "clean"
+            name = "Clean"
+            type = "ai"
+            tool = "claude-code"
+            model = "haiku"
+            tool_binary = "/custom/path"
+            tool_args = ["--flag", "value"]
+
+            [[inputs]]
+            role = "user"
+            source = "transcription"
+        "#;
+        let action = parse_action(toml_str).unwrap();
+        match &action.details {
+            ActionDetails::Ai {
+                tool_binary,
+                tool_args,
+                ..
+            } => {
+                assert_eq!(
+                    tool_binary.as_deref(),
+                    Some("/custom/path"),
+                    "tool_binary should be /custom/path"
+                );
+                assert_eq!(
+                    tool_args.as_deref(),
+                    Some(&["--flag".to_string(), "value".to_string()][..]),
+                    "tool_args should be [\"--flag\", \"value\"]"
+                );
+            }
+            _ => panic!("expected Ai variant"),
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
     // 1.1.18 — get_action lookup
     // ═══════════════════════════════════════════════════════════════════
 
