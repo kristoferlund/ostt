@@ -440,7 +440,7 @@ impl OsttTui {
         let actions_ref = actions.to_vec();
         self.terminal.draw(|frame| {
             let area = frame.area();
-            render_picker_frame(frame, area, &actions_ref, list_state);
+            render_picker_frame(frame, area, &actions_ref, list_state, None);
         })?;
 
         // Poll for input with 50ms timeout

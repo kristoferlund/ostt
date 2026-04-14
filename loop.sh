@@ -8,8 +8,18 @@ set -euo pipefail
 #   ./loop.sh <prompt-file> [max-iterations]
 #
 # Examples:
-#   ./loop.sh PROMPT.md        # Run until interrupted
-#   ./loop.sh PROMPT.md 5      # Run at most 5 iterations
+#   ./loop.sh prompt.md        # Run until interrupted
+#   ./loop.sh prompt.md 5      # Run at most 5 iterations
+# ---------------------------------------------------------------------------
+
+# --- Agent configuration ---------------------------------------------------
+# Uncomment ONE of the following lines to select your AI coding agent.
+# Customize flags as needed.
+
+LOOP_CMD="opencode run --model anthropic/claude-opus-4-6"
+# LOOP_CMD="claude -p --dangerously-skip-permissions --output-format=stream-json --model opus --verbose"
+# LOOP_CMD="codex --quiet --model o4-mini"
+
 # ---------------------------------------------------------------------------
 
 if [ $# -lt 1 ]; then
@@ -30,6 +40,7 @@ fi
 # Header
 echo ""
 echo "  prompt   $PROMPT_FILE"
+echo "  agent    $LOOP_CMD"
 echo "  branch   $BRANCH"
 if [ "$MAX_ITERATIONS" -gt 0 ] 2>/dev/null; then
   echo "  limit    $MAX_ITERATIONS"
@@ -54,7 +65,7 @@ while true; do
   fi
   echo ""
 
-  cat "$PROMPT_FILE" | opencode run --model anthropic/claude-opus-4-6
+  cat "$PROMPT_FILE" | $LOOP_CMD
 
   git push origin "$BRANCH" 2>/dev/null || git push -u origin "$BRANCH"
 

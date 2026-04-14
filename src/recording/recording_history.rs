@@ -22,7 +22,7 @@ impl RecordingHistory {
     }
 
     /// Cleans up old recordings to keep only the 10 most recent.
-    /// 
+    ///
     /// Should be called before saving a new recording.
     pub fn cleanup_old_recordings(&self) -> Result<()> {
         let mut recordings = self.list_recording_files()?;
@@ -32,7 +32,7 @@ impl RecordingHistory {
             // Sort by filename (which includes timestamp, so older files come first)
             recordings.sort();
             let oldest = &recordings[0];
-            
+
             if let Err(e) = fs::remove_file(oldest) {
                 tracing::warn!("Failed to delete old recording: {}", e);
             } else {
@@ -58,7 +58,7 @@ impl RecordingHistory {
                 }
             })
             .collect();
-        
+
         recordings.sort();
         Ok(recordings)
     }

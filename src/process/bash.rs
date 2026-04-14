@@ -23,6 +23,8 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
 
     const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 
+    tracing::debug!("Executing bash command: {}", command);
+
     // Spawn `sh -c <command>` with stdin piped and stdout/stderr captured
     let mut child = Command::new("sh")
         .arg("-c")
@@ -32,6 +34,7 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
         .stderr(std::process::Stdio::piped())
         .spawn()
         .map_err(|e| {
+            tracing::error!("Bash command failed to start: {e}");
             anyhow::anyhow!(
                 "Command failed to start: {e}. Make sure the command is installed."
             )
@@ -45,7 +48,10 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
     // Wait for the child to complete with timeout
     let output = timeout(COMMAND_TIMEOUT, child.wait_with_output())
         .await
-        .map_err(|_| anyhow::anyhow!("Command timed out after 30 seconds"))?
+        .map_err(|_| {
+            tracing::error!("Bash command timed out after 30 seconds: {}", command);
+            anyhow::anyhow!("Command timed out after 30 seconds")
+        })?
         .map_err(|e| anyhow::anyhow!("Failed to wait for command: {e}"))?;
 
     // Check exit status
@@ -53,16 +59,19 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
         let stderr = String::from_utf8_lossy(&output.stderr);
         let code = output.status.code().unwrap_or(-1);
         if code == 127 {
+            tracing::error!("Bash command not found: {}", command);
             anyhow::bail!(
                 "Command not found. Make sure the command is installed.\nShell output: {}",
                 stderr.trim()
             );
         }
+        tracing::error!("Bash command exited with status {}: {}", code, stderr.trim());
         anyhow::bail!("Command exited with status {code}:\n{}", stderr.trim());
     }
 
     // Return trimmed stdout on success
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    tracing::debug!("Bash command completed successfully ({} bytes)", stdout.len());
     Ok(stdout)
 }
 

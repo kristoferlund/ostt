@@ -288,6 +288,12 @@ impl AiTool {
                     system_prompt.to_string(),
                     "--model".to_string(),
                     model.to_string(),
+                    "--no-session-persistence".to_string(),
+                    "--mcp-config".to_string(),
+                    r#"{"mcpServers":{}}"#.to_string(),
+                    "--strict-mcp-config".to_string(),
+                    "--allowedTools".to_string(),
+                    String::new(),
                 ]
             }
             AiTool::GeminiCli => {

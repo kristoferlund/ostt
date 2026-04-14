@@ -2,7 +2,7 @@
 //!
 //! Displays audio energy distribution across frequency bands in the human voice range.
 
-use rustfft::{FftPlanner, num_complex::Complex};
+use rustfft::{num_complex::Complex, FftPlanner};
 
 /// Stateful spectrum analyzer with internal FFT planner.
 pub struct SpectrumAnalyzer {
@@ -38,7 +38,13 @@ impl SpectrumAnalyzer {
     }
 
     /// Resizes the analyzer for a new terminal width.
-    pub fn resize(&mut self, new_width: usize, samples: &[i16], sample_rate: u32, reference_level_db: i8) {
+    pub fn resize(
+        &mut self,
+        new_width: usize,
+        samples: &[i16],
+        sample_rate: u32,
+        reference_level_db: i8,
+    ) {
         self.num_bins = new_width;
         if !samples.is_empty() {
             self.display_data = calculate_spectrum(
@@ -91,8 +97,8 @@ pub fn calculate_spectrum(
         .iter()
         .enumerate()
         .map(|(i, &s)| {
-            let window = 0.5
-                * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / sample_count as f32).cos());
+            let window =
+                0.5 * (1.0 - (2.0 * std::f32::consts::PI * i as f32 / sample_count as f32).cos());
             Complex::new(s as f32 * window / 32768.0, 0.0)
         })
         .collect();
@@ -118,8 +124,7 @@ pub fn calculate_spectrum(
     let mut result = vec![0u64; num_bins];
 
     for (display_idx, result_bin) in result.iter_mut().enumerate() {
-        let start_bin =
-            min_bin + ((display_idx * useful_bins) as f32 / num_bins as f32) as usize;
+        let start_bin = min_bin + ((display_idx * useful_bins) as f32 / num_bins as f32) as usize;
         let end_bin = (min_bin
             + (((display_idx + 1) * useful_bins) as f32 / num_bins as f32) as usize)
             .min(max_bin)

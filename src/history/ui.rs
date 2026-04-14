@@ -24,6 +24,7 @@ const FG: Color = Color::Rgb(255, 255, 255);
 const TIMESTAMP_FG: Color = Color::Rgb(100, 100, 100);
 const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
 const HELP_FG: Color = Color::Rgb(100, 100, 100);
+const HOVER_BG: Color = Color::Rgb(10, 10, 10);
 
 /// Interactive history viewer for transcription entries.
 pub struct HistoryViewer {
@@ -33,6 +34,8 @@ pub struct HistoryViewer {
     notification: Option<(String, Instant)>,
     pending_click: Option<(usize, Instant)>,
     cleaned_up: bool,
+    hovered_index: Option<usize>,
+    list_area: Rect,
 }
 
 impl HistoryViewer {
@@ -57,6 +60,8 @@ impl HistoryViewer {
             notification: None,
             pending_click: None,
             cleaned_up: false,
+            hovered_index: None,
+            list_area: Rect::default(),
         })
     }
 
@@ -162,6 +167,22 @@ impl HistoryViewer {
                     tracing::debug!("Item clicked, showing selection feedback");
                 }
             }
+            MouseEventKind::Moved => {
+                let inner_top = self.list_area.y + 1; // top border
+                let inner_bottom = self.list_area.y + self.list_area.height.saturating_sub(1); // bottom border
+                if mouse.row < inner_top || mouse.row >= inner_bottom {
+                    self.hovered_index = None;
+                } else {
+                    let relative_y = mouse.row - inner_top;
+                    let visible_index = relative_y as usize / 2; // history items are 2 lines tall
+                    let actual_index = visible_index + self.list_state.offset();
+                    if actual_index < self.entries.len() {
+                        self.hovered_index = Some(actual_index);
+                    } else {
+                        self.hovered_index = None;
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -169,6 +190,8 @@ impl HistoryViewer {
     /// Renders the current state of the history viewer.
     fn draw(&mut self) -> Result<()> {
         let notification = self.notification.clone();
+        let hovered_index = self.hovered_index;
+        let selected_index = self.list_state.selected();
 
         self.terminal.draw(|frame| {
             let area = frame.area();
@@ -191,6 +214,9 @@ impl HistoryViewer {
             ])
             .areas(inner_area);
 
+            // Store list_area for mouse hit-testing
+            self.list_area = list_area;
+
             // Render ostt logo header
             let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
                 .style(Style::default().fg(FG))
@@ -201,13 +227,18 @@ impl HistoryViewer {
             let items: Vec<ListItem> = self
                 .entries
                 .iter()
-                .map(|entry| {
+                .enumerate()
+                .map(|(i, entry)| {
                     let timestamp = Line::styled(
                         entry.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
                         Style::default().fg(TIMESTAMP_FG),
                     );
                     let text = Line::styled(entry.text.clone(), Style::default().fg(FG));
-                    ListItem::new(vec![timestamp, text])
+                    let mut item = ListItem::new(vec![timestamp, text]);
+                    if Some(i) == hovered_index && Some(i) != selected_index {
+                        item = item.style(Style::default().bg(HOVER_BG));
+                    }
+                    item
                 })
                 .collect();
 

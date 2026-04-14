@@ -22,6 +22,7 @@ const BG: Color = Color::Rgb(0, 0, 0);
 const FG: Color = Color::Rgb(255, 255, 255);
 const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
 const HELP_FG: Color = Color::Rgb(100, 100, 100);
+const HOVER_BG: Color = Color::Rgb(10, 10, 10);
 
 /// Renders the action picker UI into the given frame area.
 ///
@@ -32,7 +33,8 @@ pub fn render_picker_frame(
     area: Rect,
     actions: &[ProcessAction],
     list_state: &mut ListState,
-) {
+    hovered_index: Option<usize>,
+) -> Rect {
     let padding_block = Block::default()
         .padding(Padding::uniform(1))
         .style(Style::default().bg(BG));
@@ -58,9 +60,17 @@ pub fn render_picker_frame(
     frame.render_widget(header, header_area);
 
     // Build list items from action names
+    let selected_index = list_state.selected();
     let items: Vec<ListItem> = actions
         .iter()
-        .map(|action| ListItem::new(action.name.clone()))
+        .enumerate()
+        .map(|(i, action)| {
+            let mut item = ListItem::new(action.name.clone());
+            if Some(i) == hovered_index && Some(i) != selected_index {
+                item = item.style(Style::default().bg(HOVER_BG));
+            }
+            item
+        })
         .collect();
 
     // Render list with title
@@ -82,6 +92,8 @@ pub fn render_picker_frame(
         .alignment(Alignment::Center)
         .style(Style::default().fg(HELP_FG));
     frame.render_widget(help_paragraph, footer_area);
+
+    list_area
 }
 
 /// Result of the action picker interaction.
@@ -98,6 +110,8 @@ struct ActionPicker {
     actions: Vec<ProcessAction>,
     list_state: ListState,
     cleaned_up: bool,
+    hovered_index: Option<usize>,
+    list_area: Rect,
 }
 
 impl ActionPicker {
@@ -121,6 +135,8 @@ impl ActionPicker {
             actions,
             list_state,
             cleaned_up: false,
+            hovered_index: None,
+            list_area: Rect::default(),
         })
     }
 
@@ -128,10 +144,15 @@ impl ActionPicker {
     fn draw(&mut self) -> Result<()> {
         let actions = &self.actions;
         let list_state = &mut self.list_state;
+        let hovered_index = self.hovered_index;
+        let mut computed_list_area = Rect::default();
         self.terminal.draw(|frame| {
             let area = frame.area();
-            render_picker_frame(frame, area, actions, list_state);
+            computed_list_area =
+                render_picker_frame(frame, area, actions, list_state, hovered_index);
         })?;
+
+        self.list_area = computed_list_area;
 
         Ok(())
     }
@@ -166,8 +187,14 @@ impl ActionPicker {
                 Event::Key(key) => {
                     if let Some(action) = self.handle_key(key) {
                         match action {
-                            PickerAction::Exit => break PickerResult::Cancelled,
-                            PickerAction::Select(id) => break PickerResult::Selected(id),
+                            PickerAction::Exit => {
+                                tracing::info!("Action picker cancelled by user");
+                                break PickerResult::Cancelled;
+                            }
+                            PickerAction::Select(id) => {
+                                tracing::info!("User selected action '{}'", id);
+                                break PickerResult::Selected(id);
+                            }
                         }
                     }
                 }
@@ -177,6 +204,23 @@ impl ActionPicker {
                     }
                     MouseEventKind::ScrollDown => {
                         self.list_state.select_next();
+                    }
+                    MouseEventKind::Moved => {
+                        let inner_top = self.list_area.y + 1; // top border
+                        let inner_bottom =
+                            self.list_area.y + self.list_area.height.saturating_sub(1); // bottom border
+                        if mouse.row < inner_top || mouse.row >= inner_bottom {
+                            self.hovered_index = None;
+                        } else {
+                            let relative_y = mouse.row - inner_top;
+                            let visible_index = relative_y as usize; // picker items are 1 line tall
+                            let actual_index = visible_index + self.list_state.offset();
+                            if actual_index < self.actions.len() {
+                                self.hovered_index = Some(actual_index);
+                            } else {
+                                self.hovered_index = None;
+                            }
+                        }
                     }
                     _ => {}
                 },
@@ -248,6 +292,10 @@ pub fn show_action_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
     }
 
     if actions.len() == 1 {
+        tracing::debug!(
+            "Single action configured, auto-selecting '{}'",
+            actions[0].id
+        );
         return Ok(PickerResult::Selected(actions[0].id.clone()));
     }
 

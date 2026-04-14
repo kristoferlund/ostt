@@ -84,9 +84,11 @@ Verification commands for this project (Rust):
 
 ### Important Rules for Plan Generation
 
-- Do NOT start implementing. Only produce the plan.
+- Do NOT start implementing. Only produce the plan and the prompt file.
 - Do NOT modify any files in the target codebase.
-- The only file you create is PLAN.md in the spec files folder.
+- Create exactly TWO files:
+  1. `PLAN.md` in the spec files folder (the full plan including the session prompt template)
+  2. `prompt.md` in the target codebase root (just the session prompt content, ready to use with `./loop.sh prompt.md` — no markdown fences, no extra text, just the raw prompt that will be piped to the AI agent)
 - If a spec has items explicitly marked as "deferred" to a later phase, exclude those tasks from the plan but note the deferral.
 - If a spec's acceptance criteria are vague, decompose conservatively — fewer tasks that are clearly defined is better than many ambiguous ones.
 - Task IDs should match spec numbers (spec 1.3 → tasks 1.3.1, 1.3.2, etc.).
@@ -97,5 +99,6 @@ Verification commands for this project (Rust):
 ## After Running the Prompt
 
 1. Review the generated PLAN.md — check that dependencies make sense, task granularity is right, and the session prompt paths are correct.
-2. To start implementation, open a new agent session in the target codebase directory and paste the session prompt template from PLAN.md.
-3. Each session does one section/sub-section (at most 10 tasks), commits, and stops. Repeat until all tasks are checked off.
+2. Verify that `prompt.md` was created in the project root (it should contain the raw session prompt, ready to use).
+3. Run the loop: `./loop.sh prompt.md`
+4. Each session does one section/sub-section (at most 10 tasks), commits, and stops. Repeat until all tasks are checked off.

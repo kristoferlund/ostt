@@ -34,7 +34,17 @@ pub async fn execute_action(
     transcription: &str,
     keywords: &[String],
 ) -> anyhow::Result<String> {
-    match &action.details {
+    let action_type = match &action.details {
+        ActionDetails::Bash { .. } => "bash",
+        ActionDetails::Ai { .. } => "ai",
+    };
+    tracing::info!(
+        "Dispatching action '{}' (type: {})",
+        action.id,
+        action_type
+    );
+
+    let result = match &action.details {
         ActionDetails::Bash { command } => {
             super::bash::execute_bash_action(command, transcription).await
         }
@@ -55,7 +65,22 @@ pub async fn execute_action(
             )
             .await
         }
+    };
+
+    match &result {
+        Ok(output) => {
+            tracing::info!(
+                "Action '{}' completed successfully ({} bytes)",
+                action.id,
+                output.len()
+            );
+        }
+        Err(e) => {
+            tracing::error!("Action '{}' failed: {}", action.id, e);
+        }
     }
+
+    result
 }
 
 /// Drop-based cleanup guard that ensures the terminal is restored even on
@@ -175,8 +200,14 @@ pub async fn execute_action_with_animation(
 
     match task_handle.await {
         Ok(Ok(result)) => Ok(Some(result)),
-        Ok(Err(e)) => Err(e),
-        Err(e) => Err(anyhow::anyhow!("Processing task failed: {e}")),
+        Ok(Err(e)) => {
+            tracing::error!("Processing action failed: {}", e);
+            Err(e)
+        }
+        Err(e) => {
+            tracing::error!("Processing task panicked: {}", e);
+            Err(anyhow::anyhow!("Processing task failed: {e}"))
+        }
     }
 }
 

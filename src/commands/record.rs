@@ -8,10 +8,11 @@ use crate::config;
 use crate::history::HistoryManager;
 use crate::keywords::KeywordsManager;
 use crate::process;
-use crate::recording::{AudioRecorder, OsttTui, RecordingCommand, RecordingHistory};
+use crate::recording::{AudioRecorder, OsttTui, PickerEvent, RecordingCommand, RecordingHistory};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::ErrorScreen;
 use dirs;
+use ratatui::widgets::ListState;
 use std::fs;
 
 /// Handles audio recording and optional transcription.
@@ -72,8 +73,10 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
 
     let term = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let term_clone = term.clone();
-    signal_hook::flag::register(signal_hook::consts::SIGUSR1, term_clone)
-        .map_err(|e| anyhow::anyhow!("Failed to register signal handler: {e}"))?;
+    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGUSR1, term_clone) {
+        tui.cleanup().ok();
+        return Err(anyhow::anyhow!("Failed to register signal handler: {e}"));
+    }
 
     tracing::debug!(
         "Entering recording loop. Press 'Enter' to transcribe or 'Escape'/'q' to cancel."
@@ -98,8 +101,10 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                 }
 
                 let samples = audio_recorder.get_samples();
-                tui.render_waveform(&samples)
-                    .map_err(|e| anyhow::anyhow!("Render failed: {e}"))?;
+                if let Err(e) = tui.render_waveform(&samples) {
+                    tui.cleanup().ok();
+                    return Err(anyhow::anyhow!("Render failed: {e}"));
+                }
             }
             Ok(RecordingCommand::Transcribe) => {
                 should_transcribe = true;
@@ -112,11 +117,14 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                 audio_recorder.toggle_pause();
                 tui.is_paused = audio_recorder.is_paused();
                 let samples = audio_recorder.get_samples();
-                tui.render_waveform(&samples)
-                    .map_err(|e| anyhow::anyhow!("Render failed: {e}"))?;
+                if let Err(e) = tui.render_waveform(&samples) {
+                    tui.cleanup().ok();
+                    return Err(anyhow::anyhow!("Render failed: {e}"));
+                }
             }
             Err(e) => {
                 tracing::error!("Input handling error: {}", e);
+                tui.cleanup().ok();
                 return Err(anyhow::anyhow!("Input handling error: {e}"));
             }
         }
@@ -139,25 +147,29 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
     };
 
     // Prepare data directory for recordings
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
+    let data_dir = match dirs::home_dir() {
+        Some(home) => home.join(".local").join("share").join("ostt"),
+        None => {
+            tui.cleanup().ok();
+            return Err(anyhow::anyhow!("Could not determine home directory"));
+        }
+    };
 
     // Save to persistent recordings directory with timestamp
     let recordings_dir = data_dir.join("recordings");
-    fs::create_dir_all(&recordings_dir)?;
+    if let Err(e) = fs::create_dir_all(&recordings_dir) {
+        tui.cleanup().ok();
+        return Err(e.into());
+    }
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
     let filename = format!("ostt-recording-{timestamp}.{extension}");
     let filepath = recordings_dir.join(&filename);
 
-    audio_recorder
-        .stop_recording(Some(filepath.clone()), &config_data.audio.output_format)
-        .map_err(|e| {
-            tracing::error!("Failed to save recording: {}", e);
-            e
-        })?;
+    if let Err(e) = audio_recorder.stop_recording(Some(filepath.clone()), &config_data.audio.output_format) {
+        tracing::error!("Failed to save recording: {}", e);
+        tui.cleanup().ok();
+        return Err(e);
+    }
 
     tracing::info!(
         "Recording saved to: {}",
@@ -211,52 +223,125 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
             Some("") => {
                 // Show action picker
                 if config_data.process.actions.is_empty() {
+                    tui.cleanup().ok();
                     return Err(anyhow::anyhow!(
                         "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
                     ));
                 }
 
-                match process::picker::show_action_picker(&config_data.process.actions)? {
-                    process::picker::PickerResult::Selected(selected_id) => {
+                // Single-action shortcut: skip picker if only one action
+                let selected_id = if config_data.process.actions.len() == 1 {
+                    Some(config_data.process.actions[0].id.clone())
+                } else {
+                    // Render picker through OsttTui
+                    let mut list_state = ListState::default();
+                    list_state.select(Some(0));
+                    loop {
+                        match tui.render_action_picker(&config_data.process.actions, &mut list_state)
+                            .map_err(|e| anyhow::anyhow!("{e}"))?
+                        {
+                            Some(PickerEvent::Selected(id)) => break Some(id),
+                            Some(PickerEvent::Cancelled) => break None,
+                            None => continue,
+                        }
+                    }
+                };
+
+                match selected_id {
+                    Some(selected_id) => {
                         let action = config_data
                             .process
                             .get_action(&selected_id)
                             .expect("Picker returned an ID not in config")
                             .clone();
 
-                        let config_dir = dirs::config_dir()
-                            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
-                        let keywords_manager = KeywordsManager::new(&config_dir)?;
-                        let keywords = keywords_manager.load_keywords()?;
-
-                        match process::execute_action_with_animation(&action, &text, &keywords)
-                            .await?
-                        {
-                            Some(result) => {
-                                let data_dir = dirs::home_dir()
-                                    .ok_or_else(|| {
-                                        anyhow::anyhow!("Could not determine home directory")
-                                    })?
-                                    .join(".local")
-                                    .join("share")
-                                    .join("ostt");
-                                let mut history_manager = HistoryManager::new(&data_dir)?;
-                                if let Err(e) = history_manager.save_transcription(&result) {
-                                    tracing::warn!(
-                                        "Failed to save processed result to history: {}",
-                                        e
-                                    );
-                                }
-
-                                result
-                            }
+                        let config_dir = match dirs::config_dir() {
+                            Some(dir) => dir,
                             None => {
-                                // Cancelled — fall through to output raw transcription
-                                text
+                                tui.cleanup().ok();
+                                return Err(anyhow::anyhow!("Could not determine config directory"));
+                            }
+                        };
+                        let keywords_manager = match KeywordsManager::new(&config_dir) {
+                            Ok(km) => km,
+                            Err(e) => {
+                                tui.cleanup().ok();
+                                return Err(e);
+                            }
+                        };
+                        let keywords = match keywords_manager.load_keywords() {
+                            Ok(kw) => kw,
+                            Err(e) => {
+                                tui.cleanup().ok();
+                                return Err(e);
+                            }
+                        };
+
+                        // Inline processing animation through OsttTui
+                        let mut animation = TranscriptionAnimation::new(80);
+                        animation.set_status_label("Processing...");
+
+                        let action_clone = action.clone();
+                        let text_clone = text.clone();
+                        let keywords_clone = keywords.clone();
+                        let task_handle = tokio::spawn(async move {
+                            process::execute_action(&action_clone, &text_clone, &keywords_clone).await
+                        });
+
+                        let mut cancelled = false;
+                        loop {
+                            if let Err(e) = tui.render_transcription_animation(&mut animation) {
+                                tracing::warn!("Failed to render animation: {}", e);
+                            }
+
+                            if task_handle.is_finished() {
+                                break;
+                            }
+
+                            if crossterm::event::poll(std::time::Duration::from_millis(0))
+                                .unwrap_or(false)
+                            {
+                                if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                                    match key.code {
+                                        crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {
+                                            tracing::info!("Processing cancelled by user");
+                                            task_handle.abort();
+                                            cancelled = true;
+                                            break;
+                                        }
+                                        crossterm::event::KeyCode::Char('c')
+                                            if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                                        {
+                                            tracing::info!("Processing cancelled by user (Ctrl+C)");
+                                            task_handle.abort();
+                                            cancelled = true;
+                                            break;
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+
+                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        }
+
+                        if cancelled {
+                            text
+                        } else {
+                            match task_handle.await {
+                                Ok(Ok(result)) => result,
+                                Ok(Err(e)) => {
+                                    tui.cleanup().ok();
+                                    return Err(e);
+                                }
+                                Err(e) => {
+                                    tui.cleanup().ok();
+                                    return Err(anyhow::anyhow!("Processing task failed: {e}"));
+                                }
                             }
                         }
                     }
-                    process::picker::PickerResult::Cancelled => {
+                    None => {
                         // Cancelled — fall through to output raw transcription
                         text
                     }
@@ -264,43 +349,99 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
             }
             Some(id) => {
                 // Look up action by ID
-                let action = config_data
-                    .process
-                    .get_action(id)
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
-                        )
-                    })?
-                    .clone();
-
-                let config_dir = dirs::config_dir()
-                    .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
-                let keywords_manager = KeywordsManager::new(&config_dir)?;
-                let keywords = keywords_manager.load_keywords()?;
-
-                match process::execute_action_with_animation(&action, &text, &keywords).await? {
-                    Some(result) => {
-                        let data_dir = dirs::home_dir()
-                            .ok_or_else(|| {
-                                anyhow::anyhow!("Could not determine home directory")
-                            })?
-                            .join(".local")
-                            .join("share")
-                            .join("ostt");
-                        let mut history_manager = HistoryManager::new(&data_dir)?;
-                        if let Err(e) = history_manager.save_transcription(&result) {
-                            tracing::warn!(
-                                "Failed to save processed result to history: {}",
-                                e
-                            );
-                        }
-
-                        result
-                    }
+                let action = match config_data.process.get_action(id) {
+                    Some(a) => a.clone(),
                     None => {
-                        // Cancelled — fall through to output raw transcription
-                        text
+                        tui.cleanup().ok();
+                        return Err(anyhow::anyhow!(
+                            "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
+                        ));
+                    }
+                };
+
+                let config_dir = match dirs::config_dir() {
+                    Some(dir) => dir,
+                    None => {
+                        tui.cleanup().ok();
+                        return Err(anyhow::anyhow!("Could not determine config directory"));
+                    }
+                };
+                let keywords_manager = match KeywordsManager::new(&config_dir) {
+                    Ok(km) => km,
+                    Err(e) => {
+                        tui.cleanup().ok();
+                        return Err(e);
+                    }
+                };
+                let keywords = match keywords_manager.load_keywords() {
+                    Ok(kw) => kw,
+                    Err(e) => {
+                        tui.cleanup().ok();
+                        return Err(e);
+                    }
+                };
+
+                // Inline processing animation through OsttTui
+                let mut animation = TranscriptionAnimation::new(80);
+                animation.set_status_label("Processing...");
+
+                let action_clone = action.clone();
+                let text_clone = text.clone();
+                let keywords_clone = keywords.clone();
+                let task_handle = tokio::spawn(async move {
+                    process::execute_action(&action_clone, &text_clone, &keywords_clone).await
+                });
+
+                let mut cancelled = false;
+                loop {
+                    if let Err(e) = tui.render_transcription_animation(&mut animation) {
+                        tracing::warn!("Failed to render animation: {}", e);
+                    }
+
+                    if task_handle.is_finished() {
+                        break;
+                    }
+
+                    if crossterm::event::poll(std::time::Duration::from_millis(0))
+                        .unwrap_or(false)
+                    {
+                        if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                            match key.code {
+                                crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {
+                                    tracing::info!("Processing cancelled by user");
+                                    task_handle.abort();
+                                    cancelled = true;
+                                    break;
+                                }
+                                crossterm::event::KeyCode::Char('c')
+                                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                                {
+                                    tracing::info!("Processing cancelled by user (Ctrl+C)");
+                                    task_handle.abort();
+                                    cancelled = true;
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+
+                if cancelled {
+                    text
+                } else {
+                    match task_handle.await {
+                        Ok(Ok(result)) => result,
+                        Ok(Err(e)) => {
+                            tui.cleanup().ok();
+                            return Err(e);
+                        }
+                        Err(e) => {
+                            tui.cleanup().ok();
+                            return Err(anyhow::anyhow!("Processing task failed: {e}"));
+                        }
                     }
                 }
             }

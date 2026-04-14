@@ -57,8 +57,11 @@ pub fn resolve_inputs(
             },
             InputContent::File { file } => {
                 let path = expand_tilde(file);
-                let content = fs::read_to_string(&path)
-                    .with_context(|| format!("failed to read input file: {}", path.display()))?;
+                tracing::debug!("Reading input file: {}", path.display());
+                let content = fs::read_to_string(&path).with_context(|| {
+                    tracing::error!("Failed to read input file: {}", path.display());
+                    format!("failed to read input file: {}", path.display())
+                })?;
                 messages.push(ResolvedMessage {
                     role: input.role.clone(),
                     content,
@@ -66,6 +69,16 @@ pub fn resolve_inputs(
             }
         }
     }
+
+    tracing::debug!(
+        "Resolved {} input(s): {}",
+        messages.len(),
+        messages
+            .iter()
+            .map(|m| format!("{:?}", m.role))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
 
     Ok(messages)
 }

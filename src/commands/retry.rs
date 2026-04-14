@@ -149,18 +149,7 @@ pub async fn handle_retry(
                                 )
                                 .await?
                                 {
-                                    Some(result) => {
-                                        if let Err(e) =
-                                            history_manager.save_transcription(&result)
-                                        {
-                                            tracing::warn!(
-                                                "Failed to save processed result to history: {}",
-                                                e
-                                            );
-                                        }
-
-                                        result
-                                    }
+                                    Some(result) => result,
                                     None => {
                                         // Cancelled — fall through to output raw transcription
                                         trimmed_text
@@ -192,16 +181,7 @@ pub async fn handle_retry(
                         )
                         .await?
                         {
-                            Some(result) => {
-                                if let Err(e) = history_manager.save_transcription(&result) {
-                                    tracing::warn!(
-                                        "Failed to save processed result to history: {}",
-                                        e
-                                    );
-                                }
-
-                                result
-                            }
+                            Some(result) => result,
                             None => {
                                 // Cancelled — fall through to output raw transcription
                                 trimmed_text

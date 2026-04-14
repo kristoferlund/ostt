@@ -142,16 +142,7 @@ pub async fn handle_transcribe(
                     )
                     .await?
                     {
-                        Some(result) => {
-                            if let Err(e) = history_manager.save_transcription(&result) {
-                                tracing::warn!(
-                                    "Failed to save processed result to history: {}",
-                                    e
-                                );
-                            }
-
-                            result
-                        }
+                        Some(result) => result,
                         None => {
                             // Cancelled — fall through to output raw transcription
                             trimmed_text
@@ -189,13 +180,7 @@ pub async fn handle_transcribe(
             match process::execute_action_with_animation(&action, &trimmed_text, &keywords)
                 .await?
             {
-                Some(result) => {
-                    if let Err(e) = history_manager.save_transcription(&result) {
-                        tracing::warn!("Failed to save processed result to history: {}", e);
-                    }
-
-                    result
-                }
+                Some(result) => result,
                 None => {
                     // Cancelled — fall through to output raw transcription
                     trimmed_text

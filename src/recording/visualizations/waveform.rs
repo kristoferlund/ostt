@@ -12,7 +12,7 @@
 /// * `max_width` - Maximum width of display (terminal width)
 pub fn update_waveform(history: &mut Vec<u64>, current_volume: u8, max_width: usize) {
     history.push(current_volume as u64);
-    
+
     if history.len() > max_width {
         history.remove(0);
     }

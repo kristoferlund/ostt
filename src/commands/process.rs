@@ -97,6 +97,8 @@ pub async fn handle_process(
         }
     };
 
+    tracing::info!("Executing action '{}' on transcription #{}", action.id, n);
+
     // Load keywords
     let config_dir = dirs::config_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
@@ -114,11 +116,6 @@ pub async fn handle_process(
                 return Ok(());
             }
         };
-
-    // Save processed result to history
-    if let Err(e) = history_manager.save_transcription(&result) {
-        tracing::warn!("Failed to save processed result to history: {}", e);
-    }
 
     // Output: file > clipboard > stdout
     if let Some(file_path) = output_file {
@@ -145,5 +142,6 @@ pub async fn handle_process(
         tracing::debug!("Processed result printed to stdout");
     }
 
+    tracing::info!("=== ostt Process Command Completed ===");
     Ok(())
 }
