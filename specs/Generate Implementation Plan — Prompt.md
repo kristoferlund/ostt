@@ -46,11 +46,11 @@ Write PLAN.md with the following structure:
 
 ### Tasks
 - One section per spec, in execution order (not necessarily spec number order)
-- IMPORTANT: Each section can have at most 10 tasks. If a spec has more than 10 tasks, create sub-sections for that spec.
-- Each section contains a checklist of atomic tasks with `- [ ]` checkboxes
+- IMPORTANT: Each section (or sub-section) can have AT MOST 10 tasks. If a spec has more than 10 tasks, split it into sub-sections (e.g., 2.1.A, 2.1.B, 2.1.C). Each sub-section is the unit of work for one session — the agent completes one sub-section, commits, and stops.
+- Each section/sub-section contains a checklist of atomic tasks with `- [ ]` checkboxes
 - Each task has a bold ID (e.g., **1.4.1**) and a concise description
 - Specs that depend on others have a "Depends on: X.X" note
-- Verification tasks (cargo check, cargo test, cargo clippy, etc.) are the last items in each section
+- Verification tasks (cargo check, cargo test, cargo clippy, etc.) are the last items in each section/sub-section
 
 ### Verification Protocol
 - What commands to run after each spec is complete
@@ -58,21 +58,21 @@ Write PLAN.md with the following structure:
 
 ### Session Boundaries
 Explain:
-- Each session works on ONE spec group only, then stops
+- The unit of work per session is ONE section or sub-section (at most 10 tasks). If a spec was split into sub-sections (e.g., 2.1.A, 2.1.B), each sub-section is a separate session. The agent completes one, commits, and stops.
 - When to stop early (repeated verification failure)
 - The agent must git commit before stopping every time
 
 ### Session Prompt Template
 Include a ready-to-paste prompt block that future sessions will use. The prompt must:
 - Reference PLAN.md, SESSION.md and the spec files folder by absolute path
-- Tell the agent to read the plan, find the next incomplete spec group, read its spec file
+- Tell the agent to read the plan, find the next incomplete section or sub-section (the first one with unchecked tasks), read its spec file
 - Tell the agent to study the relevant source files in the target codebase
 - Tell the agent to read the notes from previous sessions
 - Tell the agent to implement tasks in order, running verification after each
 - Tell the agent to mark tasks complete in PLAN.md as it goes
 - Tell the agent to git commit all changes before stopping
-- Tell the agent to STOP after one spec group — do not continue to the next
-- Include rules: no skipping tasks, no reordering
+- Tell the agent to STOP after one section/sub-section (at most 10 tasks) — do NOT continue to the next
+- Include rules: no skipping tasks, no reordering, SCOPE is one section/sub-section only
 - Include the failure protocol: if verification fails twice, mark task with [!], commit partial work, stop
 - Restrict file modifications to the target codebase, PLAN.md, and SESSION.md only
 - Tell the agent to APPEND (not overwrite) a session summary to the end of SESSION.md (in the same directory as PLAN.md). Use heading `## Session N: Spec X.Y — <title>` (increment N). Include: what was accomplished, obstacles encountered, out-of-scope observations.
@@ -98,4 +98,4 @@ Verification commands for this project (Rust):
 
 1. Review the generated PLAN.md — check that dependencies make sense, task granularity is right, and the session prompt paths are correct.
 2. To start implementation, open a new agent session in the target codebase directory and paste the session prompt template from PLAN.md.
-3. Each session does one spec, commits, and stops. Repeat until all tasks are checked off.
+3. Each session does one section/sub-section (at most 10 tasks), commits, and stops. Repeat until all tasks are checked off.
