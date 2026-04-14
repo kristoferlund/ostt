@@ -249,6 +249,28 @@ pub struct ActionInput {
     pub input_content: InputContent,
 }
 
+/// Supported AI CLI tools for executing AI actions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AiTool {
+    OpenCode,
+    ClaudeCode,
+    GeminiCli,
+    CodexCli,
+}
+
+impl AiTool {
+    /// Returns the standard binary name for this AI tool.
+    pub fn default_binary(&self) -> &'static str {
+        match self {
+            AiTool::OpenCode => "opencode",
+            AiTool::ClaudeCode => "claude",
+            AiTool::GeminiCli => "gemini",
+            AiTool::CodexCli => "codex",
+        }
+    }
+}
+
 /// Type-specific fields for a processing action.
 ///
 /// Uses `#[serde(tag = "type")]` so the TOML `type` field drives which variant
@@ -264,10 +286,20 @@ pub enum ActionDetails {
     },
     /// An AI chat completion action
     Ai {
+        /// Which CLI tool to invoke
+        tool: AiTool,
         /// Provider/model string (e.g. "openai/gpt-4o")
         model: String,
         /// Input messages for the LLM
         inputs: Vec<ActionInput>,
+        /// Override the binary path (e.g., "/usr/local/bin/claude" instead of "claude").
+        /// Defaults to the standard binary name for the selected tool.
+        #[serde(default)]
+        tool_binary: Option<String>,
+        /// Extra CLI arguments appended after the required ones.
+        /// Allows pro users to pass additional flags without modifying OSTT.
+        #[serde(default)]
+        tool_args: Option<Vec<String>>,
     },
 }
 
@@ -445,6 +477,7 @@ mod tests {
             id = "clean"
             name = "Clean transcript"
             type = "ai"
+            tool = "open-code"
             model = "openai/gpt-4o"
 
             [[inputs]]
@@ -459,7 +492,13 @@ mod tests {
         assert_eq!(action.id, "clean");
         assert_eq!(action.name, "Clean transcript");
         match &action.details {
-            ActionDetails::Ai { model, inputs } => {
+            ActionDetails::Ai {
+                tool,
+                model,
+                inputs,
+                ..
+            } => {
+                assert!(matches!(tool, AiTool::OpenCode));
                 assert_eq!(model, "openai/gpt-4o");
                 assert_eq!(inputs.len(), 2);
             }
@@ -480,6 +519,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
+            tool = "claude-code"
             model = "openai/gpt-4o"
 
             [[actions.inputs]]
@@ -639,6 +679,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
+            tool = "open-code"
 
             [[inputs]]
             role = "user"
@@ -653,6 +694,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
+            tool = "open-code"
             model = "openai/gpt-4o"
         "#;
         assert!(parse_action(toml_str).is_err());
@@ -664,6 +706,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
+            tool = "open-code"
         "#;
         assert!(parse_action(toml_str).is_err());
     }
@@ -716,6 +759,7 @@ mod tests {
             id = "clean"
             name = "Clean"
             type = "ai"
+            tool = "open-code"
             model = "openai/gpt-4o"
             inputs = []
         "#;

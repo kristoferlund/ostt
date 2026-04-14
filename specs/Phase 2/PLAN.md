@@ -35,15 +35,15 @@ Phase 2 contains only one spec (2.1), so there are no intra-phase dependencies.
 
 #### 2.1.A — Config type changes in `src/config/file.rs`
 
-- [ ] **2.1.1** Add `AiTool` enum with variants `OpenCode`, `ClaudeCode`, `GeminiCli`, `CodexCli`, deriving `Debug, Clone, Serialize, Deserialize` with `#[serde(rename_all = "kebab-case")]`
-- [ ] **2.1.2** Add `default_binary()` method to `AiTool` returning the standard binary name for each variant (`"opencode"`, `"claude"`, `"gemini"`, `"codex"`)
-- [ ] **2.1.3** Extend `ActionDetails::Ai` to include: `tool: AiTool`, `#[serde(default)] tool_binary: Option<String>`, `#[serde(default)] tool_args: Option<Vec<String>>`
-- [ ] **2.1.4** Update `ProcessAction::validate()` if needed (the existing validation rejects AI actions with empty `inputs` — verify this still works with the new fields)
-- [ ] **2.1.5** Export `AiTool` from `src/config/mod.rs`
-- [ ] **2.1.6** Update all existing tests in `src/config/file.rs` that construct or parse `ActionDetails::Ai` to include the required `tool` field (tests: `valid_ai_action`, `valid_mixed_actions`, `invalid_ai_missing_model`, `invalid_ai_missing_inputs`, `invalid_ai_missing_model_and_inputs`, `empty_inputs_deserializes_but_fails_validate`)
-- [ ] **2.1.7** Verify: `cargo check` passes
-- [ ] **2.1.8** Verify: `cargo clippy -- -D warnings` passes
-- [ ] **2.1.9** Verify: `cargo test` passes (all 36 existing tests still pass)
+- [x] **2.1.1** Add `AiTool` enum with variants `OpenCode`, `ClaudeCode`, `GeminiCli`, `CodexCli`, deriving `Debug, Clone, Serialize, Deserialize` with `#[serde(rename_all = "kebab-case")]`
+- [x] **2.1.2** Add `default_binary()` method to `AiTool` returning the standard binary name for each variant (`"opencode"`, `"claude"`, `"gemini"`, `"codex"`)
+- [x] **2.1.3** Extend `ActionDetails::Ai` to include: `tool: AiTool`, `#[serde(default)] tool_binary: Option<String>`, `#[serde(default)] tool_args: Option<Vec<String>>`
+- [x] **2.1.4** Update `ProcessAction::validate()` if needed (the existing validation rejects AI actions with empty `inputs` — verify this still works with the new fields)
+- [x] **2.1.5** Export `AiTool` from `src/config/mod.rs`
+- [x] **2.1.6** Update all existing tests in `src/config/file.rs` that construct or parse `ActionDetails::Ai` to include the required `tool` field (tests: `valid_ai_action`, `valid_mixed_actions`, `invalid_ai_missing_model`, `invalid_ai_missing_inputs`, `invalid_ai_missing_model_and_inputs`, `empty_inputs_deserializes_but_fails_validate`)
+- [x] **2.1.7** Verify: `cargo check` passes
+- [x] **2.1.8** Verify: `cargo clippy -- -D warnings` passes
+- [x] **2.1.9** Verify: `cargo test` passes (all 36 existing tests still pass)
 
 #### 2.1.B — Config type tests
 

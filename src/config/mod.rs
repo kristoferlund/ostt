@@ -9,7 +9,8 @@ pub mod file;
 pub mod secrets;
 
 pub use file::{
-    ActionDetails, ActionInput, InputContent, InputRole, InputSource, ProcessAction, ProcessConfig,
+    ActionDetails, ActionInput, AiTool, InputContent, InputRole, InputSource, ProcessAction,
+    ProcessConfig,
 };
 pub use file::{AudioConfig, OsttConfig, VisualizationType};
 pub use secrets::{
