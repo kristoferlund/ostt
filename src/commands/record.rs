@@ -6,6 +6,8 @@
 use crate::clipboard::copy_to_clipboard;
 use crate::config;
 use crate::history::HistoryManager;
+use crate::keywords::KeywordsManager;
+use crate::process;
 use crate::recording::{AudioRecorder, OsttTui, RecordingCommand, RecordingHistory};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::ErrorScreen;
@@ -20,7 +22,8 @@ use std::fs;
 /// # Arguments
 /// * `clipboard` - If true, copy to clipboard instead of stdout
 /// * `output_file` - Optional file path to write output to instead of stdout
-pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Result<(), anyhow::Error> {
+/// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
+pub async fn handle_record(clipboard: bool, output_file: Option<String>, process: Option<String>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
 
     let config_data = match config::OsttConfig::load() {
@@ -203,14 +206,106 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
 
     // Output transcription after TUI is completely cleaned up
     if let Some(text) = transcription_text {
+        // Processing flow: if -p was passed, chain processing after transcription
+        let output_text = match process.as_deref() {
+            None => {
+                // No processing requested, output raw transcription
+                text
+            }
+            Some("") => {
+                // Show action picker
+                let process_config = config::OsttConfig::load().map_err(|err| {
+                    tracing::error!("Failed to load configuration: {err}");
+                    anyhow::anyhow!("Configuration error: {err}")
+                })?;
+
+                if process_config.process.actions.is_empty() {
+                    return Err(anyhow::anyhow!(
+                        "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
+                    ));
+                }
+
+                match process::picker::show_action_picker(&process_config.process.actions)? {
+                    process::picker::PickerResult::Selected(selected_id) => {
+                        let action = process_config
+                            .process
+                            .get_action(&selected_id)
+                            .expect("Picker returned an ID not in config")
+                            .clone();
+
+                        let config_dir = dirs::config_dir()
+                            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+                        let keywords_manager = KeywordsManager::new(&config_dir)?;
+                        let keywords = keywords_manager.load_keywords()?;
+
+                        let result =
+                            process::execute_action(&action, &text, &keywords).await?;
+
+                        let data_dir = dirs::home_dir()
+                            .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+                            .join(".local")
+                            .join("share")
+                            .join("ostt");
+                        let mut history_manager = HistoryManager::new(&data_dir)?;
+                        if let Err(e) = history_manager.save_transcription(&result) {
+                            tracing::warn!("Failed to save processed result to history: {}", e);
+                        }
+
+                        result
+                    }
+                    process::picker::PickerResult::Cancelled => {
+                        // Cancelled — fall through to output raw transcription
+                        text
+                    }
+                }
+            }
+            Some(id) => {
+                // Look up action by ID
+                let process_config = config::OsttConfig::load().map_err(|err| {
+                    tracing::error!("Failed to load configuration: {err}");
+                    anyhow::anyhow!("Configuration error: {err}")
+                })?;
+
+                let action = process_config
+                    .process
+                    .get_action(id)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
+                        )
+                    })?
+                    .clone();
+
+                let config_dir = dirs::config_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+                let keywords_manager = KeywordsManager::new(&config_dir)?;
+                let keywords = keywords_manager.load_keywords()?;
+
+                let result = process::execute_action(&action, &text, &keywords).await?;
+
+                let data_dir = dirs::home_dir()
+                    .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
+                    .join(".local")
+                    .join("share")
+                    .join("ostt");
+                let mut history_manager = HistoryManager::new(&data_dir)?;
+                if let Err(e) = history_manager.save_transcription(&result) {
+                    tracing::warn!("Failed to save processed result to history: {}", e);
+                }
+
+                result
+            }
+        };
+
+        // Determine output destination: file > clipboard > stdout (default)
         if let Some(file_path) = output_file {
-            std::fs::write(&file_path, &text)?;
+            std::fs::write(&file_path, &output_text)?;
             tracing::info!("Transcription written to file: {}", file_path);
         } else if clipboard {
-            copy_to_clipboard(&text)?;
+            copy_to_clipboard(&output_text)?;
             tracing::info!("Transcription copied to clipboard");
         } else {
-            println!("{text}");
+            println!("{output_text}");
             tracing::debug!("Transcription printed to stdout");
         }
     }

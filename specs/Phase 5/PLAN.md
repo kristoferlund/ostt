@@ -2,7 +2,7 @@
 
 **Scope:** Spec 5.1 (Process Subcommand), Spec 5.2 (Process Flag on Record, Transcribe, Retry)
 **Target codebase:** `/home/kristoferlund/gh/ostt`
-**Status:** In progress (5.1.A, 5.2.A, 5.2.B complete)
+**Status:** Complete (all sections done)
 
 ---
 
@@ -81,11 +81,11 @@ Note: Task 5.2.8 is expected to fail at `cargo check` because the handler signat
 
 #### 5.2.C — Handler update for handle_record and final verification
 
-- [ ] **5.2.14** Update `handle_record` signature in `src/commands/record.rs` to accept `process: Option<String>` as the third parameter.
-- [ ] **5.2.15** Implement the processing flow in `handle_record` after transcription succeeds and TUI is cleaned up: in the output section where `transcription_text` is `Some(text)`, before outputting, check `process`. If `None`, output as before. If `Some("")`, load config, show action picker (new TUI lifecycle — picker sets up its own terminal). If cancelled, fall through to output raw text. If `Some(id)`, load config, look up action. Then load keywords, execute action via `process::execute_action`, save both raw and processed to history, replace output text with processed result. Ensure the recording TUI is always cleaned up before any processing TUI starts.
-- [ ] **5.2.16** Verify: `cargo check` passes.
-- [ ] **5.2.17** Verify: `cargo clippy -- -D warnings` passes.
-- [ ] **5.2.18** Verify: `cargo test` passes.
+- [x] **5.2.14** Update `handle_record` signature in `src/commands/record.rs` to accept `process: Option<String>` as the third parameter.
+- [x] **5.2.15** Implement the processing flow in `handle_record` after transcription succeeds and TUI is cleaned up: in the output section where `transcription_text` is `Some(text)`, before outputting, check `process`. If `None`, output as before. If `Some("")`, load config, show action picker (new TUI lifecycle — picker sets up its own terminal). If cancelled, fall through to output raw text. If `Some(id)`, load config, look up action. Then load keywords, execute action via `process::execute_action`, save both raw and processed to history, replace output text with processed result. Ensure the recording TUI is always cleaned up before any processing TUI starts.
+- [x] **5.2.16** Verify: `cargo check` passes.
+- [x] **5.2.17** Verify: `cargo clippy -- -D warnings` passes.
+- [x] **5.2.18** Verify: `cargo test` passes.
 
 ---
 

@@ -70,3 +70,27 @@ All 5 tasks in section 5.2.B completed successfully:
 
 - The 5.2.A changes (app.rs routing updates) from Session 2 were never committed. They are included in this session's commit alongside the 5.2.B changes.
 - In `handle_transcribe`, config is loaded twice when processing is requested: once for transcription setup (model, api key, provider config) and again inside the processing branch (for process actions). This is because the first load happens before the transcription call and the processing branch runs after. A minor inefficiency but keeps the code straightforward.
+
+## Session 4: Spec 5.2.C — Handler update for handle_record and final verification
+
+### What was accomplished
+
+All 5 tasks in section 5.2.C completed successfully:
+
+1. Updated `handle_record` signature in `src/commands/record.rs` to accept `process: Option<String>` as the third parameter.
+2. Implemented the processing flow in `handle_record` after transcription succeeds and the recording TUI is cleaned up. In the output section where `transcription_text` is `Some(text)`, added a `match process.as_deref()` block: `None` outputs raw text as before, `Some("")` loads config and shows action picker (picker manages its own terminal lifecycle), `Some(id)` loads config and looks up action by ID. On action selection: loads keywords via `KeywordsManager`, executes action via `process::execute_action`, saves processed result to history, replaces output text. Cancelled picker falls through to output raw text. Added imports for `KeywordsManager` and `process`.
+3. Verified: `cargo check` passes.
+4. Verified: `cargo clippy -- -D warnings` passes.
+5. Verified: `cargo test` passes (58 tests).
+
+This completes all of Phase 5. Both Spec 5.1 (Process Subcommand) and Spec 5.2 (Process Flag on Record, Transcribe, Retry) are fully implemented.
+
+### Obstacles encountered
+
+None. All tasks completed without issues on first attempt.
+
+### Out-of-scope observations
+
+- The `handle_record` function's `transcribe_recording_with_animation` helper still loads keywords using a manual file-read approach (lines 272-286) rather than `KeywordsManager`. The new processing flow added in this session correctly uses `KeywordsManager`. This pre-existing inconsistency in the transcription path was noted in Session 1 and remains out of scope.
+- In `handle_record`, when processing is requested, config is loaded a second time (once during recording setup, once in the processing branch). Same minor inefficiency as noted for `handle_transcribe` in Session 3. The two loads serve different purposes (audio config vs process actions) and keeping them separate is cleaner than threading config through the transcription animation helper.
+- The raw transcription is saved to history inside `transcribe_recording_with_animation`, and the processed result is saved in the processing branch — matching the spec's requirement of two history entries per run when processing is active.
