@@ -177,15 +177,8 @@ pub async fn handle_transcribe(
             let keywords_manager = KeywordsManager::new(&config_dir)?;
             let keywords = keywords_manager.load_keywords()?;
 
-            match process::execute_action_with_animation(&action, &trimmed_text, &keywords)
-                .await?
-            {
-                Some(result) => result,
-                None => {
-                    // Cancelled — fall through to output raw transcription
-                    trimmed_text
-                }
-            }
+            // Action specified directly — no TUI flow, execute without animation
+            process::execute_action(&action, &trimmed_text, &keywords).await?
         }
     };
 

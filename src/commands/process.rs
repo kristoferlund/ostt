@@ -72,9 +72,9 @@ pub async fn handle_process(
             )
         })?;
 
-    // Determine which action to use
-    let action = if let Some(ref id) = action_id {
-        config_data
+    // Determine which action to use and whether the picker was shown
+    let (action, picker_was_shown) = if let Some(ref id) = action_id {
+        let a = config_data
             .process
             .get_action(id)
             .ok_or_else(|| {
@@ -82,15 +82,19 @@ pub async fn handle_process(
                     "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
                 )
             })?
-            .clone()
+            .clone();
+        (a, false)
     } else {
         // Show action picker
         match process::picker::show_action_picker(&config_data.process.actions)? {
-            process::picker::PickerResult::Selected(selected_id) => config_data
-                .process
-                .get_action(&selected_id)
-                .expect("Picker returned an ID not in config")
-                .clone(),
+            process::picker::PickerResult::Selected(selected_id) => {
+                let a = config_data
+                    .process
+                    .get_action(&selected_id)
+                    .expect("Picker returned an ID not in config")
+                    .clone();
+                (a, true)
+            }
             process::picker::PickerResult::Cancelled => {
                 return Ok(());
             }
@@ -105,8 +109,9 @@ pub async fn handle_process(
     let keywords_manager = KeywordsManager::new(&config_dir)?;
     let keywords = keywords_manager.load_keywords()?;
 
-    // Execute the action with animation
-    let result =
+    // Use animation if the picker was shown (we're in a TUI flow),
+    // otherwise execute directly (no TUI was started)
+    let result = if picker_was_shown {
         match process::execute_action_with_animation(&action, &transcription.text, &keywords)
             .await?
         {
@@ -115,7 +120,10 @@ pub async fn handle_process(
                 // User cancelled during processing
                 return Ok(());
             }
-        };
+        }
+    } else {
+        process::execute_action(&action, &transcription.text, &keywords).await?
+    };
 
     // Output: file > clipboard > stdout
     if let Some(file_path) = output_file {
