@@ -98,8 +98,7 @@ pub async fn handle_transcribe(
         .join("share")
         .join("ostt");
     let mut history_manager = HistoryManager::new(&data_dir)?;
-    let history_note = format!("[Transcribed from {}]", file.display());
-    if let Err(e) = history_manager.save_transcription(&format!("{history_note} {trimmed_text}")) {
+    if let Err(e) = history_manager.save_transcription(&trimmed_text) {
         tracing::warn!("Failed to save transcription to history: {}", e);
     }
 
