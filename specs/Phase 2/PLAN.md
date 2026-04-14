@@ -59,31 +59,31 @@ Phase 2 contains only one spec (2.1), so there are no intra-phase dependencies.
 
 #### 2.1.C — AI executor module (`src/process/ai.rs`)
 
-- [ ] **2.1.19** Create `src/process/ai.rs` with the `execute_ai_action` async function signature (taking `&AiTool`, `&str` model, `&[ResolvedMessage]`, `Option<&str>` tool_binary, `Option<&[String]>` tool_args, returning `anyhow::Result<String>`)
-- [ ] **2.1.20** Implement prompt construction: separate `ResolvedMessage` list into system prompt (system messages concatenated with `"\n\n"`) and user prompt (user messages concatenated with `"\n\n"`)
-- [ ] **2.1.21** Add `build_required_args()` method to `AiTool` that returns the tool-specific CLI args given model and system prompt: OpenCode `["run", "--model", model]`; Claude Code `["-p", "--system-prompt", system, "--model", model]`; Gemini CLI `["-p", system, "-m", model]`; Codex CLI `["exec", system, "--model", model]`
-- [ ] **2.1.22** Implement the stdin content logic: OpenCode gets concatenated `[System]\n{system}\n\n[User]\n{user}` format; all other tools get user prompt only
-- [ ] **2.1.23** Implement the `tokio::process::Command` invocation: spawn with piped stdin/stdout/stderr, write prompt to stdin, close stdin, `wait_with_output()`
-- [ ] **2.1.24** Add 120-second timeout using `tokio::time::timeout`, killing the child process on timeout
-- [ ] **2.1.25** Implement error handling: tool not found (check `ErrorKind::NotFound` on spawn), non-zero exit (include stderr), timeout, empty stdout
-- [ ] **2.1.26** Register the module: add `pub mod ai;` to `src/process/mod.rs`
-- [ ] **2.1.27** Verify: `cargo check` passes
-- [ ] **2.1.28** Verify: `cargo clippy -- -D warnings` passes
+- [x] **2.1.19** Create `src/process/ai.rs` with the `execute_ai_action` async function signature (taking `&AiTool`, `&str` model, `&[ResolvedMessage]`, `Option<&str>` tool_binary, `Option<&[String]>` tool_args, returning `anyhow::Result<String>`)
+- [x] **2.1.20** Implement prompt construction: separate `ResolvedMessage` list into system prompt (system messages concatenated with `"\n\n"`) and user prompt (user messages concatenated with `"\n\n"`)
+- [x] **2.1.21** Add `build_required_args()` method to `AiTool` that returns the tool-specific CLI args given model and system prompt: OpenCode `["run", "--model", model]`; Claude Code `["-p", "--system-prompt", system, "--model", model]`; Gemini CLI `["-p", system, "-m", model]`; Codex CLI `["exec", system, "--model", model]`
+- [x] **2.1.22** Implement the stdin content logic: OpenCode gets concatenated `[System]\n{system}\n\n[User]\n{user}` format; all other tools get user prompt only
+- [x] **2.1.23** Implement the `tokio::process::Command` invocation: spawn with piped stdin/stdout/stderr, write prompt to stdin, close stdin, `wait_with_output()`
+- [x] **2.1.24** Add 120-second timeout using `tokio::time::timeout`, killing the child process on timeout
+- [x] **2.1.25** Implement error handling: tool not found (check `ErrorKind::NotFound` on spawn), non-zero exit (include stderr), timeout, empty stdout
+- [x] **2.1.26** Register the module: add `pub mod ai;` to `src/process/mod.rs`
+- [x] **2.1.27** Verify: `cargo check` passes
+- [x] **2.1.28** Verify: `cargo clippy -- -D warnings` passes
 
 #### 2.1.D — AI executor tests
 
-- [ ] **2.1.29** Add test: prompt construction correctly separates system and user messages
-- [ ] **2.1.30** Add test: multiple messages of the same role are concatenated with blank line separators
-- [ ] **2.1.31** Add test: `build_required_args()` returns correct args for each tool variant
-- [ ] **2.1.32** Add test: OpenCode stdin content includes `[System]` and `[User]` role labels with both prompts
-- [ ] **2.1.33** Add test: non-OpenCode tools stdin content contains only user prompt (no system content)
-- [ ] **2.1.34** Add test: `tool_binary` override changes the binary name used (test via the binary selection logic, not by spawning)
-- [ ] **2.1.35** Add test: `tool_args` are appended after required args
-- [ ] **2.1.36** Add test: missing CLI tool returns error with tool name in message
-- [ ] **2.1.37** Add test: non-zero exit returns error with stderr content (invoke a known binary like `false` or `sh -c "exit 1"` to simulate)
-- [ ] **2.1.38** Verify: `cargo check` passes
-- [ ] **2.1.39** Verify: `cargo clippy -- -D warnings` passes
-- [ ] **2.1.40** Verify: `cargo test` passes
+- [x] **2.1.29** Add test: prompt construction correctly separates system and user messages
+- [x] **2.1.30** Add test: multiple messages of the same role are concatenated with blank line separators
+- [x] **2.1.31** Add test: `build_required_args()` returns correct args for each tool variant
+- [x] **2.1.32** Add test: OpenCode stdin content includes `[System]` and `[User]` role labels with both prompts
+- [x] **2.1.33** Add test: non-OpenCode tools stdin content contains only user prompt (no system content)
+- [x] **2.1.34** Add test: `tool_binary` override changes the binary name used (test via the binary selection logic, not by spawning)
+- [x] **2.1.35** Add test: `tool_args` are appended after required args
+- [x] **2.1.36** Add test: missing CLI tool returns error with tool name in message
+- [x] **2.1.37** Add test: non-zero exit returns error with stderr content (invoke a known binary like `false` or `sh -c "exit 1"` to simulate)
+- [x] **2.1.38** Verify: `cargo check` passes
+- [x] **2.1.39** Verify: `cargo clippy -- -D warnings` passes
+- [x] **2.1.40** Verify: `cargo test` passes
 
 ---
 
