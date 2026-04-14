@@ -65,20 +65,11 @@ The `process` subcommand and `-p` flag on record/transcribe/retry.
 
 Implementation plan: [Phase 5 Plan](Phase%205/PLAN.md)
 
-### Phase 6 — History Schema Changes
-Extend SQLite history to store both raw transcriptions and processed results.
-
-| # | Item | Priority | Effort |
-|---|------|----------|--------|
-| 6.1 | [History Schema for Processed Results](Phase%206/6.1%20—%20History%20Schema%20for%20Processed%20Results.md) | High | Medium |
-
-Implementation plan: [Phase 6 Plan](Phase%206/PLAN.md)
-
-### Phase 7 — Processing Animation
+### Phase 6 — Processing Animation
 Add status label to the logo animation for visual phase distinction.
 
 | # | Item | Priority | Effort |
 |---|------|----------|--------|
-| 7.1 | [Processing Animation with Status Label](Phase%207/7.1%20—%20Processing%20Animation%20with%20Status%20Label.md) | Medium | Small |
+| 6.1 | [Processing Animation with Status Label](Phase%206/6.1%20—%20Processing%20Animation%20with%20Status%20Label.md) | Medium | Small |
 
-Implementation plan: [Phase 7 Plan](Phase%207/PLAN.md)
+Implementation plan: [Phase 6 Plan](Phase%206/PLAN.md)
