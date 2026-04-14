@@ -5,3 +5,4 @@ pub mod input;
 pub mod picker;
 
 pub use execute::execute_action;
+pub use execute::execute_action_with_animation;

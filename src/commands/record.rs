@@ -238,20 +238,32 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                         let keywords_manager = KeywordsManager::new(&config_dir)?;
                         let keywords = keywords_manager.load_keywords()?;
 
-                        let result =
-                            process::execute_action(&action, &text, &keywords).await?;
+                        match process::execute_action_with_animation(&action, &text, &keywords)
+                            .await?
+                        {
+                            Some(result) => {
+                                let data_dir = dirs::home_dir()
+                                    .ok_or_else(|| {
+                                        anyhow::anyhow!("Could not determine home directory")
+                                    })?
+                                    .join(".local")
+                                    .join("share")
+                                    .join("ostt");
+                                let mut history_manager = HistoryManager::new(&data_dir)?;
+                                if let Err(e) = history_manager.save_transcription(&result) {
+                                    tracing::warn!(
+                                        "Failed to save processed result to history: {}",
+                                        e
+                                    );
+                                }
 
-                        let data_dir = dirs::home_dir()
-                            .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-                            .join(".local")
-                            .join("share")
-                            .join("ostt");
-                        let mut history_manager = HistoryManager::new(&data_dir)?;
-                        if let Err(e) = history_manager.save_transcription(&result) {
-                            tracing::warn!("Failed to save processed result to history: {}", e);
+                                result
+                            }
+                            None => {
+                                // Cancelled — fall through to output raw transcription
+                                text
+                            }
                         }
-
-                        result
                     }
                     process::picker::PickerResult::Cancelled => {
                         // Cancelled — fall through to output raw transcription
@@ -281,19 +293,30 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                 let keywords_manager = KeywordsManager::new(&config_dir)?;
                 let keywords = keywords_manager.load_keywords()?;
 
-                let result = process::execute_action(&action, &text, &keywords).await?;
+                match process::execute_action_with_animation(&action, &text, &keywords).await? {
+                    Some(result) => {
+                        let data_dir = dirs::home_dir()
+                            .ok_or_else(|| {
+                                anyhow::anyhow!("Could not determine home directory")
+                            })?
+                            .join(".local")
+                            .join("share")
+                            .join("ostt");
+                        let mut history_manager = HistoryManager::new(&data_dir)?;
+                        if let Err(e) = history_manager.save_transcription(&result) {
+                            tracing::warn!(
+                                "Failed to save processed result to history: {}",
+                                e
+                            );
+                        }
 
-                let data_dir = dirs::home_dir()
-                    .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-                    .join(".local")
-                    .join("share")
-                    .join("ostt");
-                let mut history_manager = HistoryManager::new(&data_dir)?;
-                if let Err(e) = history_manager.save_transcription(&result) {
-                    tracing::warn!("Failed to save processed result to history: {}", e);
+                        result
+                    }
+                    None => {
+                        // Cancelled — fall through to output raw transcription
+                        text
+                    }
                 }
-
-                result
             }
         };
 
@@ -392,6 +415,7 @@ async fn transcribe_recording_with_animation(
     );
 
     let mut animation = TranscriptionAnimation::new(80);
+    animation.set_status_label("Transcribing...");
 
     let filename = audio_filename.to_string();
     let transcription_handle = tokio::spawn(async move {

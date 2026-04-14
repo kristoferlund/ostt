@@ -2,7 +2,7 @@
 
 **Scope:** Spec 6.1 (Processing Animation with Status Label)
 **Target codebase:** `/home/kristoferlund/gh/ostt`
-**Status:** Not started
+**Status:** Complete
 
 ---
 
@@ -36,21 +36,21 @@ Execution order: **6.1.A → 6.1.B**
 
 #### 6.1.A — Status label on TranscriptionAnimation and execute_action_with_animation helper
 
-- [ ] **6.1.1** Add `status_label: String` field to the `TranscriptionAnimation` struct in `src/transcription/animation.rs`. Initialize it to `"Transcribing...".to_string()` in `new()`.
-- [ ] **6.1.2** Add `pub fn set_status_label(&mut self, label: &str)` method to `TranscriptionAnimation` that sets `self.status_label = label.to_string()`.
-- [ ] **6.1.3** In the `draw()` method of `TranscriptionAnimation`, after the existing character rendering loop (`for anim_char in &self.chars` block), add label rendering: compute `label_x` centered horizontally, `label_y = center_y + 2`, render using `frame.buffer_mut().set_string(...)` with `Style::default().fg(Color::Rgb(128, 128, 128))`. Only render if `!self.status_label.is_empty() && label_y < height`.
-- [ ] **6.1.4** In `src/commands/record.rs`, in the `transcribe_recording_with_animation` function, call `animation.set_status_label("Transcribing...");` after creating the animation (after `let mut animation = TranscriptionAnimation::new(80);`) for explicitness.
-- [ ] **6.1.5** Add the `execute_action_with_animation` async function in `src/process/execute.rs`. Signature: `pub async fn execute_action_with_animation(action: &ProcessAction, transcription: &str, keywords: &[String]) -> anyhow::Result<Option<String>>`. It should: (1) set up terminal (raw mode, alternate screen, CrosstermBackend, Terminal::new), (2) create a `TranscriptionAnimation` and call `set_status_label("Processing...")`, (3) spawn `execute_action` as a tokio task, (4) run animation loop (render frame, poll for cancel input via Esc/q/Ctrl+C, sleep 50ms, check if task finished), (5) return `Ok(Some(result))` on success, `Ok(None)` on cancel, `Err` on failure, (6) restore terminal on exit. Use a `Drop`-based cleanup guard struct (same pattern as `ActionPicker` in `picker.rs`) to ensure terminal is restored even on panic/early return.
-- [ ] **6.1.6** Re-export `execute_action_with_animation` from `src/process/mod.rs`.
-- [ ] **6.1.7** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
+- [x] **6.1.1** Add `status_label: String` field to the `TranscriptionAnimation` struct in `src/transcription/animation.rs`. Initialize it to `"Transcribing...".to_string()` in `new()`.
+- [x] **6.1.2** Add `pub fn set_status_label(&mut self, label: &str)` method to `TranscriptionAnimation` that sets `self.status_label = label.to_string()`.
+- [x] **6.1.3** In the `draw()` method of `TranscriptionAnimation`, after the existing character rendering loop (`for anim_char in &self.chars` block), add label rendering: compute `label_x` centered horizontally, `label_y = center_y + 2`, render using `frame.buffer_mut().set_string(...)` with `Style::default().fg(Color::Rgb(128, 128, 128))`. Only render if `!self.status_label.is_empty() && label_y < height`.
+- [x] **6.1.4** In `src/commands/record.rs`, in the `transcribe_recording_with_animation` function, call `animation.set_status_label("Transcribing...");` after creating the animation (after `let mut animation = TranscriptionAnimation::new(80);`) for explicitness.
+- [x] **6.1.5** Add the `execute_action_with_animation` async function in `src/process/execute.rs`. Signature: `pub async fn execute_action_with_animation(action: &ProcessAction, transcription: &str, keywords: &[String]) -> anyhow::Result<Option<String>>`. It should: (1) set up terminal (raw mode, alternate screen, CrosstermBackend, Terminal::new), (2) create a `TranscriptionAnimation` and call `set_status_label("Processing...")`, (3) spawn `execute_action` as a tokio task, (4) run animation loop (render frame, poll for cancel input via Esc/q/Ctrl+C, sleep 50ms, check if task finished), (5) return `Ok(Some(result))` on success, `Ok(None)` on cancel, `Err` on failure, (6) restore terminal on exit. Use a `Drop`-based cleanup guard struct (same pattern as `ActionPicker` in `picker.rs`) to ensure terminal is restored even on panic/early return.
+- [x] **6.1.6** Re-export `execute_action_with_animation` from `src/process/mod.rs`.
+- [x] **6.1.7** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
 
 #### 6.1.B — Update all callers to use execute_action_with_animation
 
-- [ ] **6.1.8** Update `src/commands/process.rs` (`handle_process`): replace the direct `process::execute_action(&action, &transcription.text, &keywords).await?` call with `process::execute_action_with_animation(&action, &transcription.text, &keywords).await?`. Handle the `Option<String>` return: if `None` (cancelled), return `Ok(())` early; if `Some(result)`, use `result` for the rest of the output flow.
-- [ ] **6.1.9** Update `src/commands/record.rs` (`handle_record`): in both processing branches (`Some("")` picker path and `Some(id)` direct path), replace `process::execute_action(...)` with `process::execute_action_with_animation(...)`. Handle `None` (cancelled) by falling through to output raw transcription text.
-- [ ] **6.1.10** Update `src/commands/retry.rs` (`handle_retry`): in both processing branches (`Some("")` picker path and `Some(id)` direct path), replace `process::execute_action(...)` with `process::execute_action_with_animation(...)`. Handle `None` (cancelled) by falling through to output raw transcription `trimmed_text`.
-- [ ] **6.1.11** Update `src/commands/transcribe.rs` (`handle_transcribe`): in both processing branches (`Some("")` picker path and `Some(id)` direct path), replace `process::execute_action(...)` with `process::execute_action_with_animation(...)`. Handle `None` (cancelled) by falling through to output raw `trimmed_text`.
-- [ ] **6.1.12** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
+- [x] **6.1.8** Update `src/commands/process.rs` (`handle_process`): replace the direct `process::execute_action(&action, &transcription.text, &keywords).await?` call with `process::execute_action_with_animation(&action, &transcription.text, &keywords).await?`. Handle the `Option<String>` return: if `None` (cancelled), return `Ok(())` early; if `Some(result)`, use `result` for the rest of the output flow.
+- [x] **6.1.9** Update `src/commands/record.rs` (`handle_record`): in both processing branches (`Some("")` picker path and `Some(id)` direct path), replace `process::execute_action(...)` with `process::execute_action_with_animation(...)`. Handle `None` (cancelled) by falling through to output raw transcription text.
+- [x] **6.1.10** Update `src/commands/retry.rs` (`handle_retry`): in both processing branches (`Some("")` picker path and `Some(id)` direct path), replace `process::execute_action(...)` with `process::execute_action_with_animation(...)`. Handle `None` (cancelled) by falling through to output raw transcription `trimmed_text`.
+- [x] **6.1.11** Update `src/commands/transcribe.rs` (`handle_transcribe`): in both processing branches (`Some("")` picker path and `Some(id)` direct path), replace `process::execute_action(...)` with `process::execute_action_with_animation(...)`. Handle `None` (cancelled) by falling through to output raw `trimmed_text`.
+- [x] **6.1.12** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
 
 ---
 

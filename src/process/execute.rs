@@ -1,9 +1,19 @@
 //! Action dispatcher for processing actions.
 //!
 //! Provides a unified `execute_action` function that dispatches to the correct
-//! executor based on the action type (bash or AI).
+//! executor based on the action type (bash or AI). Also provides
+//! `execute_action_with_animation` which wraps the action in an animated
+//! progress indicator.
 
 use crate::config::{ActionDetails, ProcessAction};
+use crate::transcription::TranscriptionAnimation;
+use crossterm::{
+    event::{self, Event, KeyCode, KeyModifiers},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::prelude::*;
+use std::io::{self, Stdout};
 
 /// Executes a processing action on the given transcription text.
 ///
@@ -45,6 +55,128 @@ pub async fn execute_action(
             )
             .await
         }
+    }
+}
+
+/// Drop-based cleanup guard that ensures the terminal is restored even on
+/// panic or early return.
+struct TerminalGuard {
+    terminal: Terminal<CrosstermBackend<Stdout>>,
+    cleaned_up: bool,
+}
+
+impl TerminalGuard {
+    /// Creates a new terminal guard, entering raw mode and alternate screen.
+    fn new() -> anyhow::Result<Self> {
+        enable_raw_mode()?;
+        let mut stdout = io::stdout();
+        execute!(stdout, EnterAlternateScreen)?;
+
+        let backend = CrosstermBackend::new(stdout);
+        let terminal = Terminal::new(backend)?;
+
+        Ok(Self {
+            terminal,
+            cleaned_up: false,
+        })
+    }
+
+    /// Restores the terminal to normal mode.
+    fn cleanup(&mut self) -> anyhow::Result<()> {
+        if self.cleaned_up {
+            return Ok(());
+        }
+        self.cleaned_up = true;
+        disable_raw_mode()?;
+        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
+        self.terminal.show_cursor()?;
+        Ok(())
+    }
+}
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
+    }
+}
+
+/// Executes an action with an animated progress indicator.
+///
+/// Shows the OSTT logo animation with a "Processing..." label while the action runs.
+/// Cancellable via Esc/q/Ctrl+C.
+///
+/// # Returns
+/// - `Ok(Some(result))` — action completed successfully
+/// - `Ok(None)` — user cancelled during processing
+/// - `Err(...)` — action failed
+pub async fn execute_action_with_animation(
+    action: &ProcessAction,
+    transcription: &str,
+    keywords: &[String],
+) -> anyhow::Result<Option<String>> {
+    let mut guard = TerminalGuard::new()?;
+
+    let mut animation = TranscriptionAnimation::new(80);
+    animation.set_status_label("Processing...");
+
+    // Clone data for the spawned task
+    let action_clone = action.clone();
+    let transcription_clone = transcription.to_string();
+    let keywords_clone = keywords.to_vec();
+
+    let task_handle = tokio::spawn(async move {
+        execute_action(&action_clone, &transcription_clone, &keywords_clone).await
+    });
+
+    let mut cancelled = false;
+    loop {
+        // Render animation frame
+        guard.terminal.draw(|frame| {
+            let area = frame.area();
+            animation.update();
+            animation.draw(frame, area);
+        })?;
+
+        // Check if task finished
+        if task_handle.is_finished() {
+            break;
+        }
+
+        // Poll for cancel input (Esc/q/Ctrl+C)
+        if event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+            if let Ok(Event::Key(key)) = event::read() {
+                match key.code {
+                    KeyCode::Esc | KeyCode::Char('q') => {
+                        tracing::info!("Processing cancelled by user");
+                        task_handle.abort();
+                        cancelled = true;
+                        break;
+                    }
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        tracing::info!("Processing cancelled by user (Ctrl+C)");
+                        task_handle.abort();
+                        cancelled = true;
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    // Restore terminal before returning
+    guard.cleanup()?;
+
+    if cancelled {
+        return Ok(None);
+    }
+
+    match task_handle.await {
+        Ok(Ok(result)) => Ok(Some(result)),
+        Ok(Err(e)) => Err(e),
+        Err(e) => Err(anyhow::anyhow!("Processing task failed: {e}")),
     }
 }
 

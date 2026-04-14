@@ -142,21 +142,30 @@ pub async fn handle_retry(
                                     .expect("Picker returned an ID not in config")
                                     .clone();
 
-                                let result = process::execute_action(
+                                match process::execute_action_with_animation(
                                     &action,
                                     &trimmed_text,
                                     &keywords,
                                 )
-                                .await?;
+                                .await?
+                                {
+                                    Some(result) => {
+                                        if let Err(e) =
+                                            history_manager.save_transcription(&result)
+                                        {
+                                            tracing::warn!(
+                                                "Failed to save processed result to history: {}",
+                                                e
+                                            );
+                                        }
 
-                                if let Err(e) = history_manager.save_transcription(&result) {
-                                    tracing::warn!(
-                                        "Failed to save processed result to history: {}",
-                                        e
-                                    );
+                                        result
+                                    }
+                                    None => {
+                                        // Cancelled — fall through to output raw transcription
+                                        trimmed_text
+                                    }
                                 }
-
-                                result
                             }
                             process::picker::PickerResult::Cancelled => {
                                 // Cancelled — fall through to output raw transcription
@@ -176,21 +185,28 @@ pub async fn handle_retry(
                             })?
                             .clone();
 
-                        let result = process::execute_action(
+                        match process::execute_action_with_animation(
                             &action,
                             &trimmed_text,
                             &keywords,
                         )
-                        .await?;
+                        .await?
+                        {
+                            Some(result) => {
+                                if let Err(e) = history_manager.save_transcription(&result) {
+                                    tracing::warn!(
+                                        "Failed to save processed result to history: {}",
+                                        e
+                                    );
+                                }
 
-                        if let Err(e) = history_manager.save_transcription(&result) {
-                            tracing::warn!(
-                                "Failed to save processed result to history: {}",
-                                e
-                            );
+                                result
+                            }
+                            None => {
+                                // Cancelled — fall through to output raw transcription
+                                trimmed_text
+                            }
                         }
-
-                        result
                     }
                 };
 

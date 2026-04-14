@@ -135,14 +135,28 @@ pub async fn handle_transcribe(
                     let keywords_manager = KeywordsManager::new(&config_dir)?;
                     let keywords = keywords_manager.load_keywords()?;
 
-                    let result =
-                        process::execute_action(&action, &trimmed_text, &keywords).await?;
+                    match process::execute_action_with_animation(
+                        &action,
+                        &trimmed_text,
+                        &keywords,
+                    )
+                    .await?
+                    {
+                        Some(result) => {
+                            if let Err(e) = history_manager.save_transcription(&result) {
+                                tracing::warn!(
+                                    "Failed to save processed result to history: {}",
+                                    e
+                                );
+                            }
 
-                    if let Err(e) = history_manager.save_transcription(&result) {
-                        tracing::warn!("Failed to save processed result to history: {}", e);
+                            result
+                        }
+                        None => {
+                            // Cancelled — fall through to output raw transcription
+                            trimmed_text
+                        }
                     }
-
-                    result
                 }
                 process::picker::PickerResult::Cancelled => {
                     // Cancelled — fall through to output raw transcription
@@ -172,13 +186,21 @@ pub async fn handle_transcribe(
             let keywords_manager = KeywordsManager::new(&config_dir)?;
             let keywords = keywords_manager.load_keywords()?;
 
-            let result = process::execute_action(&action, &trimmed_text, &keywords).await?;
+            match process::execute_action_with_animation(&action, &trimmed_text, &keywords)
+                .await?
+            {
+                Some(result) => {
+                    if let Err(e) = history_manager.save_transcription(&result) {
+                        tracing::warn!("Failed to save processed result to history: {}", e);
+                    }
 
-            if let Err(e) = history_manager.save_transcription(&result) {
-                tracing::warn!("Failed to save processed result to history: {}", e);
+                    result
+                }
+                None => {
+                    // Cancelled — fall through to output raw transcription
+                    trimmed_text
+                }
             }
-
-            result
         }
     };
 

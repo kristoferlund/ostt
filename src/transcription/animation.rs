@@ -22,6 +22,7 @@ pub struct TranscriptionAnimation {
     start_time: Instant,
     min_duration: std::time::Duration,
     frame_count: u32,
+    status_label: String,
 }
 
 impl TranscriptionAnimation {
@@ -33,7 +34,13 @@ impl TranscriptionAnimation {
             start_time: Instant::now(),
             min_duration: std::time::Duration::from_secs(5),
             frame_count: 0,
+            status_label: "Transcribing...".to_string(),
         }
+    }
+
+    /// Sets the status label displayed below the animation.
+    pub fn set_status_label(&mut self, label: &str) {
+        self.status_label = label.to_string();
     }
 
     /// Initialize ASCII art characters for the animation
@@ -205,6 +212,18 @@ impl TranscriptionAnimation {
                     Style::default().fg(color).bold(),
                 );
             }
+        }
+
+        // Render status label centered below the logo
+        let label_x = (width / 2).saturating_sub(self.status_label.len() as u16 / 2);
+        let label_y = center_y + 2;
+        if !self.status_label.is_empty() && label_y < height {
+            frame.buffer_mut().set_string(
+                area.x + label_x,
+                area.y + label_y,
+                &self.status_label,
+                Style::default().fg(Color::Rgb(128, 128, 128)),
+            );
         }
     }
 }

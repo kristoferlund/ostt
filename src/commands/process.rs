@@ -103,8 +103,17 @@ pub async fn handle_process(
     let keywords_manager = KeywordsManager::new(&config_dir)?;
     let keywords = keywords_manager.load_keywords()?;
 
-    // Execute the action
-    let result = process::execute_action(&action, &transcription.text, &keywords).await?;
+    // Execute the action with animation
+    let result =
+        match process::execute_action_with_animation(&action, &transcription.text, &keywords)
+            .await?
+        {
+            Some(r) => r,
+            None => {
+                // User cancelled during processing
+                return Ok(());
+            }
+        };
 
     // Save processed result to history
     if let Err(e) = history_manager.save_transcription(&result) {
