@@ -2,7 +2,7 @@
 
 **Scope:** Specs 7.1, 7.2, 7.3
 **Target codebase:** `/home/kristoferlund/gh/ostt`
-**Status:** Not started
+**Status:** Complete
 
 ---
 
@@ -78,11 +78,11 @@ Depends on: 7.1.A
 
 Depends on: 7.1.B
 
-- [ ] **7.1.11** In `src/commands/record.rs`, in the `Some("")` (picker) branch: replace `process::picker::show_action_picker(...)` with an inline loop using `tui.render_action_picker(&config_data.process.actions, &mut list_state)`. Create `list_state` with `ListState::default()` and select index 0. Loop until `PickerEvent::Selected(id)` or `PickerEvent::Cancelled` is returned. Handle the single-action shortcut (if only one action, skip picker and use it directly) before entering the loop.
-- [ ] **7.1.12** In `src/commands/record.rs`, in the `Some("")` branch after picker selection: replace `process::execute_action_with_animation(...)` with an inline animation loop that reuses `tui.render_transcription_animation(...)`. Create a new `TranscriptionAnimation::new(80)` with `set_status_label("Processing...")`, spawn `process::execute_action(...)` as a tokio task, and run the same render-poll-cancel loop pattern used in `transcribe_recording_with_animation`. Return the result or raw text on cancel.
-- [ ] **7.1.13** In `src/commands/record.rs`, in the `Some(id)` (direct action) branch: apply the same pattern as 7.1.12 — replace `process::execute_action_with_animation(...)` with an inline animation loop through OsttTui.
-- [ ] **7.1.14** Ensure all error paths in `handle_record` call `tui.cleanup()` before returning. Check the transcription error paths in `transcribe_recording_with_animation` — where `tui.cleanup().ok()` is called before showing ErrorScreen — these should still work correctly since the TUI is now cleaned up later. Adjust if needed so cleanup happens exactly once on every exit path.
-- [ ] **7.1.15** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
+- [x] **7.1.11** In `src/commands/record.rs`, in the `Some("")` (picker) branch: replace `process::picker::show_action_picker(...)` with an inline loop using `tui.render_action_picker(&config_data.process.actions, &mut list_state)`. Create `list_state` with `ListState::default()` and select index 0. Loop until `PickerEvent::Selected(id)` or `PickerEvent::Cancelled` is returned. Handle the single-action shortcut (if only one action, skip picker and use it directly) before entering the loop.
+- [x] **7.1.12** In `src/commands/record.rs`, in the `Some("")` branch after picker selection: replace `process::execute_action_with_animation(...)` with an inline animation loop that reuses `tui.render_transcription_animation(...)`. Create a new `TranscriptionAnimation::new(80)` with `set_status_label("Processing...")`, spawn `process::execute_action(...)` as a tokio task, and run the same render-poll-cancel loop pattern used in `transcribe_recording_with_animation`. Return the result or raw text on cancel.
+- [x] **7.1.13** In `src/commands/record.rs`, in the `Some(id)` (direct action) branch: apply the same pattern as 7.1.12 — replace `process::execute_action_with_animation(...)` with an inline animation loop through OsttTui.
+- [x] **7.1.14** Ensure all error paths in `handle_record` call `tui.cleanup()` before returning. Check the transcription error paths in `transcribe_recording_with_animation` — where `tui.cleanup().ok()` is called before showing ErrorScreen — these should still work correctly since the TUI is now cleaned up later. Adjust if needed so cleanup happens exactly once on every exit path.
+- [x] **7.1.15** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
 
 ---
 
@@ -92,14 +92,14 @@ Depends on: 7.1.B
 
 Depends on: 7.2 (mouse support), 7.1 (render_picker_frame extraction)
 
-- [ ] **7.3.1** In `src/history/ui.rs`, add `const HOVER_BG: Color = Color::Rgb(10, 10, 10);`. Add `hovered_index: Option<usize>` and `list_area: Rect` fields to `HistoryViewer`. Initialize `hovered_index` to `None` and `list_area` to `Rect::default()` in `new()`.
-- [ ] **7.3.2** In `src/history/ui.rs`, in `draw()`, store the computed `list_area` rect on `self` (e.g., `self.list_area = list_area;` after the layout split). When building `ListItem`s, check if the item index matches `self.hovered_index` and is not the currently selected item — if so, apply `Style::default().bg(HOVER_BG)` to that item.
-- [ ] **7.3.3** In `src/history/ui.rs`, in `handle_mouse()`, add a `MouseEventKind::Moved` arm. Implement hit-testing: compute `inner_top = self.list_area.y + 1` (border), `inner_bottom = self.list_area.y + self.list_area.height - 1` (border). History items are 2 lines tall (timestamp + text). If `mouse.row` is in range, compute `visible_index = (mouse.row - inner_top) / 2`, `actual_index = visible_index + self.list_state.offset()`. Set `self.hovered_index = Some(actual_index)` if valid, else `None`.
-- [ ] **7.3.4** In `src/process/picker.rs`, add `const HOVER_BG: Color = Color::Rgb(10, 10, 10);`. Add `hovered_index: Option<usize>` and `list_area: Rect` fields to `ActionPicker`. Initialize them in `new()`.
-- [ ] **7.3.5** In `src/process/picker.rs`, update `render_picker_frame` to accept a `hovered_index: Option<usize>` parameter. When building `ListItem`s, apply `Style::default().bg(HOVER_BG)` to items whose index matches `hovered_index` (and is not the selected index). Update both callers (`ActionPicker::draw` and `OsttTui::render_action_picker`) to pass the appropriate `hovered_index` value.
-- [ ] **7.3.6** In `src/process/picker.rs`, in the `run()` method's mouse event handling, add a `MouseEventKind::Moved` arm. Implement hit-testing using `self.list_area`: picker items are 1 line tall. Compute `visible_index = mouse.row - inner_top`, `actual_index = visible_index + self.list_state.offset()`. Set `self.hovered_index` accordingly.
-- [ ] **7.3.7** In `src/process/picker.rs`, in `draw()`, store the computed `list_area` on `self` (similar to history viewer).
-- [ ] **7.3.8** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
+- [x] **7.3.1** In `src/history/ui.rs`, add `const HOVER_BG: Color = Color::Rgb(10, 10, 10);`. Add `hovered_index: Option<usize>` and `list_area: Rect` fields to `HistoryViewer`. Initialize `hovered_index` to `None` and `list_area` to `Rect::default()` in `new()`.
+- [x] **7.3.2** In `src/history/ui.rs`, in `draw()`, store the computed `list_area` rect on `self` (e.g., `self.list_area = list_area;` after the layout split). When building `ListItem`s, check if the item index matches `self.hovered_index` and is not the currently selected item — if so, apply `Style::default().bg(HOVER_BG)` to that item.
+- [x] **7.3.3** In `src/history/ui.rs`, in `handle_mouse()`, add a `MouseEventKind::Moved` arm. Implement hit-testing: compute `inner_top = self.list_area.y + 1` (border), `inner_bottom = self.list_area.y + self.list_area.height - 1` (border). History items are 2 lines tall (timestamp + text). If `mouse.row` is in range, compute `visible_index = (mouse.row - inner_top) / 2`, `actual_index = visible_index + self.list_state.offset()`. Set `self.hovered_index = Some(actual_index)` if valid, else `None`.
+- [x] **7.3.4** In `src/process/picker.rs`, add `const HOVER_BG: Color = Color::Rgb(10, 10, 10);`. Add `hovered_index: Option<usize>` and `list_area: Rect` fields to `ActionPicker`. Initialize them in `new()`.
+- [x] **7.3.5** In `src/process/picker.rs`, update `render_picker_frame` to accept a `hovered_index: Option<usize>` parameter. When building `ListItem`s, apply `Style::default().bg(HOVER_BG)` to items whose index matches `hovered_index` (and is not the selected index). Update both callers (`ActionPicker::draw` and `OsttTui::render_action_picker`) to pass the appropriate `hovered_index` value.
+- [x] **7.3.6** In `src/process/picker.rs`, in the `run()` method's mouse event handling, add a `MouseEventKind::Moved` arm. Implement hit-testing using `self.list_area`: picker items are 1 line tall. Compute `visible_index = mouse.row - inner_top`, `actual_index = visible_index + self.list_state.offset()`. Set `self.hovered_index` accordingly.
+- [x] **7.3.7** In `src/process/picker.rs`, in `draw()`, store the computed `list_area` on `self` (similar to history viewer).
+- [x] **7.3.8** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
 
 ---
 
