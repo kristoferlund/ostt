@@ -69,7 +69,7 @@ Include a ready-to-paste prompt block that future sessions will use. The prompt 
 - Tell the agent to study the relevant source files in the target codebase
 - Tell the agent to read the notes from previous sessions
 - Tell the agent to implement tasks in order, running verification after each
-- Tell the agent to mark tasks complete in PLAN.md as it goes
+- CRITICAL: Tell the agent to update PLAN.md IMMEDIATELY after completing each task (change `- [ ]` to `- [x]`) BEFORE starting the next task. This must not be batched — it is essential for crash recovery so interrupted sessions don't redo completed work.
 - Tell the agent to git commit all changes before stopping
 - Tell the agent to STOP after one section/sub-section (at most 10 tasks) — do NOT continue to the next
 - Include rules: no skipping tasks, no reordering, SCOPE is one section/sub-section only
