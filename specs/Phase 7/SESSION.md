@@ -44,3 +44,23 @@ All 6 tasks in section 7.1.A completed successfully:
 
 - The `render_action_picker` method clones actions via `actions.to_vec()` each frame to work around borrow checker constraints (external `actions` slice vs `self.terminal.draw()` closure). This is acceptable since the actions list is small, but could be optimized if needed.
 - `render_picker_frame` is imported directly via `crate::process::picker::render_picker_frame`. A re-export from `src/process/mod.rs` could be added for consistency but was not in scope.
+
+## Session 3: Spec 7.1.B — Refactor handle_record to keep TUI alive through processing
+
+### What was accomplished
+
+All 4 tasks in section 7.1.B completed successfully:
+
+1. **7.1.7** — Removed the second `config::OsttConfig::load()` calls in both the `Some("")` (picker) and `Some(id)` (direct action) branches. Both now reuse `config_data` loaded at the top of `handle_record`. References changed from `process_config` to `config_data`.
+2. **7.1.8** — Replaced manual keywords file reading in `transcribe_recording_with_animation` (the `config_dir`/`keywords_file`/`if keywords_file.exists()` block) with `KeywordsManager`: uses `dirs::config_dir()` to get the config directory, creates `KeywordsManager::new(&config_dir)?`, and calls `keywords_manager.load_keywords()?`.
+3. **7.1.9** — Moved `tui.cleanup()` from after transcription (before processing) to after the entire processing flow is complete — just before the output section. Added an `else` branch so the TUI is also cleaned up when there is no transcription text.
+4. **7.1.10** — Verified: `cargo check`, `cargo clippy -- -D warnings`, and `cargo test` all pass (58 tests).
+
+### Obstacles encountered
+
+None. All tasks were straightforward.
+
+### Out-of-scope observations
+
+- Several `?`-based error paths in the processing branches of `handle_record` (e.g., `show_action_picker()?`, `execute_action_with_animation()?`, `KeywordsManager::new()?`) can exit `handle_record` without calling `tui.cleanup()`. These will be addressed in task 7.1.14 (section 7.1.C) which explicitly covers ensuring all error paths call `tui.cleanup()`.
+- The error paths in `transcribe_recording_with_animation` (unknown model, missing API key, transcription failure) still call `tui.cleanup().ok()` before showing an `ErrorScreen`. This results in a harmless double-cleanup when the `else` branch in `handle_record` also calls cleanup. This is safe since crossterm calls are idempotent.

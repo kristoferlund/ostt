@@ -69,10 +69,10 @@ Depends on: 7.2 (picker mouse support already in place)
 
 Depends on: 7.1.A
 
-- [ ] **7.1.7** In `src/commands/record.rs`, in `handle_record`, remove the second `config::OsttConfig::load()` call in the `Some("")` (picker) branch and the `Some(id)` branch. Instead, reuse the `config_data` already loaded at the top of `handle_record`. Update references from `process_config` to `config_data`.
-- [ ] **7.1.8** In `src/commands/record.rs`, in `transcribe_recording_with_animation`, replace the manual keywords file reading (lines ~388-402, the `config_dir`, `keywords_file`, `if keywords_file.exists()` block) with `KeywordsManager`: use `dirs::config_dir()` to get the config directory, create a `KeywordsManager::new(&config_dir)?`, and call `keywords_manager.load_keywords()?`.
-- [ ] **7.1.9** In `src/commands/record.rs`, move `tui.cleanup()` from its current position (after transcription, before processing) to after the entire processing flow is complete — just before the output section (`if let Some(file_path) = output_file`). Remove the existing `tui.cleanup()` call at line ~204. The TUI should stay alive through recording, transcription, picker, and processing animation.
-- [ ] **7.1.10** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
+- [x] **7.1.7** In `src/commands/record.rs`, in `handle_record`, remove the second `config::OsttConfig::load()` call in the `Some("")` (picker) branch and the `Some(id)` branch. Instead, reuse the `config_data` already loaded at the top of `handle_record`. Update references from `process_config` to `config_data`.
+- [x] **7.1.8** In `src/commands/record.rs`, in `transcribe_recording_with_animation`, replace the manual keywords file reading (lines ~388-402, the `config_dir`, `keywords_file`, `if keywords_file.exists()` block) with `KeywordsManager`: use `dirs::config_dir()` to get the config directory, create a `KeywordsManager::new(&config_dir)?`, and call `keywords_manager.load_keywords()?`.
+- [x] **7.1.9** In `src/commands/record.rs`, move `tui.cleanup()` from its current position (after transcription, before processing) to after the entire processing flow is complete — just before the output section (`if let Some(file_path) = output_file`). Remove the existing `tui.cleanup()` call at line ~204. The TUI should stay alive through recording, transcription, picker, and processing animation.
+- [x] **7.1.10** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
 
 #### 7.1.C — Use OsttTui for picker and processing animation in handle_record
 

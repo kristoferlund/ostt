@@ -201,10 +201,6 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
         None
     };
 
-    tui.cleanup()
-        .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
-
-    // Output transcription after TUI is completely cleaned up
     if let Some(text) = transcription_text {
         // Processing flow: if -p was passed, chain processing after transcription
         let output_text = match process.as_deref() {
@@ -214,20 +210,15 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
             }
             Some("") => {
                 // Show action picker
-                let process_config = config::OsttConfig::load().map_err(|err| {
-                    tracing::error!("Failed to load configuration: {err}");
-                    anyhow::anyhow!("Configuration error: {err}")
-                })?;
-
-                if process_config.process.actions.is_empty() {
+                if config_data.process.actions.is_empty() {
                     return Err(anyhow::anyhow!(
                         "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
                     ));
                 }
 
-                match process::picker::show_action_picker(&process_config.process.actions)? {
+                match process::picker::show_action_picker(&config_data.process.actions)? {
                     process::picker::PickerResult::Selected(selected_id) => {
-                        let action = process_config
+                        let action = config_data
                             .process
                             .get_action(&selected_id)
                             .expect("Picker returned an ID not in config")
@@ -273,12 +264,7 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
             }
             Some(id) => {
                 // Look up action by ID
-                let process_config = config::OsttConfig::load().map_err(|err| {
-                    tracing::error!("Failed to load configuration: {err}");
-                    anyhow::anyhow!("Configuration error: {err}")
-                })?;
-
-                let action = process_config
+                let action = config_data
                     .process
                     .get_action(id)
                     .ok_or_else(|| {
@@ -320,6 +306,10 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
             }
         };
 
+        // Clean up TUI before outputting results
+        tui.cleanup()
+            .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+
         // Determine output destination: file > clipboard > stdout (default)
         if let Some(file_path) = output_file {
             std::fs::write(&file_path, &output_text)?;
@@ -331,6 +321,10 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
             println!("{output_text}");
             tracing::debug!("Transcription printed to stdout");
         }
+    } else {
+        // No transcription — still need to clean up TUI
+        tui.cleanup()
+            .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
     }
 
     tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
@@ -385,21 +379,11 @@ async fn transcribe_recording_with_animation(
     };
 
     // Load keywords
-    let config_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".config")
+    let config_dir = dirs::config_dir()
+        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
         .join("ostt");
-    let keywords_file = config_dir.join("keywords.txt");
-    let keywords = if keywords_file.exists() {
-        let content = fs::read_to_string(&keywords_file)?;
-        content
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .collect()
-    } else {
-        Vec::new()
-    };
+    let keywords_manager = KeywordsManager::new(&config_dir)?;
+    let keywords = keywords_manager.load_keywords()?;
 
     let transcription_config = transcription::TranscriptionConfig::new(
         model,
