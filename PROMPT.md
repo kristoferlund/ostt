@@ -1,14 +1,14 @@
 Read the implementation plan at:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/PLAN.md
+  /home/kristoferlund/gh/ostt/specs/Phase 3/PLAN.md
 
 Read the session notes at:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/Phase 3/SESSION.md
 
 Read every spec file in:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/
+  /home/kristoferlund/gh/ostt/specs/Phase 3/
 
-Find the next incomplete SUB-SECTION in PLAN.md (the first sub-section that has
-unchecked tasks, e.g., 2.1.A, 2.1.B, 2.1.C, or 2.1.D).
+Find the next incomplete SECTION in PLAN.md (the first section that has
+unchecked tasks, e.g., 3.1.A or 3.2.A).
 Read the corresponding spec file for context.
 
 Study the relevant source files in the target codebase at /home/kristoferlund/gh/ostt/src/
@@ -23,27 +23,27 @@ CRITICAL — Update PLAN.md after EVERY completed task:
   After finishing each task, IMMEDIATELY edit PLAN.md to change `- [ ]` to `- [x]`
   for that task BEFORE starting the next task. This is essential for crash recovery —
   if the session is interrupted, the plan must reflect what has already been done.
-  Do NOT batch these updates. Do NOT wait until the end of the sub-section.
+  Do NOT batch these updates. Do NOT wait until the end of the section.
 
 After each verification task (cargo check, cargo clippy, cargo test), confirm it passes
 before moving on.
 
 Rules:
-- SCOPE: Complete only ONE sub-section per session (at most 10 tasks). A sub-section
-  is a group like "2.1.A", "2.1.B", etc. — identified by a #### heading in the plan.
+- SCOPE: Complete only ONE section per session (at most 10 tasks). A section
+  is a group like "3.1.A", "3.2.A", etc. — identified by a #### heading in the plan.
 - Do not skip tasks. Do not reorder tasks.
 - Only modify files in the target codebase (/home/kristoferlund/gh/ostt/src/), PLAN.md,
   and SESSION.md. Do not create or modify any other files.
 - If a verification step fails, fix the issue and retry. If it fails a second time on
   the same task, mark the task with `[!]` in PLAN.md, git commit all partial work, and
   STOP the session.
-- After completing all tasks in the current sub-section, git commit all changes.
-- STOP after completing one sub-section. Do NOT continue to the next sub-section.
+- After completing all tasks in the current section, git commit all changes.
+- STOP after completing one section. Do NOT continue to the next section.
 
 After stopping, APPEND a session summary to the end of:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/Phase 3/SESSION.md
 
-Use the heading format: ## Session N: Spec 2.1.X — <title>
+Use the heading format: ## Session N: Spec 3.X.Y — <title>
 (Increment N based on how many sessions already exist in the file.)
 
 Include in the summary:
