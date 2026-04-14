@@ -1,18 +1,23 @@
 Read the implementation plan at:
-  /home/kristoferlund/gh/ostt/specs/Phase 3/PLAN.md
+  /home/kristoferlund/gh/ostt/specs/Phase 4/PLAN.md
 
 Read the session notes at:
-  /home/kristoferlund/gh/ostt/specs/Phase 3/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/Phase 4/SESSION.md
 
 Read every spec file in:
-  /home/kristoferlund/gh/ostt/specs/Phase 3/
+  /home/kristoferlund/gh/ostt/specs/Phase 4/
 
 Find the next incomplete SECTION in PLAN.md (the first section that has
-unchecked tasks, e.g., 3.1.A or 3.2.A).
+unchecked tasks, e.g., 4.1.A).
 Read the corresponding spec file for context.
 
 Study the relevant source files in the target codebase at /home/kristoferlund/gh/ostt/src/
 before making any changes. Understand existing patterns, imports, and conventions.
+Key reference files for this phase:
+  - src/history/ui.rs (primary TUI pattern reference)
+  - src/keywords/ui.rs (secondary TUI pattern reference)
+  - src/process/mod.rs (module registration)
+  - src/config/file.rs (ProcessAction, ProcessConfig types)
 
 Read the session notes from previous sessions in SESSION.md (if the file exists) to
 understand what has already been accomplished and any obstacles encountered.
@@ -30,7 +35,7 @@ before moving on.
 
 Rules:
 - SCOPE: Complete only ONE section per session (at most 10 tasks). A section
-  is a group like "3.1.A", "3.2.A", etc. — identified by a #### heading in the plan.
+  is a group like "4.1.A" — identified by a #### heading in the plan.
 - Do not skip tasks. Do not reorder tasks.
 - Only modify files in the target codebase (/home/kristoferlund/gh/ostt/src/), PLAN.md,
   and SESSION.md. Do not create or modify any other files.
@@ -41,10 +46,11 @@ Rules:
 - STOP after completing one section. Do NOT continue to the next section.
 
 After stopping, APPEND a session summary to the end of:
-  /home/kristoferlund/gh/ostt/specs/Phase 3/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/Phase 4/SESSION.md
 
-Use the heading format: ## Session N: Spec 3.X.Y — <title>
-(Increment N based on how many sessions already exist in the file.)
+Use the heading format: ## Session N: Spec 4.1.A — <title>
+(Increment N based on how many sessions already exist in the file.
+If the file does not exist, create it and start with Session 1.)
 
 Include in the summary:
 - What was accomplished
