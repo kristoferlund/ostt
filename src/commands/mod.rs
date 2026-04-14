@@ -24,6 +24,7 @@ pub mod logs;
 pub mod retry;
 pub mod replay;
 pub mod transcribe;
+pub mod process;
 
 pub use auth::handle_auth;
 pub use record::handle_record;
@@ -35,3 +36,4 @@ pub use logs::handle_logs;
 pub use retry::handle_retry;
 pub use replay::handle_replay;
 pub use transcribe::handle_transcribe;
+pub use process::handle_process;

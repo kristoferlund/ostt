@@ -204,6 +204,40 @@ enum Commands {
     /// Useful for troubleshooting issues.
     Logs,
 
+    /// Post-process a transcription from history
+    ///
+    /// Run a processing action on an existing transcription.
+    /// Shows the action picker if no --action is specified.
+    ///
+    /// Examples:
+    ///   ostt process                    # Process most recent, show picker
+    ///   ostt process 3                  # Process #3, show picker
+    ///   ostt process -a clean           # Process most recent with "clean" action
+    ///   ostt process 5 -a cmd -c        # Process #5 with "cmd", copy to clipboard
+    ///   ostt process --list             # List configured actions
+    #[command(visible_alias = "p")]
+    Process {
+        /// History index (1 = most recent, 2 = second most recent, etc.)
+        #[arg(value_name = "N")]
+        index: Option<usize>,
+
+        /// Run action by ID, skip the action picker
+        #[arg(short, long, value_name = "ID")]
+        action: Option<String>,
+
+        /// List all configured actions and exit
+        #[arg(long)]
+        list: bool,
+
+        /// Copy result to clipboard instead of stdout (shadows global -c)
+        #[arg(short, long)]
+        clipboard: bool,
+
+        /// Write result to file instead of stdout (shadows global -o)
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
+
     /// Generate shell completion script
     ///
     /// Generate completion script for your shell. Save the output to your
@@ -317,6 +351,15 @@ pub async fn run() -> Result<(), anyhow::Error> {
         }
         Some(Commands::Config) => {
             commands::handle_config()?;
+        }
+        Some(Commands::Process {
+            index,
+            action,
+            list,
+            clipboard,
+            output,
+        }) => {
+            commands::handle_process(index, action, list, clipboard, output).await?;
         }
         Some(Commands::Completions { .. }) | Some(Commands::ListDevices) | Some(Commands::Logs) => {
             unreachable!("These commands are handled earlier")

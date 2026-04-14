@@ -2,7 +2,7 @@
 
 **Scope:** Spec 5.1 (Process Subcommand), Spec 5.2 (Process Flag on Record, Transcribe, Retry)
 **Target codebase:** `/home/kristoferlund/gh/ostt`
-**Status:** Not started
+**Status:** In progress (5.1.A complete)
 
 ---
 
@@ -45,16 +45,16 @@ Execution order: **5.1 → 5.2**
 
 #### 5.1.A — History lookup and process command handler
 
-- [ ] **5.1.1** Add `get_transcription_by_index` method to `HistoryManager` in `src/history/storage.rs`: takes `index: usize` (1-indexed), computes `offset = index.saturating_sub(1)`, queries `SELECT id, text, created_at FROM transcriptions ORDER BY created_at DESC LIMIT 1 OFFSET ?1`, returns `Result<Option<TranscriptionEntry>>`. Use the same row-parsing pattern as `get_transcription`.
-- [ ] **5.1.2** Create `src/commands/process.rs` with the `handle_process` async function signature: `pub async fn handle_process(index: Option<usize>, action_id: Option<String>, list: bool, clipboard: bool, output_file: Option<String>) -> Result<(), anyhow::Error>`. Add necessary imports (`crate::config`, `crate::history::HistoryManager`, `crate::keywords::KeywordsManager`, `crate::process`, `crate::clipboard::copy_to_clipboard`, `dirs`).
-- [ ] **5.1.3** Implement the `--list` mode branch in `handle_process`: load config via `OsttConfig::load()`, if `config.process.actions` is empty print `"No process actions configured. Add actions to ~/.config/ostt/ostt.toml"` and return Ok, otherwise print each action as `"{id} — {name}"` (one per line) and return Ok.
-- [ ] **5.1.4** Implement the normal mode flow in `handle_process`: load config, validate at least one action exists (error if none: `"No process actions configured. Add actions to ~/.config/ostt/ostt.toml"`), load transcription via `HistoryManager::get_transcription_by_index(index.unwrap_or(1))` (error if None: `"No transcription found at index {N}. Use 'ostt history' to see available transcriptions."`).
-- [ ] **5.1.5** Continue the normal mode flow: if `action_id` is given, look up via `config.process.get_action(id)` (error if not found: `"Unknown action '{id}'. Use 'ostt process --list' to see available actions."`). If `action_id` is not given, call `process::picker::show_action_picker(&config.process.actions)` — if cancelled, return Ok (exit cleanly). Then look up the selected action from config.
-- [ ] **5.1.6** Complete the normal mode flow: load keywords via `KeywordsManager`, execute the action via `process::execute_action(&action, &transcription.text, &keywords)`, save the result to history via `history_manager.save_transcription(&result)`, then output using the file > clipboard > stdout priority pattern (matching retry.rs/transcribe.rs).
-- [ ] **5.1.7** Register the module: add `pub mod process;` and `pub use process::handle_process;` to `src/commands/mod.rs`.
-- [ ] **5.1.8** Add the `Process` variant to the `Commands` enum in `src/app.rs` with all fields (`index: Option<usize>`, `action: Option<String>`, `list: bool`, `clipboard: bool`, `output: Option<String>`) and the `#[command(visible_alias = "p")]` attribute, matching the spec's CLI definition exactly.
-- [ ] **5.1.9** Add the routing match arm in `src/app.rs` `run()` function: `Some(Commands::Process { index, action, list, clipboard, output }) => { commands::handle_process(index, action, list, clipboard, output).await?; }`.
-- [ ] **5.1.10** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
+- [x] **5.1.1** Add `get_transcription_by_index` method to `HistoryManager` in `src/history/storage.rs`: takes `index: usize` (1-indexed), computes `offset = index.saturating_sub(1)`, queries `SELECT id, text, created_at FROM transcriptions ORDER BY created_at DESC LIMIT 1 OFFSET ?1`, returns `Result<Option<TranscriptionEntry>>`. Use the same row-parsing pattern as `get_transcription`.
+- [x] **5.1.2** Create `src/commands/process.rs` with the `handle_process` async function signature: `pub async fn handle_process(index: Option<usize>, action_id: Option<String>, list: bool, clipboard: bool, output_file: Option<String>) -> Result<(), anyhow::Error>`. Add necessary imports (`crate::config`, `crate::history::HistoryManager`, `crate::keywords::KeywordsManager`, `crate::process`, `crate::clipboard::copy_to_clipboard`, `dirs`).
+- [x] **5.1.3** Implement the `--list` mode branch in `handle_process`: load config via `OsttConfig::load()`, if `config.process.actions` is empty print `"No process actions configured. Add actions to ~/.config/ostt/ostt.toml"` and return Ok, otherwise print each action as `"{id} — {name}"` (one per line) and return Ok.
+- [x] **5.1.4** Implement the normal mode flow in `handle_process`: load config, validate at least one action exists (error if none: `"No process actions configured. Add actions to ~/.config/ostt/ostt.toml"`), load transcription via `HistoryManager::get_transcription_by_index(index.unwrap_or(1))` (error if None: `"No transcription found at index {N}. Use 'ostt history' to see available transcriptions."`).
+- [x] **5.1.5** Continue the normal mode flow: if `action_id` is given, look up via `config.process.get_action(id)` (error if not found: `"Unknown action '{id}'. Use 'ostt process --list' to see available actions."`). If `action_id` is not given, call `process::picker::show_action_picker(&config.process.actions)` — if cancelled, return Ok (exit cleanly). Then look up the selected action from config.
+- [x] **5.1.6** Complete the normal mode flow: load keywords via `KeywordsManager`, execute the action via `process::execute_action(&action, &transcription.text, &keywords)`, save the result to history via `history_manager.save_transcription(&result)`, then output using the file > clipboard > stdout priority pattern (matching retry.rs/transcribe.rs).
+- [x] **5.1.7** Register the module: add `pub mod process;` and `pub use process::handle_process;` to `src/commands/mod.rs`.
+- [x] **5.1.8** Add the `Process` variant to the `Commands` enum in `src/app.rs` with all fields (`index: Option<usize>`, `action: Option<String>`, `list: bool`, `clipboard: bool`, `output: Option<String>`) and the `#[command(visible_alias = "p")]` attribute, matching the spec's CLI definition exactly.
+- [x] **5.1.9** Add the routing match arm in `src/app.rs` `run()` function: `Some(Commands::Process { index, action, list, clipboard, output }) => { commands::handle_process(index, action, list, clipboard, output).await?; }`.
+- [x] **5.1.10** Verify: `cargo check` and `cargo clippy -- -D warnings` and `cargo test` all pass.
 
 ### Spec 5.2 — Process Flag on Record, Transcribe, Retry
 
