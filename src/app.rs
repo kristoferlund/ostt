@@ -88,6 +88,10 @@ struct Cli {
     #[arg(short, long, value_name = "FILE", global = true)]
     output: Option<String>,
 
+    /// Enable processing after transcription
+    #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+    process: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -107,6 +111,10 @@ enum Commands {
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+        process: Option<String>,
     },
 
     /// Retry transcription of a previous recording
@@ -125,6 +133,10 @@ enum Commands {
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+        process: Option<String>,
     },
 
     /// Transcribe a pre-recorded audio file
@@ -150,6 +162,10 @@ enum Commands {
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+        process: Option<String>,
     },
 
     /// Replay a previous recording using system audio player
@@ -307,26 +323,28 @@ pub async fn run() -> Result<(), anyhow::Error> {
             // Default command is record
             // Merge top-level options with explicit record command options
             // If both are specified, the explicit record command options take precedence
-            let (clipboard, output) = match cli.command {
-                Some(Commands::Record { clipboard, output }) => (clipboard, output),
-                None => (cli.clipboard, cli.output),
+            let (clipboard, output, process) = match cli.command {
+                Some(Commands::Record { clipboard, output, process }) => (clipboard, output, process),
+                None => (cli.clipboard, cli.output, cli.process),
                 _ => unreachable!(),
             };
-            commands::handle_record(clipboard, output).await?;
+            commands::handle_record(clipboard, output, process).await?;
         }
         Some(Commands::Retry {
             index,
             clipboard,
             output,
+            process,
         }) => {
-            commands::handle_retry(index, clipboard, output).await?;
+            commands::handle_retry(index, clipboard, output, process).await?;
         }
         Some(Commands::Transcribe {
             file,
             clipboard,
             output,
+            process,
         }) => {
-            commands::handle_transcribe(file, clipboard, output).await?;
+            commands::handle_transcribe(file, clipboard, output, process).await?;
         }
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;

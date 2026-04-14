@@ -7,6 +7,7 @@ use crate::clipboard::copy_to_clipboard;
 use crate::config;
 use crate::history::HistoryManager;
 use crate::keywords::KeywordsManager;
+use crate::process;
 use crate::transcription;
 use dirs;
 use std::path::PathBuf;
@@ -20,10 +21,12 @@ use std::path::PathBuf;
 /// * `file` - Path to the audio file to transcribe
 /// * `clipboard` - If true, copy to clipboard instead of stdout
 /// * `output_file` - Optional file path to write output to instead of stdout
+/// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
 pub async fn handle_transcribe(
     file: PathBuf,
     clipboard: bool,
     output_file: Option<String>,
+    process: Option<String>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Transcribe Command ===");
 
@@ -88,7 +91,7 @@ pub async fn handle_transcribe(
     let trimmed_text = text.trim().to_string();
     tracing::debug!("Transcription completed: {}", trimmed_text);
 
-    // Save to history
+    // Save raw transcription to history
     let data_dir = dirs::home_dir()
         .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
         .join(".local")
@@ -100,11 +103,90 @@ pub async fn handle_transcribe(
         tracing::warn!("Failed to save transcription to history: {}", e);
     }
 
+    // Processing flow: if -p was passed, chain processing after transcription
+    let output_text = match process.as_deref() {
+        None => {
+            // No processing requested, output raw transcription
+            trimmed_text
+        }
+        Some("") => {
+            // Show action picker
+            let config_data = config::OsttConfig::load().map_err(|err| {
+                tracing::error!("Failed to load configuration: {err}");
+                anyhow::anyhow!("Configuration error: {err}")
+            })?;
+
+            if config_data.process.actions.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
+                ));
+            }
+
+            match process::picker::show_action_picker(&config_data.process.actions)? {
+                process::picker::PickerResult::Selected(selected_id) => {
+                    let action = config_data
+                        .process
+                        .get_action(&selected_id)
+                        .expect("Picker returned an ID not in config")
+                        .clone();
+
+                    let config_dir = dirs::config_dir()
+                        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+                    let keywords_manager = KeywordsManager::new(&config_dir)?;
+                    let keywords = keywords_manager.load_keywords()?;
+
+                    let result =
+                        process::execute_action(&action, &trimmed_text, &keywords).await?;
+
+                    if let Err(e) = history_manager.save_transcription(&result) {
+                        tracing::warn!("Failed to save processed result to history: {}", e);
+                    }
+
+                    result
+                }
+                process::picker::PickerResult::Cancelled => {
+                    // Cancelled — fall through to output raw transcription
+                    trimmed_text
+                }
+            }
+        }
+        Some(id) => {
+            // Look up action by ID
+            let config_data = config::OsttConfig::load().map_err(|err| {
+                tracing::error!("Failed to load configuration: {err}");
+                anyhow::anyhow!("Configuration error: {err}")
+            })?;
+
+            let action = config_data
+                .process
+                .get_action(id)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
+                    )
+                })?
+                .clone();
+
+            let config_dir = dirs::config_dir()
+                .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+            let keywords_manager = KeywordsManager::new(&config_dir)?;
+            let keywords = keywords_manager.load_keywords()?;
+
+            let result = process::execute_action(&action, &trimmed_text, &keywords).await?;
+
+            if let Err(e) = history_manager.save_transcription(&result) {
+                tracing::warn!("Failed to save processed result to history: {}", e);
+            }
+
+            result
+        }
+    };
+
     // Determine output destination: file > clipboard > stdout (default)
     if let Some(file_path) = output_file {
-        match std::fs::write(&file_path, &trimmed_text) {
+        match std::fs::write(&file_path, &output_text) {
             Ok(_) => {
-                tracing::debug!("Transcribed text written to file: {file_path}");
+                tracing::debug!("Output text written to file: {file_path}");
             }
             Err(e) => {
                 tracing::warn!("Failed to write to file '{file_path}': {e}");
@@ -112,9 +194,9 @@ pub async fn handle_transcribe(
             }
         }
     } else if clipboard {
-        match copy_to_clipboard(&trimmed_text) {
+        match copy_to_clipboard(&output_text) {
             Ok(_) => {
-                tracing::debug!("Transcription copied to clipboard");
+                tracing::debug!("Output text copied to clipboard");
             }
             Err(e) => {
                 tracing::warn!("Failed to copy to clipboard: {e}");
@@ -122,8 +204,8 @@ pub async fn handle_transcribe(
         }
     } else {
         // Default: stdout
-        println!("{trimmed_text}");
-        tracing::debug!("Transcribed text printed to stdout");
+        println!("{output_text}");
+        tracing::debug!("Output text printed to stdout");
     }
 
     Ok(())

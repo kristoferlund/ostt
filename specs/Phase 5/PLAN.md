@@ -2,7 +2,7 @@
 
 **Scope:** Spec 5.1 (Process Subcommand), Spec 5.2 (Process Flag on Record, Transcribe, Retry)
 **Target codebase:** `/home/kristoferlund/gh/ostt`
-**Status:** In progress (5.1.A complete)
+**Status:** In progress (5.1.A, 5.2.A, 5.2.B complete)
 
 ---
 
@@ -60,24 +60,24 @@ Execution order: **5.1 → 5.2**
 
 #### 5.2.A — CLI changes and routing updates
 
-- [ ] **5.2.1** Add the `process` field to the `Record` variant in `Commands` enum in `src/app.rs`: `#[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")] process: Option<String>`.
-- [ ] **5.2.2** Add the same `process` field to the `Retry` variant in `Commands` enum in `src/app.rs`.
-- [ ] **5.2.3** Add the same `process` field to the `Transcribe` variant in `Commands` enum in `src/app.rs`.
-- [ ] **5.2.4** Add the same `process` field to the top-level `Cli` struct in `src/app.rs` (for the default record command, no explicit subcommand).
-- [ ] **5.2.5** Update the `Record` routing match arm in `run()` to extract and pass `process`: destructure `process` alongside `clipboard` and `output`, merge from `cli.process` when `None` (no subcommand), pass to `commands::handle_record(clipboard, output, process)`.
-- [ ] **5.2.6** Update the `Retry` routing match arm in `run()` to extract and pass `process` to `commands::handle_retry(index, clipboard, output, process)`.
-- [ ] **5.2.7** Update the `Transcribe` routing match arm in `run()` to extract and pass `process` to `commands::handle_transcribe(file, clipboard, output, process)`.
-- [ ] **5.2.8** Verify: `cargo check` passes (handler signatures don't match yet — this will fail; proceed to 5.2.B to update handlers).
+- [x] **5.2.1** Add the `process` field to the `Record` variant in `Commands` enum in `src/app.rs`: `#[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")] process: Option<String>`.
+- [x] **5.2.2** Add the same `process` field to the `Retry` variant in `Commands` enum in `src/app.rs`.
+- [x] **5.2.3** Add the same `process` field to the `Transcribe` variant in `Commands` enum in `src/app.rs`.
+- [x] **5.2.4** Add the same `process` field to the top-level `Cli` struct in `src/app.rs` (for the default record command, no explicit subcommand).
+- [x] **5.2.5** Update the `Record` routing match arm in `run()` to extract and pass `process`: destructure `process` alongside `clipboard` and `output`, merge from `cli.process` when `None` (no subcommand), pass to `commands::handle_record(clipboard, output, process)`.
+- [x] **5.2.6** Update the `Retry` routing match arm in `run()` to extract and pass `process` to `commands::handle_retry(index, clipboard, output, process)`.
+- [x] **5.2.7** Update the `Transcribe` routing match arm in `run()` to extract and pass `process` to `commands::handle_transcribe(file, clipboard, output, process)`.
+- [x] **5.2.8** Verify: `cargo check` passes (handler signatures don't match yet — this will fail; proceed to 5.2.B to update handlers).
 
 Note: Task 5.2.8 is expected to fail at `cargo check` because the handler signatures haven't been updated yet. Mark it as complete once you've confirmed the CLI/routing changes compile in isolation (or skip verification and proceed to 5.2.B if `cargo check` fails solely due to handler arity mismatches).
 
 #### 5.2.B — Handler updates for handle_transcribe and handle_retry
 
-- [ ] **5.2.9** Update `handle_transcribe` signature in `src/commands/transcribe.rs` to accept `process: Option<String>` as the fourth parameter.
-- [ ] **5.2.10** Implement the processing flow in `handle_transcribe` after transcription succeeds and `trimmed_text` is available: if `process` is `None`, proceed to output as before. If `process` is `Some("")`, load config, call `process::picker::show_action_picker` — if cancelled, fall through to normal output. If `process` is `Some(id)`, load config, look up action (error if not found). Then load keywords, execute action, save both raw transcription AND processed result to history (two `save_transcription` calls), replace output text with processed result.
-- [ ] **5.2.11** Update `handle_retry` signature in `src/commands/retry.rs` to accept `process: Option<String>` as the fourth parameter.
-- [ ] **5.2.12** Implement the same processing flow in `handle_retry` after transcription succeeds: same pattern as `handle_transcribe` — check `process`, show picker or look up action, execute, save both to history, output processed result.
-- [ ] **5.2.13** Verify: `cargo check` and `cargo clippy -- -D warnings` pass.
+- [x] **5.2.9** Update `handle_transcribe` signature in `src/commands/transcribe.rs` to accept `process: Option<String>` as the fourth parameter.
+- [x] **5.2.10** Implement the processing flow in `handle_transcribe` after transcription succeeds and `trimmed_text` is available: if `process` is `None`, proceed to output as before. If `process` is `Some("")`, load config, call `process::picker::show_action_picker` — if cancelled, fall through to normal output. If `process` is `Some(id)`, load config, look up action (error if not found). Then load keywords, execute action, save both raw transcription AND processed result to history (two `save_transcription` calls), replace output text with processed result.
+- [x] **5.2.11** Update `handle_retry` signature in `src/commands/retry.rs` to accept `process: Option<String>` as the fourth parameter.
+- [x] **5.2.12** Implement the same processing flow in `handle_retry` after transcription succeeds: same pattern as `handle_transcribe` — check `process`, show picker or look up action, execute, save both to history, output processed result.
+- [x] **5.2.13** Verify: `cargo check` and `cargo clippy -- -D warnings` pass.
 
 #### 5.2.C — Handler update for handle_record and final verification
 
