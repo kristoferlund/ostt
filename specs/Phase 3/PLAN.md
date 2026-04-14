@@ -2,7 +2,7 @@
 
 **Scope:** Specs 3.1 (Bash Action Executor) and 3.2 (Action Dispatcher)
 **Target codebase:** `/home/kristoferlund/gh/ostt`
-**Status:** Not started
+**Status:** Complete
 
 ---
 
@@ -35,16 +35,16 @@ Execution order: **3.1 first, then 3.2.**
 
 #### 3.1.A — Module implementation and tests
 
-- [ ] **3.1.1** Create `src/process/bash.rs` with the `execute_bash_action` async function signature (taking `&str` command and `&str` input, returning `anyhow::Result<String>`)
-- [ ] **3.1.2** Implement the function body: spawn `sh -c <command>` using `tokio::process::Command` with stdin piped and stdout/stderr captured, write `input` to stdin, close stdin, wait for output
-- [ ] **3.1.3** Add 30-second timeout using `tokio::time::timeout` — kill the child and return error "Command timed out after 30 seconds" on timeout
-- [ ] **3.1.4** Implement error handling: command spawn failure ("Command failed to start: {error}. Make sure the command is installed."), non-zero exit ("Command exited with status {code}:\n{stderr}"), return trimmed stdout on success
-- [ ] **3.1.5** Register the module: add `pub mod bash;` to `src/process/mod.rs`
-- [ ] **3.1.6** Add test: `execute_bash_action("tr '[:lower:]' '[:upper:]'", "hello")` returns `"HELLO"`
-- [ ] **3.1.7** Add test: `execute_bash_action("cat", "pass through")` returns `"pass through"`
-- [ ] **3.1.8** Add test: a command that exits non-zero returns an error containing stderr (e.g., `sh -c "echo err >&2; exit 1"`)
-- [ ] **3.1.9** Add test: a non-existent command (e.g., `nonexistent_command_xyz`) returns a clear error
-- [ ] **3.1.10** Verify: `cargo check`, `cargo clippy -- -D warnings`, `cargo test` all pass
+- [x] **3.1.1** Create `src/process/bash.rs` with the `execute_bash_action` async function signature (taking `&str` command and `&str` input, returning `anyhow::Result<String>`)
+- [x] **3.1.2** Implement the function body: spawn `sh -c <command>` using `tokio::process::Command` with stdin piped and stdout/stderr captured, write `input` to stdin, close stdin, wait for output
+- [x] **3.1.3** Add 30-second timeout using `tokio::time::timeout` — kill the child and return error "Command timed out after 30 seconds" on timeout
+- [x] **3.1.4** Implement error handling: command spawn failure ("Command failed to start: {error}. Make sure the command is installed."), non-zero exit ("Command exited with status {code}:\n{stderr}"), return trimmed stdout on success
+- [x] **3.1.5** Register the module: add `pub mod bash;` to `src/process/mod.rs`
+- [x] **3.1.6** Add test: `execute_bash_action("tr '[:lower:]' '[:upper:]'", "hello")` returns `"HELLO"`
+- [x] **3.1.7** Add test: `execute_bash_action("cat", "pass through")` returns `"pass through"`
+- [x] **3.1.8** Add test: a command that exits non-zero returns an error containing stderr (e.g., `sh -c "echo err >&2; exit 1"`)
+- [x] **3.1.9** Add test: a non-existent command (e.g., `nonexistent_command_xyz`) returns a clear error
+- [x] **3.1.10** Verify: `cargo check`, `cargo clippy -- -D warnings`, `cargo test` all pass
 
 ---
 
@@ -54,13 +54,13 @@ Execution order: **3.1 first, then 3.2.**
 
 #### 3.2.A — Module implementation and tests
 
-- [ ] **3.2.1** Create `src/process/execute.rs` with the `execute_action` async function signature (taking `&ProcessAction`, `&str` transcription, `&[String]` keywords, returning `anyhow::Result<String>`)
-- [ ] **3.2.2** Implement the dispatch logic: match on `action.details` — for `ActionDetails::Bash { command }` call `bash::execute_bash_action(command, transcription)`, for `ActionDetails::Ai { tool, model, inputs, tool_binary, tool_args }` call `input::resolve_inputs` then `ai::execute_ai_action`
-- [ ] **3.2.3** Register the module and add re-exports: add `pub mod execute;` to `src/process/mod.rs`, add `pub use execute::execute_action;`
-- [ ] **3.2.4** Add test: `execute_action` with a bash action (`cat`) returns the transcription text as-is
-- [ ] **3.2.5** Add test: `execute_action` with a bash action that transforms text (e.g., `tr '[:lower:]' '[:upper:]'`) returns the transformed result
-- [ ] **3.2.6** Add test: `execute_action` with a bash action that fails returns an error
-- [ ] **3.2.7** Verify: `cargo check`, `cargo clippy -- -D warnings`, `cargo test` all pass
+- [x] **3.2.1** Create `src/process/execute.rs` with the `execute_action` async function signature (taking `&ProcessAction`, `&str` transcription, `&[String]` keywords, returning `anyhow::Result<String>`)
+- [x] **3.2.2** Implement the dispatch logic: match on `action.details` — for `ActionDetails::Bash { command }` call `bash::execute_bash_action(command, transcription)`, for `ActionDetails::Ai { tool, model, inputs, tool_binary, tool_args }` call `input::resolve_inputs` then `ai::execute_ai_action`
+- [x] **3.2.3** Register the module and add re-exports: add `pub mod execute;` to `src/process/mod.rs`, add `pub use execute::execute_action;`
+- [x] **3.2.4** Add test: `execute_action` with a bash action (`cat`) returns the transcription text as-is
+- [x] **3.2.5** Add test: `execute_action` with a bash action that transforms text (e.g., `tr '[:lower:]' '[:upper:]'`) returns the transformed result
+- [x] **3.2.6** Add test: `execute_action` with a bash action that fails returns an error
+- [x] **3.2.7** Verify: `cargo check`, `cargo clippy -- -D warnings`, `cargo test` all pass
 
 ---
 
