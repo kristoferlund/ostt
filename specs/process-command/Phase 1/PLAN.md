@@ -115,13 +115,13 @@ cargo test
 
 ```
 Read the implementation plan at:
-  /home/kristoferlund/gh/ostt/specs/Phase 1/PLAN.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 1/PLAN.md
 
 Read the session notes at:
-  /home/kristoferlund/gh/ostt/specs/Phase 1/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 1/SESSION.md
 
 Read every spec file in:
-  /home/kristoferlund/gh/ostt/specs/Phase 1/
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 1/
 
 Find the next incomplete spec group in PLAN.md (the first group that has unchecked tasks).
 Read the corresponding spec file for that group.
@@ -150,7 +150,7 @@ Rules:
 - STOP after completing one spec group. Do not continue to the next spec group.
 
 After stopping, APPEND a session summary to the end of:
-  /home/kristoferlund/gh/ostt/specs/Phase 1/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 1/SESSION.md
 
 Use the heading format: ## Session N: Spec X.Y — <title>
 (Increment N based on how many sessions already exist in the file.)

@@ -124,13 +124,13 @@ cargo test
 
 ```
 Read the implementation plan at:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/PLAN.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 2/PLAN.md
 
 Read the session notes at:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 2/SESSION.md
 
 Read every spec file in:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 2/
 
 Find the next incomplete SUB-SECTION in PLAN.md (the first sub-section that has
 unchecked tasks, e.g., 2.1.A, 2.1.B, 2.1.C, or 2.1.D).
@@ -166,7 +166,7 @@ Rules:
 - STOP after completing one sub-section. Do NOT continue to the next sub-section.
 
 After stopping, APPEND a session summary to the end of:
-  /home/kristoferlund/gh/ostt/specs/Phase 2/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 2/SESSION.md
 
 Use the heading format: ## Session N: Spec 2.1.X — <title>
 (Increment N based on how many sessions already exist in the file.)

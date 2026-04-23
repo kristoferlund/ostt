@@ -91,13 +91,13 @@ cargo test
 
 ```
 Read the implementation plan at:
-  /home/kristoferlund/gh/ostt/specs/Phase 6/PLAN.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 6/PLAN.md
 
 Read the session notes at:
-  /home/kristoferlund/gh/ostt/specs/Phase 6/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 6/SESSION.md
 
 Read the spec file:
-  /home/kristoferlund/gh/ostt/specs/Phase 6/6.1 — Processing Animation with Status Label.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 6/6.1 — Processing Animation with Status Label.md
 
 Find the next incomplete SECTION in PLAN.md (the first section that has
 unchecked tasks, e.g., 6.1.A or 6.1.B).
@@ -142,7 +142,7 @@ Rules:
 - STOP after completing one section. Do NOT continue to the next section.
 
 After stopping, APPEND a session summary to the end of:
-  /home/kristoferlund/gh/ostt/specs/Phase 6/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 6/SESSION.md
 
 Use the heading format: ## Session N: Spec X.Y.Z — <title>
 (Increment N based on how many sessions already exist in the file.

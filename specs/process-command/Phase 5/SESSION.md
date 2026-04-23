@@ -23,7 +23,7 @@ None. All tasks completed without issues on first attempt.
 
 ### Out-of-scope observations
 
-- There are untracked/modified files in the working tree from other phases (specs/Phase 3/SESSION.md, specs/Phase 4/SESSION.md, specs/README.md, specs/Phase 7/). These were left untouched and not included in the commit.
+- There are untracked/modified files in the working tree from other phases (specs/process-command/Phase 3/SESSION.md, specs/process-command/Phase 4/SESSION.md, specs/README.md, specs/process-command/Phase 7/). These were left untouched and not included in the commit.
 - FIX THIS: The `handle_record` function in `record.rs` loads keywords using a manual file-read approach rather than `KeywordsManager` (lines 270-284). The other handlers (`retry.rs`, `transcribe.rs`) use `KeywordsManager`. This inconsistency is pre-existing and out of scope for Phase 5.
 
 ## Session 2: Spec 5.2.A — CLI changes and routing updates

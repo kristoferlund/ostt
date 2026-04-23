@@ -140,15 +140,15 @@ cargo test
 
 ```
 Read the implementation plan at:
-  /home/kristoferlund/gh/ostt/specs/Phase 7/PLAN.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 7/PLAN.md
 
 Read the session notes at:
-  /home/kristoferlund/gh/ostt/specs/Phase 7/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 7/SESSION.md
 
 Read the spec files:
-  /home/kristoferlund/gh/ostt/specs/Phase 7/7.1 — Unified TUI Lifecycle for Record Flow.md
-  /home/kristoferlund/gh/ostt/specs/Phase 7/7.2 — Miscellaneous Fixes.md
-  /home/kristoferlund/gh/ostt/specs/Phase 7/7.3 — Mouse Hover Highlight.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 7/7.1 — Unified TUI Lifecycle for Record Flow.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 7/7.2 — Miscellaneous Fixes.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 7/7.3 — Mouse Hover Highlight.md
 
 Find the next incomplete SECTION in PLAN.md (the first section that has
 unchecked tasks, e.g., 7.2, 7.1.A, 7.1.B, 7.1.C, or 7.3).
@@ -194,7 +194,7 @@ Rules:
 - STOP after completing one section. Do NOT continue to the next section.
 
 After stopping, APPEND a session summary to the end of:
-  /home/kristoferlund/gh/ostt/specs/Phase 7/SESSION.md
+  /home/kristoferlund/gh/ostt/specs/process-command/Phase 7/SESSION.md
 
 Use the heading format: ## Session N: Spec X.Y.Z — <title>
 (Increment N based on how many sessions already exist in the file.
