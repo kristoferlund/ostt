@@ -3,7 +3,7 @@
 **OSTT** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, ostt works seamlessly on **Linux and macOS**.
 
 > [!TIP]
-> **Omarchy and Hyprland users!** Configure ostt to run as a floating popup window to record and transcribe in any app. 
+> **Use ostt as a global hotkey popup!** Run `ostt launch -c` from a keyboard shortcut to record and transcribe from any app. See [Platform Setup](#platform-specific-setup) below.
 
 <video src="https://github.com/user-attachments/assets/a4124692-9d70-4d36-a4de-613b2209d81f" controls width="600">
   Your browser does not support the video tag.
@@ -23,11 +23,7 @@
 - **Cross-platform support** - Linux and macOS
 
 > [!IMPORTANT]
-> **Upgrading from 0.0.5?** Version 0.0.7 introduces output flags (`-c`, `-o`) that change default behavior for popup integrations.
-> - **Hyprland users**: See [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
-> - **macOS users**: See [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
-> 
-> Without updates, transcriptions will output to stdout instead of clipboard in popup windows.
+> **Upgrading from 0.0.7 or earlier?** Version 0.0.8 introduces the `ostt launch` command, which is now the recommended way to set up popup hotkeys on macOS. See [macOS Setup](environments/macOS/README.md) for the new approach using Shortcuts.app (no Hammerspoon needed).
 
 ## Supported Providers & Models
 
@@ -140,14 +136,16 @@ For the best experience, configure ostt to run as a floating popup window tied t
 3. Have it automatically transcribed
 4. Paste the result directly into your current app
 
+The `ostt launch` command handles terminal detection, window configuration, and toggle behavior (press the hotkey again to finish recording). Bind `ostt launch -c` to a system keyboard shortcut on any platform.
+
 Platform-specific setup instructions:
 
-- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration (recommended)
-- **[macOS Setup](environments/macOS/README.md)** - Hammerspoon-based popup configuration
+- **[macOS Setup](environments/macOS/README.md)** - Uses Shortcuts.app (built-in, no third-party tools)
+- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration
 
 ### Other Platforms
 
-ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal.
+ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (KDE, GNOME, XFCE), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
 
 ## Commands
 
@@ -159,6 +157,8 @@ ostt -c              # Record and copy to clipboard (shorthand)
 ostt record -c       # Record and copy to clipboard (explicit)
 ostt -o file         # Record and write to file (shorthand)
 ostt record -o file  # Record and write to file (explicit)
+ostt launch -c       # Launch popup terminal, record, copy to clipboard
+ostt launch -c -p clean  # Launch popup, record, process with "clean", copy
 ostt transcribe file # Transcribe a pre-recorded audio file
 ostt transcribe f -c # Transcribe and copy to clipboard
 ostt transcribe f -o out.txt # Transcribe and write to file
@@ -177,10 +177,11 @@ ostt -h              # Quick help
 ostt --help          # Detailed help with examples
 ```
 
-**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `l` (launch), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
 
 ```bash
 ostt r -c            # Same as: ostt record -c
+ostt l -c            # Same as: ostt launch -c
 ostt a               # Same as: ostt auth
 ```
 
@@ -377,7 +378,8 @@ Add technical terms, names, or domain-specific vocabulary to help the AI transcr
     └── alacritty-float.toml
 
 ~/.local/share/ostt/
-└── credentials            # API keys (0600 permissions)
+├── credentials            # API keys (0600 permissions)
+└── launch.pid             # PID file for ostt launch toggle
 
 ~/.local/state/ostt/
 └── ostt.log.*             # Daily-rotated logs (kept for 7 days, auto-cleanup on startup)

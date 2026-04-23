@@ -200,12 +200,71 @@ pub struct ProvidersConfig {
     pub assemblyai: AssemblyAIConfig,
 }
 
+/// Popup window configuration for the `launch` subcommand.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopupConfig {
+    /// Terminal emulator to use: "ghostty", "kitty", "alacritty", "foot", "gnome-terminal"
+    /// If not set, auto-detects from available terminals.
+    #[serde(default)]
+    pub terminal: Option<String>,
+    /// Window x position in pixels
+    #[serde(default = "default_popup_x")]
+    pub x: u32,
+    /// Window y position in pixels
+    #[serde(default = "default_popup_y")]
+    pub y: u32,
+    /// Window width in terminal columns
+    #[serde(default = "default_popup_width")]
+    pub width: u32,
+    /// Window height in terminal rows
+    #[serde(default = "default_popup_height")]
+    pub height: u32,
+    /// Font size
+    #[serde(default = "default_popup_font_size")]
+    pub font_size: u32,
+    /// Hide window decorations (titlebar, borders)
+    #[serde(default = "default_true")]
+    pub borderless: bool,
+}
+
+fn default_popup_x() -> u32 {
+    630
+}
+fn default_popup_y() -> u32 {
+    790
+}
+fn default_popup_width() -> u32 {
+    50
+}
+fn default_popup_height() -> u32 {
+    10
+}
+fn default_popup_font_size() -> u32 {
+    8
+}
+
+impl Default for PopupConfig {
+    fn default() -> Self {
+        Self {
+            terminal: None,
+            x: default_popup_x(),
+            y: default_popup_y(),
+            width: default_popup_width(),
+            height: default_popup_height(),
+            font_size: default_popup_font_size(),
+            borderless: true,
+        }
+    }
+}
+
 /// Complete application configuration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OsttConfig {
     pub audio: AudioConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
+    #[serde(default)]
+    pub popup: PopupConfig,
 }
 
 impl OsttConfig {
@@ -248,6 +307,7 @@ impl OsttConfig {
                 visualization: VisualizationType::default(),
             },
             providers: ProvidersConfig::default(),
+            popup: PopupConfig::default(),
         }
     }
 }

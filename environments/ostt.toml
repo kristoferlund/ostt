@@ -186,3 +186,29 @@ language_detection = true
 # [providers.assemblyai.language_detection_options]
 # expected_languages = ["en", "es", "fr"]  # Only expect these languages
 # fallback_language = "auto"               # "auto" or specific code like "en"
+
+
+# =============================================================================
+# Popup Window Configuration (for `ostt launch`)
+# =============================================================================
+
+# [popup]
+
+# Terminal emulator to use for the popup window.
+# If not set, auto-detects from: ghostty, kitty, foot, alacritty, gnome-terminal
+# terminal = "ghostty"
+
+# Window position (pixels from top-left corner of screen).
+# Note: position is ignored on GNOME Wayland (compositor controls placement).
+# x = 630
+# y = 790
+
+# Window size in terminal columns and rows.
+# width = 50
+# height = 10
+
+# Font size for the popup terminal.
+# font_size = 8
+
+# Hide window decorations (titlebar, borders).
+# borderless = true
