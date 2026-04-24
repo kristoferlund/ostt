@@ -63,7 +63,16 @@ Configure the popup window size, position, and terminal in `~/.config/ostt/ostt.
 ```toml
 [popup]
 # Terminal emulator to use. Auto-detected if not set.
-# Supported: ghostty, kitty, alacritty, foot, gnome-terminal
+# Setting this skips auto-detection (faster startup).
+#
+# Preferred (recommended, cross-platform):
+#   ghostty, kitty, alacritty
+#
+# Platform defaults (used as fallback if none of the above are found):
+#   foot, konsole, gnome-terminal, xfce4-terminal
+#
+# On macOS, the default Terminal.app does not support true color and
+# is not suitable for ostt. Install one of the preferred terminals.
 # terminal = "ghostty"
 
 # Window position (pixels from top-left corner)

@@ -102,7 +102,9 @@ enum TerminalEmulator {
     Kitty,
     Alacritty,
     Foot,
+    Konsole,
     GnomeTerminal,
+    Xfce4Terminal,
 }
 
 impl TerminalEmulator {
@@ -113,7 +115,9 @@ impl TerminalEmulator {
             Self::Kitty => "kitty",
             Self::Alacritty => "alacritty",
             Self::Foot => "foot",
+            Self::Konsole => "konsole",
             Self::GnomeTerminal => "gnome-terminal",
+            Self::Xfce4Terminal => "xfce4-terminal",
         }
     }
 
@@ -148,19 +152,25 @@ impl TerminalEmulator {
             "kitty" => Some(Self::Kitty),
             "alacritty" => Some(Self::Alacritty),
             "foot" => Some(Self::Foot),
+            "konsole" => Some(Self::Konsole),
             "gnome-terminal" => Some(Self::GnomeTerminal),
+            "xfce4-terminal" => Some(Self::Xfce4Terminal),
             _ => None,
         }
     }
 
-    /// Detection order: prefer terminals that support the most features.
+    /// Detection order: preferred terminals first, then platform defaults as fallbacks.
     fn detection_order() -> &'static [Self] {
         &[
+            // Preferred: modern, feature-rich, cross-platform
             Self::Ghostty,
             Self::Kitty,
-            Self::Foot,
             Self::Alacritty,
+            // Fallbacks: platform defaults (already installed on their respective DEs)
+            Self::Foot,
+            Self::Konsole,
             Self::GnomeTerminal,
+            Self::Xfce4Terminal,
         ]
     }
 }
@@ -171,7 +181,7 @@ fn detect_terminal(config: &PopupConfig) -> anyhow::Result<(TerminalEmulator, St
     if let Some(ref name) = config.terminal {
         let terminal = TerminalEmulator::from_name(name)
             .ok_or_else(|| anyhow!(
-                "Unknown terminal '{}'. Supported: ghostty, kitty, alacritty, foot, gnome-terminal",
+                "Unknown terminal '{}'. Supported: ghostty, kitty, alacritty, foot, konsole, gnome-terminal, xfce4-terminal",
                 name
             ))?;
         let binary = terminal.find_binary()
@@ -192,7 +202,7 @@ fn detect_terminal(config: &PopupConfig) -> anyhow::Result<(TerminalEmulator, St
 
     Err(anyhow!(
         "No supported terminal emulator found.\n\
-         Install one of: ghostty, kitty, alacritty, foot, gnome-terminal\n\
+         Install one of: ghostty, kitty, alacritty\n\
          Or set the terminal in ~/.config/ostt/ostt.toml under [popup]."
     ))
 }
@@ -294,6 +304,19 @@ fn build_terminal_args(
             args.extend(ostt_args.iter().cloned());
             args
         }
+        TerminalEmulator::Konsole => {
+            let mut args = vec![
+                binary.to_string(),
+                "-p".to_string(),
+                format!("TerminalColumns={}", config.width),
+                "-p".to_string(),
+                format!("TerminalRows={}", config.height),
+                "-e".to_string(),
+                ostt_bin.to_string(),
+            ];
+            args.extend(ostt_args.iter().cloned());
+            args
+        }
         TerminalEmulator::GnomeTerminal => {
             let mut args = vec![
                 binary.to_string(),
@@ -302,6 +325,21 @@ fn build_terminal_args(
                 ostt_bin.to_string(),
             ];
             args.extend(ostt_args.iter().cloned());
+            args
+        }
+        TerminalEmulator::Xfce4Terminal => {
+            let mut args = vec![
+                binary.to_string(),
+                format!("--geometry={}x{}", config.width, config.height),
+                "-e".to_string(),
+            ];
+            // xfce4-terminal -e takes a single string command
+            let mut cmd = ostt_bin.to_string();
+            for arg in ostt_args {
+                cmd.push(' ');
+                cmd.push_str(arg);
+            }
+            args.push(cmd);
             args
         }
     }

@@ -203,8 +203,9 @@ pub struct ProvidersConfig {
 /// Popup window configuration for the `launch` subcommand.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PopupConfig {
-    /// Terminal emulator to use: "ghostty", "kitty", "alacritty", "foot", "gnome-terminal"
-    /// If not set, auto-detects from available terminals.
+    /// Terminal emulator to use. If not set, auto-detects from available terminals.
+    /// Preferred: "ghostty", "kitty", "alacritty"
+    /// Fallbacks: "foot", "konsole", "gnome-terminal", "xfce4-terminal"
     #[serde(default)]
     pub terminal: Option<String>,
     /// Window x position in pixels

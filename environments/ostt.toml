@@ -195,7 +195,12 @@ language_detection = true
 # [popup]
 
 # Terminal emulator to use for the popup window.
-# If not set, auto-detects from: ghostty, kitty, foot, alacritty, gnome-terminal
+# If not set, auto-detects in this order:
+#   Preferred:  ghostty, kitty, alacritty
+#   Fallbacks:  foot, konsole, gnome-terminal, xfce4-terminal
+#
+# Setting this skips auto-detection (faster startup).
+# Note: macOS Terminal.app does not support true color — use a preferred terminal.
 # terminal = "ghostty"
 
 # Window position (pixels from top-left corner of screen).
