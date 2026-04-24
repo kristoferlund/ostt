@@ -142,11 +142,12 @@ Platform-specific setup instructions:
 
 - **[macOS Setup](environments/macOS/README.md)** - Uses Shortcuts.app (built-in, no third-party tools)
 - **[GNOME Setup](environments/gnome/README.md)** - Ubuntu, Fedora, and other GNOME desktops
+- **[KDE Plasma Setup](environments/kde/README.md)** - Kubuntu, Fedora KDE, openSUSE, and other KDE desktops
 - **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration
 
 ### Other Platforms
 
-ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (KDE, XFCE, Sway), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
+ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (XFCE, Sway, Cinnamon), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
 
 ## Commands
 
