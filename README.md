@@ -23,7 +23,7 @@
 - **Cross-platform support** - Linux and macOS
 
 > [!IMPORTANT]
-> **Upgrading from 0.0.7 or earlier?** Version 0.0.8 introduces the `ostt launch` command, which is now the recommended way to set up popup hotkeys on macOS. See [macOS Setup](environments/macOS/README.md) for the new approach using Shortcuts.app (no Hammerspoon needed).
+> **New in 0.0.8:** The `ostt launch` command provides a simple way to set up popup hotkeys on any platform. Bind `ostt launch -c` to a keyboard shortcut — no external tools needed. See [Platform Setup](#platform-specific-setup).
 
 ## Supported Providers & Models
 
@@ -91,15 +91,22 @@ Dependencies need only to be installed manually if you used the shell installer.
 
 **macOS:**
 ```bash
-ffmpeg
+brew install ffmpeg
 ```
 
-**Linux:**
+**Linux (Wayland):**
 ```bash
-ffmpeg wl-clipboard  # For Wayland
-# OR
-ffmpeg xclip         # For X11
+sudo apt install ffmpeg wl-clipboard   # Debian/Ubuntu
+sudo dnf install ffmpeg wl-clipboard   # Fedora
 ```
+
+**Linux (X11):**
+```bash
+sudo apt install ffmpeg xclip          # Debian/Ubuntu
+sudo dnf install ffmpeg xclip          # Fedora
+```
+
+Check your session type with `echo $XDG_SESSION_TYPE`.
 
 **Optional (Recommended for better audio playback):**
 ```bash
@@ -320,20 +327,7 @@ language_detection = true  # Automatic language detection
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.
 
-## Usage
-
-### Recording
-
-```bash
-ostt                 # Output to stdout (default)
-ostt record          # Output to stdout (explicit)
-ostt -c              # Copy to clipboard (shorthand)
-ostt record -c       # Copy to clipboard (explicit)
-ostt -o file         # Write to file (shorthand)
-ostt record -o file  # Write to file (explicit)
-```
-
-**Keyboard Controls:**
+## Recording Controls
 
 | Key | Action |
 |-----|--------|
@@ -344,31 +338,11 @@ ostt record -o file  # Write to file (explicit)
 **Display Elements:**
 
 - **Visualization**: Real-time audio display (spectrum or waveform, configurable)
-  - **Spectrum mode**: Shows frequency distribution across the voice range. Peaks in the visualization align with volume meter peaks
-  - **Waveform mode**: Shows amplitude envelope over time
+  - **Spectrum mode**: Frequency distribution across the voice range
+  - **Waveform mode**: Amplitude envelope over time
 - **Vol %**: Current volume level
 - **Peak %**: Maximum volume in last 3 seconds
-- **Red indicator**: Clipping warning (appears in both visualization modes)
-
-### History
-
-Browse your transcription history:
-
-```bash
-ostt history
-```
-
-Use arrow keys to navigate, Enter to copy selected transcription to clipboard, and Esc to exit.
-
-### Keywords
-
-Manage keywords for improved transcription accuracy:
-
-```bash
-ostt keywords
-```
-
-Add technical terms, names, or domain-specific vocabulary to help the AI transcribe more accurately.
+- **Red indicator**: Clipping warning
 
 ## File Locations
 
