@@ -141,9 +141,9 @@ The `ostt launch` command handles terminal detection, window configuration, and 
 Platform-specific setup instructions:
 
 - **[macOS Setup](environments/macOS/README.md)** - Uses Shortcuts.app (built-in, no third-party tools)
+- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration
 - **[GNOME Setup](environments/gnome/README.md)** - Ubuntu, Fedora, and other GNOME desktops
 - **[KDE Plasma Setup](environments/kde/README.md)** - Kubuntu, Fedora KDE, openSUSE, and other KDE desktops
-- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration
 
 ### Other Platforms
 
