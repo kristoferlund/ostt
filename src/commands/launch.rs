@@ -1,94 +1,61 @@
 //! Launch ostt in a popup terminal window.
 //!
 //! Spawns a terminal emulator with ostt running inside it. If an ostt instance
-//! is already running (tracked via PID file), sends SIGUSR1 to finish recording
-//! instead of spawning a new instance.
+//! is already running, sends SIGUSR1 to finish recording instead of spawning
+//! a new instance.
 
 use anyhow::{anyhow, Context};
-use std::fs;
-use std::path::PathBuf;
 use std::process::Command;
 
 use crate::config::file::PopupConfig;
 use crate::config::OsttConfig;
 
-// ─── PID file management ───────────────────────────────────────────────────
+// ─── Running instance detection ─────────────────────────────────────────────
 
-/// Returns the path to the PID file: ~/.local/share/ostt/launch.pid
-fn pid_file_path() -> anyhow::Result<PathBuf> {
-    let home = dirs::home_dir().context("Could not determine home directory")?;
-    let dir = home.join(".local").join("share").join("ostt");
-    fs::create_dir_all(&dir)?;
-    Ok(dir.join("launch.pid"))
-}
+/// Finds a running ostt process (not this launcher) by looking for our binary.
+///
+/// Some terminals (gnome-terminal, konsole) use a server model where the CLI
+/// process exits immediately, making PID file tracking of the terminal unreliable.
+/// Instead, we find the ostt process directly.
+fn find_running_ostt() -> Option<u32> {
+    let ostt_bin = ostt_binary_path().ok()?;
 
-/// Reads the PID from the PID file. Returns None if file doesn't exist or is invalid.
-fn read_pid() -> Option<u32> {
-    let path = pid_file_path().ok()?;
-    let content = fs::read_to_string(path).ok()?;
-    content.trim().parse().ok()
-}
-
-/// Writes a PID to the PID file.
-fn write_pid(pid: u32) -> anyhow::Result<()> {
-    let path = pid_file_path()?;
-    fs::write(&path, pid.to_string())?;
-    Ok(())
-}
-
-/// Removes the PID file.
-fn remove_pid_file() -> anyhow::Result<()> {
-    let path = pid_file_path()?;
-    if path.exists() {
-        fs::remove_file(&path)?;
-    }
-    Ok(())
-}
-
-/// Checks if a process with the given PID is alive.
-fn is_process_alive(pid: u32) -> bool {
-    // kill -0 checks if process exists without sending a signal
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
+    // Use pgrep to find ostt processes matching our binary path.
+    // -f matches against the full command line.
+    let output = Command::new("pgrep")
+        .args(["-f", &ostt_bin])
         .output()
-        .is_ok_and(|o| o.status.success())
-}
+        .ok()?;
 
-/// Walk the process tree from a given PID to find the leaf (deepest child).
-/// This handles the Ghostty -> login -> ostt chain on macOS.
-fn find_leaf_pid(pid: u32) -> u32 {
-    let mut current = pid;
-    for _ in 0..5 {
-        let output = Command::new("pgrep")
-            .args(["-P", &current.to_string()])
-            .output();
-        match output {
-            Ok(o) if o.status.success() => {
-                let stdout = String::from_utf8_lossy(&o.stdout);
-                match stdout.trim().lines().next().and_then(|l| l.trim().parse::<u32>().ok()) {
-                    Some(child) => current = child,
-                    None => break,
-                }
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let my_pid = std::process::id();
+
+    // Find the first PID that isn't us (the launcher)
+    for line in stdout.trim().lines() {
+        if let Ok(pid) = line.trim().parse::<u32>() {
+            if pid != my_pid {
+                return Some(pid);
             }
-            _ => break,
         }
     }
-    current
+    None
 }
 
 /// Sends SIGUSR1 to finish recording on a running ostt instance.
-/// Walks the process tree to find the actual ostt process.
-fn signal_running_ostt(terminal_pid: u32) -> anyhow::Result<()> {
-    let ostt_pid = find_leaf_pid(terminal_pid);
-    tracing::info!("Sending SIGUSR1 to PID {} (leaf of {})", ostt_pid, terminal_pid);
+fn signal_running_ostt(pid: u32) -> anyhow::Result<()> {
+    tracing::info!("Sending SIGUSR1 to ostt PID {}", pid);
 
     let status = Command::new("kill")
-        .args(["-USR1", &ostt_pid.to_string()])
+        .args(["-USR1", &pid.to_string()])
         .status()
         .context("Failed to send SIGUSR1")?;
 
     if !status.success() {
-        return Err(anyhow!("Failed to send SIGUSR1 to PID {}", ostt_pid));
+        return Err(anyhow!("Failed to send SIGUSR1 to PID {}", pid));
     }
     Ok(())
 }
@@ -352,16 +319,11 @@ fn build_terminal_args(
 /// If an ostt instance is already running (tracked via PID file), sends SIGUSR1
 /// to finish recording. Otherwise, spawns a new terminal window with ostt.
 pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
-    // Check if there's already a running instance
-    if let Some(pid) = read_pid() {
-        if is_process_alive(pid) {
-            tracing::info!("Found running ostt instance (terminal PID {}), sending SIGUSR1", pid);
-            signal_running_ostt(pid)?;
-            return Ok(());
-        }
-        // Stale PID file, clean up
-        tracing::debug!("Stale PID file (PID {} no longer running), cleaning up", pid);
-        remove_pid_file()?;
+    // Check if there's already a running ostt instance
+    if let Some(pid) = find_running_ostt() {
+        tracing::info!("Found running ostt instance (PID {}), sending SIGUSR1", pid);
+        signal_running_ostt(pid)?;
+        return Ok(());
     }
 
     // Load config for popup settings
@@ -389,15 +351,9 @@ pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
         .spawn()
         .with_context(|| format!("Failed to spawn {}", terminal.command_name()))?;
 
-    let terminal_pid = child.id();
-    tracing::info!("Terminal spawned with PID {}", terminal_pid);
-
-    // Write PID file for toggle support
-    write_pid(terminal_pid)?;
+    tracing::info!("Terminal spawned with PID {}", child.id());
 
     // Detach the child process — we don't wait for it.
-    // The PID file is cleaned up on the next invocation if the process has exited
-    // (stale PID detection above), or when ostt launch is used as a toggle.
     drop(child);
 
     // Exit the process immediately so the caller (hotkey, shell) doesn't block.

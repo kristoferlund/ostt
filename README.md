@@ -141,11 +141,12 @@ The `ostt launch` command handles terminal detection, window configuration, and 
 Platform-specific setup instructions:
 
 - **[macOS Setup](environments/macOS/README.md)** - Uses Shortcuts.app (built-in, no third-party tools)
+- **[GNOME Setup](environments/gnome/README.md)** - Ubuntu, Fedora, and other GNOME desktops
 - **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration
 
 ### Other Platforms
 
-ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (KDE, GNOME, XFCE), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
+ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (KDE, XFCE, Sway), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
 
 ## Commands
 
@@ -378,8 +379,7 @@ Add technical terms, names, or domain-specific vocabulary to help the AI transcr
     └── alacritty-float.toml
 
 ~/.local/share/ostt/
-├── credentials            # API keys (0600 permissions)
-└── launch.pid             # PID file for ostt launch toggle
+└── credentials            # API keys (0600 permissions)
 
 ~/.local/state/ostt/
 └── ostt.log.*             # Daily-rotated logs (kept for 7 days, auto-cleanup on startup)
