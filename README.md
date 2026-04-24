@@ -3,7 +3,7 @@
 **OSTT** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, ostt works seamlessly on **Linux and macOS**.
 
 > [!TIP]
-> **Omarchy and Hyprland users!** Configure ostt to run as a floating popup window to record and transcribe in any app. 
+> **Use ostt as a global hotkey popup!** Run `ostt launch -c` from a keyboard shortcut to record and transcribe from any app. See [Platform Setup](#platform-specific-setup) below.
 
 <video src="https://github.com/user-attachments/assets/a4124692-9d70-4d36-a4de-613b2209d81f" controls width="600">
   Your browser does not support the video tag.
@@ -23,11 +23,7 @@
 - **Cross-platform support** - Linux and macOS
 
 > [!IMPORTANT]
-> **Upgrading from 0.0.5?** Version 0.0.7 introduces output flags (`-c`, `-o`) that change default behavior for popup integrations.
-> - **Hyprland users**: See [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
-> - **macOS users**: See [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
-> 
-> Without updates, transcriptions will output to stdout instead of clipboard in popup windows.
+> **New in 0.0.8:** The `ostt launch` command provides a simple way to set up popup hotkeys on any platform. Bind `ostt launch -c` to a keyboard shortcut — no external tools needed. See [Platform Setup](#platform-specific-setup).
 
 ## Supported Providers & Models
 
@@ -95,15 +91,22 @@ Dependencies need only to be installed manually if you used the shell installer.
 
 **macOS:**
 ```bash
-ffmpeg
+brew install ffmpeg
 ```
 
-**Linux:**
+**Linux (Wayland):**
 ```bash
-ffmpeg wl-clipboard  # For Wayland
-# OR
-ffmpeg xclip         # For X11
+sudo apt install ffmpeg wl-clipboard   # Debian/Ubuntu
+sudo dnf install ffmpeg wl-clipboard   # Fedora
 ```
+
+**Linux (X11):**
+```bash
+sudo apt install ffmpeg xclip          # Debian/Ubuntu
+sudo dnf install ffmpeg xclip          # Fedora
+```
+
+Check your session type with `echo $XDG_SESSION_TYPE`.
 
 **Optional (Recommended for better audio playback):**
 ```bash
@@ -140,14 +143,18 @@ For the best experience, configure ostt to run as a floating popup window tied t
 3. Have it automatically transcribed
 4. Paste the result directly into your current app
 
+The `ostt launch` command handles terminal detection, window configuration, and toggle behavior (press the hotkey again to finish recording). Bind `ostt launch -c` to a system keyboard shortcut on any platform.
+
 Platform-specific setup instructions:
 
-- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration (recommended)
-- **[macOS Setup](environments/macOS/README.md)** - Hammerspoon-based popup configuration
+- **[macOS Setup](environments/macOS/README.md)** - Uses Shortcuts.app (built-in, no third-party tools)
+- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration
+- **[GNOME Setup](environments/gnome/README.md)** - Ubuntu, Fedora, and other GNOME desktops
+- **[KDE Plasma Setup](environments/kde/README.md)** - Kubuntu, Fedora KDE, openSUSE, and other KDE desktops
 
 ### Other Platforms
 
-ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal.
+ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (XFCE, Sway, Cinnamon), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
 
 ## Commands
 
@@ -159,6 +166,8 @@ ostt -c              # Record and copy to clipboard (shorthand)
 ostt record -c       # Record and copy to clipboard (explicit)
 ostt -o file         # Record and write to file (shorthand)
 ostt record -o file  # Record and write to file (explicit)
+ostt launch -c       # Launch popup terminal, record, copy to clipboard
+ostt launch -c -p clean  # Launch popup, record, process with "clean", copy
 ostt transcribe file # Transcribe a pre-recorded audio file
 ostt transcribe f -c # Transcribe and copy to clipboard
 ostt transcribe f -o out.txt # Transcribe and write to file
@@ -177,10 +186,11 @@ ostt -h              # Quick help
 ostt --help          # Detailed help with examples
 ```
 
-**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `l` (launch), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
 
 ```bash
 ostt r -c            # Same as: ostt record -c
+ostt l -c            # Same as: ostt launch -c
 ostt a               # Same as: ostt auth
 ```
 
@@ -317,20 +327,7 @@ language_detection = true  # Automatic language detection
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.
 
-## Usage
-
-### Recording
-
-```bash
-ostt                 # Output to stdout (default)
-ostt record          # Output to stdout (explicit)
-ostt -c              # Copy to clipboard (shorthand)
-ostt record -c       # Copy to clipboard (explicit)
-ostt -o file         # Write to file (shorthand)
-ostt record -o file  # Write to file (explicit)
-```
-
-**Keyboard Controls:**
+## Recording Controls
 
 | Key | Action |
 |-----|--------|
@@ -341,31 +338,11 @@ ostt record -o file  # Write to file (explicit)
 **Display Elements:**
 
 - **Visualization**: Real-time audio display (spectrum or waveform, configurable)
-  - **Spectrum mode**: Shows frequency distribution across the voice range. Peaks in the visualization align with volume meter peaks
-  - **Waveform mode**: Shows amplitude envelope over time
+  - **Spectrum mode**: Frequency distribution across the voice range
+  - **Waveform mode**: Amplitude envelope over time
 - **Vol %**: Current volume level
 - **Peak %**: Maximum volume in last 3 seconds
-- **Red indicator**: Clipping warning (appears in both visualization modes)
-
-### History
-
-Browse your transcription history:
-
-```bash
-ostt history
-```
-
-Use arrow keys to navigate, Enter to copy selected transcription to clipboard, and Esc to exit.
-
-### Keywords
-
-Manage keywords for improved transcription accuracy:
-
-```bash
-ostt keywords
-```
-
-Add technical terms, names, or domain-specific vocabulary to help the AI transcribe more accurately.
+- **Red indicator**: Clipping warning
 
 ## File Locations
 

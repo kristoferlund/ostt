@@ -204,6 +204,25 @@ enum Commands {
     /// Useful for troubleshooting issues.
     Logs,
 
+    /// Launch ostt in a popup terminal window
+    ///
+    /// Spawns a terminal emulator with ostt running inside it. Pressing the
+    /// same hotkey again (re-running `ostt launch`) sends SIGUSR1 to the
+    /// running ostt process, which finishes recording and triggers transcription.
+    ///
+    /// Configure window settings in ~/.config/ostt/ostt.toml under [popup].
+    ///
+    /// Examples:
+    ///   ostt launch -c                  # Record, transcribe, copy to clipboard
+    ///   ostt launch -c -p clean         # Record, transcribe, clean, copy
+    ///   ostt launch -- -c -p translate  # Record, transcribe, translate, copy
+    #[command(visible_alias = "l")]
+    Launch {
+        /// Arguments to pass to the ostt instance (e.g. "-c", "-p clean")
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
     /// Generate shell completion script
     ///
     /// Generate completion script for your shell. Save the output to your
@@ -317,6 +336,20 @@ pub async fn run() -> Result<(), anyhow::Error> {
         }
         Some(Commands::Config) => {
             commands::handle_config()?;
+        }
+        Some(Commands::Launch { args }) => {
+            // Reconstruct the full ostt args list. Global flags (-c, -o) are
+            // consumed by clap before they reach the Launch args vec, so we
+            // re-inject them here so they get passed to the spawned ostt instance.
+            let mut full_args = args;
+            if cli.clipboard {
+                full_args.insert(0, "-c".to_string());
+            }
+            if let Some(ref out) = cli.output {
+                full_args.insert(0, out.clone());
+                full_args.insert(0, "-o".to_string());
+            }
+            commands::handle_launch(full_args).await?;
         }
         Some(Commands::Completions { .. }) | Some(Commands::ListDevices) | Some(Commands::Logs) => {
             unreachable!("These commands are handled earlier")
