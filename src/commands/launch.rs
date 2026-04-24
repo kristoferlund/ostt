@@ -17,11 +17,14 @@ use crate::config::OsttConfig;
 /// Some terminals (gnome-terminal, konsole) use a server model where the CLI
 /// process exits immediately, making PID file tracking of the terminal unreliable.
 /// Instead, we find the ostt process directly.
+///
+/// Uses `pgrep -f` to get candidates, then verifies each candidate's actual
+/// executable matches our binary path (filtering out terminals and shells
+/// that merely reference the ostt path in their arguments).
 fn find_running_ostt() -> Option<u32> {
     let ostt_bin = ostt_binary_path().ok()?;
 
-    // Use pgrep to find ostt processes matching our binary path.
-    // -f matches against the full command line.
+    // Use pgrep to find processes with our binary path in their command line.
     let output = Command::new("pgrep")
         .args(["-f", &ostt_bin])
         .output()
@@ -34,15 +37,41 @@ fn find_running_ostt() -> Option<u32> {
     let stdout = String::from_utf8_lossy(&output.stdout);
     let my_pid = std::process::id();
 
-    // Find the first PID that isn't us (the launcher)
+    // Check each candidate: verify its actual executable is our ostt binary,
+    // not a terminal emulator or shell that has our path in its arguments.
     for line in stdout.trim().lines() {
         if let Ok(pid) = line.trim().parse::<u32>() {
-            if pid != my_pid {
+            if pid == my_pid {
+                continue;
+            }
+            if is_ostt_process(pid, &ostt_bin) {
                 return Some(pid);
             }
         }
     }
     None
+}
+
+/// Checks if a process is actually running our ostt binary (not just referencing it).
+fn is_ostt_process(pid: u32, ostt_bin: &str) -> bool {
+    // Use `ps -o comm= -p <pid>` to get the process executable name.
+    // On macOS this returns the full path, on Linux the basename.
+    let output = Command::new("ps")
+        .args(["-o", "comm=", "-p", &pid.to_string()])
+        .output();
+
+    match output {
+        Ok(o) if o.status.success() => {
+            let comm = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            // Check if the process command matches our binary name or full path
+            let ostt_name = std::path::Path::new(ostt_bin)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("ostt");
+            comm == ostt_bin || comm.ends_with(ostt_name)
+        }
+        _ => false,
+    }
 }
 
 /// Sends SIGUSR1 to finish recording on a running ostt instance.
