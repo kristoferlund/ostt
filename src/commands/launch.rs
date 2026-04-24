@@ -68,7 +68,7 @@ fn is_ostt_process(pid: u32, ostt_bin: &str) -> bool {
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("ostt");
-            comm == ostt_bin || comm.ends_with(ostt_name)
+            comm == ostt_bin || comm == ostt_name || comm.ends_with(&format!("/{}", ostt_name))
         }
         _ => false,
     }
@@ -87,6 +87,11 @@ fn signal_running_ostt(pid: u32) -> anyhow::Result<()> {
         return Err(anyhow!("Failed to send SIGUSR1 to PID {}", pid));
     }
     Ok(())
+}
+
+/// Shell-quotes a string by wrapping in single quotes and escaping internal single quotes.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 // ─── Terminal detection and spawning ────────────────────────────────────────
@@ -224,10 +229,10 @@ fn build_terminal_args(
         TerminalEmulator::Ghostty => {
             // Ghostty uses a shell wrapper to source profile for PATH
             // (needed for bash processing actions that invoke external tools)
-            let mut ostt_cmd = ostt_bin.to_string();
+            let mut ostt_cmd = shell_quote(ostt_bin);
             for arg in ostt_args {
                 ostt_cmd.push(' ');
-                ostt_cmd.push_str(arg);
+                ostt_cmd.push_str(&shell_quote(arg));
             }
 
             let shell_cmd = format!(
@@ -330,10 +335,10 @@ fn build_terminal_args(
                 "-e".to_string(),
             ];
             // xfce4-terminal -e takes a single string command
-            let mut cmd = ostt_bin.to_string();
+            let mut cmd = shell_quote(ostt_bin);
             for arg in ostt_args {
                 cmd.push(' ');
-                cmd.push_str(arg);
+                cmd.push_str(&shell_quote(arg));
             }
             args.push(cmd);
             args
