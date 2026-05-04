@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `.deb` package for Debian/Ubuntu/Mint installation via `cargo-deb`
+- `.rpm` package for Fedora/RHEL/openSUSE installation via `cargo-generate-rpm`
+- Both packages are automatically built and uploaded to GitHub Releases via CI
+
 ## 0.0.8 - 2026-03-31
 
 ### Added

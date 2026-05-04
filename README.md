@@ -77,6 +77,21 @@ yay -S ostt
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
 ```
 
+**Debian/Ubuntu (.deb):**
+```bash
+curl -sLO https://github.com/kristoferlund/ostt/releases/latest/download/ostt_latest_amd64.deb && sudo apt install ./ostt_latest_amd64.deb
+```
+
+**Fedora/RHEL (.rpm):**
+```bash
+sudo dnf install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
+```
+
+**openSUSE (.rpm):**
+```bash
+sudo zypper install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
+```
+
 ### macOS
 
 **Homebrew (Recommended):**

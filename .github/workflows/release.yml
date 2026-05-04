@@ -211,14 +211,55 @@ jobs:
           path: |
             ${{ steps.cargo-dist.outputs.paths }}
             ${{ env.BUILD_MANIFEST_NAME }}
+  # Build .deb and .rpm Linux packages
+  build-linux-packages:
+    name: build-linux-packages
+    needs:
+      - plan
+    if: ${{ needs.plan.outputs.publishing == 'true' }}
+    runs-on: "ubuntu-22.04"
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          submodules: recursive
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
+      - name: Install cargo-deb
+        run: cargo install cargo-deb
+      - name: Install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm
+      - name: Build release binary
+        run: cargo build --release --locked
+      - name: Build .deb package
+        run: cargo deb --no-build
+      - name: Build .rpm package
+        run: cargo generate-rpm
+      - name: Create stable-name copies
+        run: |
+          cp target/debian/*.deb target/debian/ostt_latest_amd64.deb
+          cp target/generate-rpm/*.rpm target/generate-rpm/ostt-latest.x86_64.rpm
+      - name: "Upload Linux packages"
+        uses: actions/upload-artifact@v4
+        with:
+          name: artifacts-linux-packages
+          path: |
+            target/debian/*.deb
+            target/generate-rpm/*.rpm
+
   # Determines if we should publish/announce
   host:
     needs:
       - plan
       - build-local-artifacts
       - build-global-artifacts
+      - build-linux-packages
     # Only run if we're "publishing", and only if plan, local and global didn't fail (skipped is fine)
-    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') }}
+    if: ${{ always() && needs.plan.result == 'success' && needs.plan.outputs.publishing == 'true' && (needs.build-global-artifacts.result == 'skipped' || needs.build-global-artifacts.result == 'success') && (needs.build-local-artifacts.result == 'skipped' || needs.build-local-artifacts.result == 'success') && (needs.build-linux-packages.result == 'skipped' || needs.build-linux-packages.result == 'success') }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: "ubuntu-22.04"
@@ -266,6 +307,11 @@ jobs:
         run: |
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
+      - name: "Download Linux package artifacts"
+        uses: actions/download-artifact@v4
+        with:
+          name: artifacts-linux-packages
+          path: artifacts-linux-packages/
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
@@ -276,7 +322,7 @@ jobs:
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
 
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
+          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/* artifacts-linux-packages/*
 
   publish-homebrew-formula:
     needs:
