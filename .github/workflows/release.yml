@@ -239,6 +239,10 @@ jobs:
         run: cargo deb --no-build
       - name: Build .rpm package
         run: cargo generate-rpm
+      - name: Create stable-name copies
+        run: |
+          cp target/debian/*.deb target/debian/ostt_latest_amd64.deb
+          cp target/generate-rpm/*.rpm target/generate-rpm/ostt-latest.x86_64.rpm
       - name: "Upload Linux packages"
         uses: actions/upload-artifact@v4
         with:

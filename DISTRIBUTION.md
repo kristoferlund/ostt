@@ -60,13 +60,13 @@ makepkg -si
 ### 4. Debian/Ubuntu (.deb)
 
 ```bash
-curl -sL $(curl -s https://api.github.com/repos/kristoferlund/ostt/releases/latest | grep -o 'https://[^"]*_amd64\.deb') -o ostt.deb && sudo dpkg -i ostt.deb && rm ostt.deb
+curl -sLO https://github.com/kristoferlund/ostt/releases/latest/download/ostt_latest_amd64.deb && sudo dpkg -i ostt_latest_amd64.deb
 ```
 
 ### 5. Fedora/RHEL/openSUSE (.rpm)
 
 ```bash
-curl -sL $(curl -s https://api.github.com/repos/kristoferlund/ostt/releases/latest | grep -o 'https://[^"]*\.x86_64\.rpm') -o ostt.rpm && sudo dnf install -y ostt.rpm && rm ostt.rpm
+sudo dnf install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
 ```
 
 ### 6. Direct Binary Download (Linux/macOS)
