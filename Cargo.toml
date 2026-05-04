@@ -69,3 +69,53 @@ strip = true
 # Metadata for cargo-dist
 [package.metadata.dist]
 tap = "kristoferlund/ostt"
+
+[package.metadata.deb]
+name = "ostt"
+maintainer = "Kristofer Lund <kristoferlund@users.noreply.github.com>"
+copyright = "2024, Kristofer Lund"
+license-file = ["LICENSE", "4"]
+extended-description = """\
+ostt (Open Speech-to-Text) is an interactive terminal-based audio recording \
+and speech-to-text transcription tool. Record via microphone with real-time \
+waveform visualization and transcribe using your choice of AI provider.\
+"""
+depends = "$auto, ffmpeg"
+recommends = "wl-clipboard | xclip"
+section = "sound"
+priority = "optional"
+assets = [
+    ["target/release/ostt", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/ostt/README.md", "644"],
+    ["LICENSE", "usr/share/doc/ostt/LICENSE", "644"],
+]
+
+[package.metadata.generate-rpm]
+name = "ostt"
+license = "MIT"
+summary = "Open Speech-to-Text: Terminal recording and transcription tool"
+description = """\
+ostt is an interactive terminal-based audio recording and speech-to-text \
+transcription tool. Record via microphone with real-time waveform visualization \
+and transcribe using your choice of AI provider (OpenAI, Deepgram, Groq, \
+AssemblyAI, DeepInfra, Berget).\
+"""
+requires = ["ffmpeg"]
+recommends = ["wl-clipboard"]
+
+[[package.metadata.generate-rpm.assets]]
+source = "target/release/ostt"
+dest = "/usr/bin/ostt"
+mode = "0755"
+
+[[package.metadata.generate-rpm.assets]]
+source = "README.md"
+dest = "/usr/share/doc/ostt/README.md"
+mode = "0644"
+doc = true
+
+[[package.metadata.generate-rpm.assets]]
+source = "LICENSE"
+dest = "/usr/share/doc/ostt/LICENSE"
+mode = "0644"
+doc = true
