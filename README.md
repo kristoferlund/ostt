@@ -79,16 +79,12 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/rele
 
 **Debian/Ubuntu (.deb):**
 ```bash
-# Download the .deb from the latest release
-wget https://github.com/kristoferlund/ostt/releases/latest/download/ostt_<version>_amd64.deb
-sudo dpkg -i ostt_<version>_amd64.deb
+curl -sL $(curl -s https://api.github.com/repos/kristoferlund/ostt/releases/latest | grep -o 'https://[^"]*_amd64\.deb') -o ostt.deb && sudo dpkg -i ostt.deb && rm ostt.deb
 ```
 
 **Fedora/RHEL (.rpm):**
 ```bash
-# Download the .rpm from the latest release
-wget https://github.com/kristoferlund/ostt/releases/latest/download/ostt-<version>-1.x86_64.rpm
-sudo dnf install ostt-<version>-1.x86_64.rpm
+curl -sL $(curl -s https://api.github.com/repos/kristoferlund/ostt/releases/latest | grep -o 'https://[^"]*\.x86_64\.rpm') -o ostt.rpm && sudo dnf install -y ostt.rpm && rm ostt.rpm
 ```
 
 ### macOS
