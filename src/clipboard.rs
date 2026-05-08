@@ -17,10 +17,7 @@ use std::time::Duration;
 pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(mut child) = Command::new("pbcopy")
-            .stdin(Stdio::piped())
-            .spawn()
-        {
+        if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
             if let Some(mut stdin) = child.stdin.take() {
                 match write!(stdin, "{text}") {
                     Ok(_) => {

@@ -19,7 +19,7 @@ use std::io::{stdout, Stdout};
 use crate::config::VisualizationType;
 use crate::transcription::TranscriptionAnimation;
 
-use super::visualizations::{SpectrumAnalyzer, update_waveform, resize_waveform};
+use super::visualizations::{resize_waveform, update_waveform, SpectrumAnalyzer};
 
 /// User input command during recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,7 +137,7 @@ impl OsttTui {
                     update_waveform(&mut self.display_data, current_volume, self.terminal_width);
                 }
             }
-            
+
             self.last_sample_time = std::time::Instant::now();
         }
 
@@ -146,11 +146,16 @@ impl OsttTui {
 
         if current_width != self.terminal_width {
             self.terminal_width = current_width;
-            
+
             match self.visualization_type {
                 VisualizationType::Spectrum => {
                     if let Some(analyzer) = &mut self.spectrum_analyzer {
-                        analyzer.resize(current_width, samples, self.sample_rate, self.reference_level_db);
+                        analyzer.resize(
+                            current_width,
+                            samples,
+                            self.sample_rate,
+                            self.reference_level_db,
+                        );
                         self.display_data = analyzer.data().to_vec();
                     }
                 }

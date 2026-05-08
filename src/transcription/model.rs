@@ -60,8 +60,9 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperKBLarge
             | TranscriptionModel::BergetWhisperNBLarge
             | TranscriptionModel::BergetWhisperLargeV3 => TranscriptionProvider::Berget,
-            TranscriptionModel::ElevenLabsScribeV2
-            | TranscriptionModel::ElevenLabsScribeV1 => TranscriptionProvider::ElevenLabs,
+            TranscriptionModel::ElevenLabsScribeV2 | TranscriptionModel::ElevenLabsScribeV1 => {
+                TranscriptionProvider::ElevenLabs
+            }
         }
     }
 
@@ -128,8 +129,9 @@ impl TranscriptionModel {
             | TranscriptionModel::BergetWhisperLargeV3 => {
                 "https://api.berget.ai/v1/audio/transcriptions"
             }
-            TranscriptionModel::ElevenLabsScribeV2
-            | TranscriptionModel::ElevenLabsScribeV1 => "https://api.elevenlabs.io/v1/speech-to-text",
+            TranscriptionModel::ElevenLabsScribeV2 | TranscriptionModel::ElevenLabsScribeV1 => {
+                "https://api.elevenlabs.io/v1/speech-to-text"
+            }
         }
     }
 

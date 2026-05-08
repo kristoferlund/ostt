@@ -55,10 +55,7 @@ pub async fn handle_retry(
         ));
     }
 
-    tracing::info!(
-        "Retrying transcription for recording #{}",
-        index
-    );
+    tracing::info!("Retrying transcription for recording #{}", index);
 
     // Load configuration
     let config_data = config::OsttConfig::load().map_err(|err| {
@@ -109,8 +106,8 @@ pub async fn handle_retry(
                 // Save to history
                 let mut history_manager = HistoryManager::new(&data_dir)?;
                 let history_note = format!("[Retried from recording #{index}]");
-                if let Err(e) = history_manager
-                    .save_transcription(&format!("{history_note} {trimmed_text}"))
+                if let Err(e) =
+                    history_manager.save_transcription(&format!("{history_note} {trimmed_text}"))
                 {
                     tracing::warn!("Failed to save transcription to history: {}", e);
                 }
@@ -124,7 +121,9 @@ pub async fn handle_retry(
                         }
                         Err(e) => {
                             tracing::warn!("Failed to write to file '{file_path}': {e}");
-                            return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
+                            return Err(anyhow::anyhow!(
+                                "Failed to write to file '{file_path}': {e}"
+                            ));
                         }
                     }
                 } else if clipboard {

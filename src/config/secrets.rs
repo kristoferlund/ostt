@@ -16,8 +16,7 @@ use std::path::PathBuf;
 /// - If the local data directory cannot be determined
 /// - If the secrets directory cannot be created
 fn get_secrets_dir() -> anyhow::Result<PathBuf> {
-    let data_dir = dirs::home_dir()
-        .context("Could not find home directory")?;
+    let data_dir = dirs::home_dir().context("Could not find home directory")?;
     let secrets_dir = data_dir.join(".local").join("share").join("ostt");
     fs::create_dir_all(&secrets_dir)?;
     Ok(secrets_dir)
@@ -115,14 +114,14 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
     let content = fs::read_to_string(&credentials_file)?;
     let mut credentials: HashMap<String, String> = toml::from_str(&content).unwrap_or_default();
 
-     if credentials.remove(provider_id).is_some() {
-         let content = toml::to_string(&credentials)?;
-         fs::write(&credentials_file, content)?;
-         tracing::info!("API key cleared for provider: {}", provider_id);
-     }
-  
-     Ok(())
- }
+    if credentials.remove(provider_id).is_some() {
+        let content = toml::to_string(&credentials)?;
+        fs::write(&credentials_file, content)?;
+        tracing::info!("API key cleared for provider: {}", provider_id);
+    }
+
+    Ok(())
+}
 
 /// Saves the selected model globally (only ONE model is selected at a time).
 ///
@@ -167,9 +166,7 @@ pub fn get_selected_model() -> anyhow::Result<Option<String>> {
         return Ok(None);
     }
 
-    let model_id = fs::read_to_string(&model_file)?
-        .trim()
-        .to_string();
+    let model_id = fs::read_to_string(&model_file)?.trim().to_string();
 
     if model_id.is_empty() {
         Ok(None)
@@ -177,4 +174,3 @@ pub fn get_selected_model() -> anyhow::Result<Option<String>> {
         Ok(Some(model_id))
     }
 }
-

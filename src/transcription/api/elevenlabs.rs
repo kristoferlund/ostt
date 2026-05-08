@@ -3,8 +3,8 @@
 //! Handles transcription requests to ElevenLabs' speech-to-text API using
 //! multipart form data. Supports the Scribe v2 and Scribe v1 models.
 
-use std::path::Path;
 use serde::Deserialize;
+use std::path::Path;
 
 use super::TranscriptionConfig;
 
@@ -20,13 +20,9 @@ struct ElevenLabsResponse {
 /// Sends multipart form data with `xi-api-key` header authentication.
 /// Keywords are passed as `keyterms` to improve transcription accuracy for
 /// domain-specific terms.
-pub async fn transcribe(
-    config: &TranscriptionConfig,
-    audio_path: &Path,
-) -> anyhow::Result<String> {
-    let audio_data = std::fs::read(audio_path).map_err(|e| {
-        anyhow::anyhow!("Failed to read audio file: {e}")
-    })?;
+pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+    let audio_data =
+        std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
     let file_name = audio_path
         .file_name()
@@ -77,7 +73,8 @@ pub async fn transcribe(
         Ok(resp) => resp,
         Err(e) => {
             let error_msg = if e.is_connect() {
-                "Failed to connect to ElevenLabs API server. Check your internet connection.".to_string()
+                "Failed to connect to ElevenLabs API server. Check your internet connection."
+                    .to_string()
             } else if e.is_timeout() {
                 "Request to ElevenLabs timed out. The API server is not responding.".to_string()
             } else if e.to_string().contains("builder") {
@@ -91,7 +88,10 @@ pub async fn transcribe(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
 
         let human_readable = match status.as_u16() {
             401 => "ElevenLabs API key is invalid or expired. Please run 'ostt auth' to update your API key.".to_string(),

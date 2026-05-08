@@ -34,8 +34,8 @@ pub fn handle_logs() -> Result<(), anyhow::Error> {
     }
 
     // Read and display the log file
-    let content = fs::read_to_string(&log_file)
-        .map_err(|e| anyhow!("Failed to read log file: {e}"))?;
+    let content =
+        fs::read_to_string(&log_file).map_err(|e| anyhow!("Failed to read log file: {e}"))?;
 
     if content.is_empty() {
         println!("Log file is empty: {}", log_file.display());
@@ -56,16 +56,9 @@ pub fn handle_logs() -> Result<(), anyhow::Error> {
     println!();
 
     if start_index > 0 {
-        println!(
-            "Showing last {} of {} lines:",
-            DEFAULT_LINES,
-            lines.len()
-        );
+        println!("Showing last {} of {} lines:", DEFAULT_LINES, lines.len());
     } else {
-        println!(
-            "Showing all {} lines:",
-            lines.len()
-        );
+        println!("Showing all {} lines:", lines.len());
     }
     println!("Full log file at: {}", log_file.display());
     println!();
@@ -79,8 +72,8 @@ pub fn handle_logs() -> Result<(), anyhow::Error> {
 
 /// Finds the latest (most recently modified) log file in the directory.
 fn find_latest_log(log_dir: &PathBuf) -> Result<PathBuf, anyhow::Error> {
-    let entries = fs::read_dir(log_dir)
-        .map_err(|e| anyhow!("Failed to read log directory: {e}"))?;
+    let entries =
+        fs::read_dir(log_dir).map_err(|e| anyhow!("Failed to read log directory: {e}"))?;
 
     let mut latest_file: Option<(PathBuf, std::time::SystemTime)> = None;
 
@@ -99,9 +92,7 @@ fn find_latest_log(log_dir: &PathBuf) -> Result<PathBuf, anyhow::Error> {
 
         if let Ok(metadata) = fs::metadata(&path) {
             if let Ok(modified) = metadata.modified() {
-                if latest_file.is_none()
-                    || modified > latest_file.as_ref().unwrap().1
-                {
+                if latest_file.is_none() || modified > latest_file.as_ref().unwrap().1 {
                     latest_file = Some((path, modified));
                 }
             }
@@ -118,8 +109,7 @@ fn get_log_dir() -> Result<PathBuf, anyhow::Error> {
     let log_dir = if let Ok(xdg_state) = std::env::var("XDG_STATE_HOME") {
         PathBuf::from(xdg_state).join("ostt")
     } else {
-        let home = dirs::home_dir()
-            .ok_or_else(|| anyhow!("Could not determine home directory"))?;
+        let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
         home.join(".local/state/ostt")
     };
 
