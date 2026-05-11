@@ -75,25 +75,11 @@ The installer detects your platform, installs missing dependencies, downloads th
 
 ### Alternative Methods
 
-**Homebrew:**
-
-```bash
-brew install kristoferlund/ostt/ostt
-```
-
-**Arch Linux (AUR):**
-
-```bash
-paru -S ostt
-# or
-yay -S ostt
-```
-
-`pacman` is the default package manager on Arch Linux, but AUR packages require an AUR helper such as `paru` or `yay` unless you build them manually.
+If you prefer installing through your platform's normal package tooling instead of a shell installer, see the platform-specific setup guides for Homebrew, AUR, `.deb`, and `.rpm` options.
 
 ### Dependencies
 
-The recommended installer handles runtime dependencies for supported platforms. If you use an alternative install method, make sure `ffmpeg` is available. Linux clipboard output also requires `wl-clipboard` on Wayland or `xclip` on X11.
+The recommended installer and native package-manager installs handle runtime dependencies for supported platforms. If you install from archives or source, make sure `ffmpeg` is available. Linux clipboard output also requires `wl-clipboard` on Wayland or `xclip` on X11.
 
 **Optional (Recommended for better audio playback):**
 ```bash

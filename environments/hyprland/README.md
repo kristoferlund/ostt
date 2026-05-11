@@ -13,6 +13,16 @@ curl -fsSL https://ostt.ai/install | bash
 ostt auth
 ```
 
+Prefer the Arch package route? Omarchy is Arch-based, so you can install OSTT from the AUR with an AUR helper:
+
+```bash
+paru -S ostt
+# or
+yay -S ostt
+```
+
+`pacman` is the default package manager on Arch Linux, but it does not install AUR packages directly unless you build them manually.
+
 ### Keybinding
 
 Add the keybinding to `~/.config/hypr/bindings.conf`:

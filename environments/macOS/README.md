@@ -11,6 +11,15 @@ curl -fsSL https://ostt.ai/install | bash
 ostt auth
 ```
 
+Prefer a normal package-manager install? Use Homebrew instead:
+
+```bash
+brew install kristoferlund/ostt/ostt
+ostt auth
+```
+
+The Homebrew route installs OSTT as a managed package and allows normal uninstall with `brew uninstall ostt`.
+
 For popup mode, OSTT auto-detects Ghostty, kitty, or Alacritty. The installer warns you if none are installed. [Ghostty](https://ghostty.org/) is recommended.
 
 ### Bind to a Hotkey

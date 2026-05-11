@@ -25,8 +25,10 @@ ostt/
 ### 1. Shell Installer (Linux/macOS) - Recommended
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
+curl -fsSL https://ostt.ai/install | bash
 ```
+
+The website installer is the primary install path. It detects the platform, installs missing runtime dependencies where possible, downloads a release artifact, verifies its checksum, and installs `ostt`.
 
 Then configure:
 ```bash
@@ -54,7 +56,27 @@ cd ostt
 makepkg -si
 ```
 
-### 4. Direct Binary Download (Linux/macOS)
+### 4. Debian/Ubuntu (.deb)
+
+```bash
+curl -sLO https://github.com/kristoferlund/ostt/releases/latest/download/ostt_latest_amd64.deb && sudo apt install ./ostt_latest_amd64.deb
+```
+
+Native packages are release artifacts for users who prefer OS package manager installation. They also give the website installer a distro-native artifact to use on supported Linux systems instead of manually installing the tarball.
+
+### 5. Fedora/RHEL (.rpm)
+
+```bash
+sudo dnf install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
+```
+
+### 6. openSUSE (.rpm)
+
+```bash
+sudo zypper install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
+```
+
+### 7. Direct Binary Download (Linux/macOS)
 
 Download pre-compiled binaries from [GitHub Releases](https://github.com/kristoferlund/ostt/releases):
 
@@ -70,12 +92,12 @@ cd ostt-<platform>
 sudo cp ostt /usr/local/bin/
 ```
 
-### 5. Compile from Source
+### 8. Compile from Source
 
 ```bash
 git clone https://github.com/kristoferlund/ostt.git
 cd ostt
-cargo build --release --profile dist
+cargo build --profile dist
 sudo cp target/dist/ostt /usr/local/bin/
 ```
 
@@ -195,6 +217,38 @@ ostt uses [cargo-dist](https://github.com/axodotdev/cargo-dist) for building and
 - `x86_64-apple-darwin` (macOS Intel)
 - `aarch64-unknown-linux-gnu` (Linux ARM64)
 - `x86_64-unknown-linux-gnu` (Linux x86_64)
+
+### cargo-deb (.deb for Debian/Ubuntu)
+
+ostt uses [cargo-deb](https://github.com/kornelski/cargo-deb) to build `.deb` packages automatically in CI.
+
+**Configuration:** `[package.metadata.deb]` in `Cargo.toml`
+
+**How it works:**
+- `cargo build --profile dist --locked` compiles the binary
+- `cargo deb --no-build` packages the pre-built binary into a `.deb`
+- Output goes to `target/debian/`
+- The package and checksum are uploaded as GitHub Release assets on every tagged release
+
+**Dependencies declared in package:**
+- `ffmpeg` (required)
+- `wl-clipboard | xclip` (recommended)
+
+### cargo-generate-rpm (.rpm for Fedora/RHEL/openSUSE)
+
+ostt uses [cargo-generate-rpm](https://github.com/cat-in-136/cargo-generate-rpm) to build `.rpm` packages automatically in CI.
+
+**Configuration:** `[package.metadata.generate-rpm]` in `Cargo.toml`
+
+**How it works:**
+- `cargo build --profile dist --locked` compiles the binary
+- `cargo generate-rpm` packages the pre-built binary into an `.rpm`
+- Output goes to `target/generate-rpm/`
+- The package and checksum are uploaded as GitHub Release assets on every tagged release
+
+**Dependencies declared in package:**
+- `ffmpeg` (required)
+- `wl-clipboard` (recommended)
 
 ### PKGBUILD (AUR)
 
@@ -404,6 +458,7 @@ Example workflow snippet:
    - Uploads binaries and installer script
    - Generates Homebrew formula
    - Publishes to `kristoferlund/homebrew-ostt` (if tap repo exists)
+   - Builds and uploads `.deb` (Debian/Ubuntu) and `.rpm` (Fedora/RHEL/openSUSE) packages
 6. **Manually update AUR** (until automated):
    ```bash
    cd aur-ostt

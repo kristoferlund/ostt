@@ -11,6 +11,19 @@ curl -fsSL https://ostt.ai/install | bash
 ostt auth
 ```
 
+Prefer a normal package install? On supported x86_64 Linux distributions, install the release package with your system package manager instead:
+
+```bash
+# Debian, Ubuntu, Mint, Pop!_OS
+curl -sLO https://github.com/kristoferlund/ostt/releases/latest/download/ostt_latest_amd64.deb
+sudo apt install ./ostt_latest_amd64.deb
+
+# Fedora, RHEL, Rocky Linux
+sudo dnf install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
+```
+
+The package-manager route installs OSTT as a system package, installs declared dependencies, and allows normal uninstall commands such as `sudo apt remove ostt` or `sudo dnf remove ostt`.
+
 ### Bind to a Hotkey
 
 1. Open **Settings** > **Keyboard** > **View and Customize Shortcuts**
