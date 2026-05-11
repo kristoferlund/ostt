@@ -80,12 +80,9 @@ struct TranscriptResponse {
 /// Uses a three-step process: upload audio, submit transcription request, poll for result.
 /// Polls at 3-second intervals with a maximum timeout of 5 minutes.
 /// Implements retry logic with exponential backoff for upload failures.
-pub async fn transcribe(
-    config: &TranscriptionConfig,
-    audio_path: &Path,
-) -> anyhow::Result<String> {
-    let audio_data = std::fs::read(audio_path)
-        .map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
+pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+    let audio_data =
+        std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
     // Configure client with timeouts
     let client = reqwest::Client::builder()
@@ -93,7 +90,7 @@ pub async fn transcribe(
         .connect_timeout(Duration::from_secs(10))
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
-    
+
     let base_url = config.model.endpoint();
 
     // Step 1: Upload audio with retry logic for transient failures
@@ -103,12 +100,24 @@ pub async fn transcribe(
     let assemblyai_config = &config.providers.assemblyai;
 
     // Build language_detection_options if any values are set
-    let language_detection_options = if assemblyai_config.language_detection_options.expected_languages.is_some()
-        || assemblyai_config.language_detection_options.fallback_language.is_some()
+    let language_detection_options = if assemblyai_config
+        .language_detection_options
+        .expected_languages
+        .is_some()
+        || assemblyai_config
+            .language_detection_options
+            .fallback_language
+            .is_some()
     {
         Some(LanguageDetectionOptionsRequest {
-            expected_languages: assemblyai_config.language_detection_options.expected_languages.clone(),
-            fallback_language: assemblyai_config.language_detection_options.fallback_language.clone(),
+            expected_languages: assemblyai_config
+                .language_detection_options
+                .expected_languages
+                .clone(),
+            fallback_language: assemblyai_config
+                .language_detection_options
+                .fallback_language
+                .clone(),
         })
     } else {
         None
@@ -143,7 +152,8 @@ pub async fn transcribe(
         Ok(resp) => resp,
         Err(e) => {
             let error_msg = if e.is_connect() {
-                "Failed to connect to AssemblyAI API server. Check your internet connection.".to_string()
+                "Failed to connect to AssemblyAI API server. Check your internet connection."
+                    .to_string()
             } else if e.is_timeout() {
                 "Request to AssemblyAI timed out. The API server is not responding.".to_string()
             } else {
@@ -155,7 +165,10 @@ pub async fn transcribe(
 
     if !submit_response.status().is_success() {
         let status = submit_response.status();
-        let error_body = submit_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = submit_response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(anyhow::anyhow!(format_error(status.as_u16(), &error_body)));
     }
 
@@ -193,7 +206,8 @@ pub async fn transcribe(
                 let error_msg = if e.is_connect() {
                     "Failed to connect to AssemblyAI API server while polling. Check your internet connection.".to_string()
                 } else if e.is_timeout() {
-                    "AssemblyAI poll request timed out. The API server is not responding.".to_string()
+                    "AssemblyAI poll request timed out. The API server is not responding."
+                        .to_string()
                 } else {
                     format!("AssemblyAI poll network error: {e}")
                 };
@@ -203,7 +217,10 @@ pub async fn transcribe(
 
         if !poll_response.status().is_success() {
             let status = poll_response.status();
-            let error_body = poll_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            let error_body = poll_response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
             return Err(anyhow::anyhow!(format_error(status.as_u16(), &error_body)));
         }
 
@@ -214,7 +231,10 @@ pub async fn transcribe(
 
         tracing::debug!(
             "Poll attempt {}/{}: status={}, id={}",
-            attempts, MAX_POLL_ATTEMPTS, result.status, result.id
+            attempts,
+            MAX_POLL_ATTEMPTS,
+            result.status,
+            result.id
         );
 
         match result.status.as_str() {
@@ -227,7 +247,9 @@ pub async fn transcribe(
                 return Ok(trimmed);
             }
             "error" => {
-                let error = result.error.unwrap_or_else(|| "Unknown transcription error".to_string());
+                let error = result
+                    .error
+                    .unwrap_or_else(|| "Unknown transcription error".to_string());
                 return Err(anyhow::anyhow!("AssemblyAI transcription failed: {error}"));
             }
             _ => {
@@ -239,7 +261,7 @@ pub async fn transcribe(
 }
 
 /// Uploads audio to AssemblyAI with exponential backoff retry logic.
-/// 
+///
 /// AssemblyAI recommends implementing retry logic for transient upload errors
 /// that may occur due to temporary server issues.
 async fn upload_with_retry(
@@ -252,8 +274,12 @@ async fn upload_with_retry(
     let mut delay_ms = INITIAL_RETRY_DELAY_MS;
 
     loop {
-        tracing::debug!("Uploading audio to AssemblyAI (attempt {} of {})...", retries + 1, MAX_UPLOAD_RETRIES + 1);
-        
+        tracing::debug!(
+            "Uploading audio to AssemblyAI (attempt {} of {})...",
+            retries + 1,
+            MAX_UPLOAD_RETRIES + 1
+        );
+
         match try_upload(client, base_url, api_key, &audio_data).await {
             Ok(upload_url) => return Ok(upload_url),
             Err(e) => {
@@ -265,8 +291,13 @@ async fn upload_with_retry(
                         e
                     ));
                 }
-                
-                tracing::warn!("Upload attempt {} failed: {}. Retrying in {}ms...", retries, e, delay_ms);
+
+                tracing::warn!(
+                    "Upload attempt {} failed: {}. Retrying in {}ms...",
+                    retries,
+                    e,
+                    delay_ms
+                );
                 tokio::time::sleep(Duration::from_millis(delay_ms)).await;
                 delay_ms *= 2; // Exponential backoff
             }
@@ -290,9 +321,13 @@ async fn try_upload(
         .await
         .map_err(|e| {
             if e.is_connect() {
-                anyhow::anyhow!("Failed to connect to AssemblyAI API server. Check your internet connection.")
+                anyhow::anyhow!(
+                    "Failed to connect to AssemblyAI API server. Check your internet connection."
+                )
             } else if e.is_timeout() {
-                anyhow::anyhow!("Request to AssemblyAI timed out. The API server is not responding.")
+                anyhow::anyhow!(
+                    "Request to AssemblyAI timed out. The API server is not responding."
+                )
             } else {
                 anyhow::anyhow!("AssemblyAI network error: {e}")
             }
@@ -300,7 +335,10 @@ async fn try_upload(
 
     if !upload_response.status().is_success() {
         let status = upload_response.status();
-        let error_body = upload_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = upload_response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         return Err(anyhow::anyhow!(format_error(status.as_u16(), &error_body)));
     }
 

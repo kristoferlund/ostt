@@ -7,10 +7,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    prelude::*,
-    widgets::Paragraph,
-};
+use ratatui::{prelude::*, widgets::Paragraph};
 use std::io::{self, Stdout};
 
 /// Error screen for displaying human-readable error messages.
@@ -141,10 +138,7 @@ impl ErrorScreen {
     /// - If cursor cannot be shown
     pub fn cleanup(&mut self) -> anyhow::Result<()> {
         disable_raw_mode()?;
-        execute!(
-            self.terminal.backend_mut(),
-            LeaveAlternateScreen
-        )?;
+        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
         self.terminal.show_cursor()?;
         Ok(())
     }

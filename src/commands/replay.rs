@@ -46,14 +46,8 @@ pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow:
         ));
     }
 
-    tracing::info!(
-        "Playing recording #{}",
-        index
-    );
-    tracing::info!(
-        "Audio file path: {}",
-        audio_path.display()
-    );
+    tracing::info!("Playing recording #{}", index);
+    tracing::info!("Audio file path: {}", audio_path.display());
 
     // Platform-specific audio player invocation
     #[cfg(target_os = "macos")]

@@ -196,7 +196,11 @@ fn detect_terminal(config: &PopupConfig) -> anyhow::Result<(TerminalEmulator, St
     // Auto-detect
     for terminal in TerminalEmulator::detection_order() {
         if let Some(binary) = terminal.find_binary() {
-            tracing::info!("Auto-detected terminal: {} ({})", terminal.command_name(), binary);
+            tracing::info!(
+                "Auto-detected terminal: {} ({})",
+                terminal.command_name(),
+                binary
+            );
             return Ok((*terminal, binary));
         }
     }
@@ -325,7 +329,10 @@ fn build_terminal_args(
         TerminalEmulator::GnomeTerminal => {
             let mut args = vec![
                 binary.to_string(),
-                format!("--geometry={}x{}+{}+{}", config.width, config.height, config.x, config.y),
+                format!(
+                    "--geometry={}x{}+{}+{}",
+                    config.width, config.height, config.x, config.y
+                ),
                 "--".to_string(),
                 ostt_bin.to_string(),
             ];

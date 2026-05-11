@@ -2,8 +2,8 @@
 //!
 //! Handles transcription requests to DeepInfra's inference API using multipart form data.
 
-use std::path::Path;
 use serde::Deserialize;
+use std::path::Path;
 
 use super::TranscriptionConfig;
 
@@ -17,13 +17,9 @@ struct DeepInfraResponse {
 ///
 /// Uses multipart form data with bearer token authentication.
 /// DeepInfra hosts OpenAI's Whisper model and compatible models.
-pub async fn transcribe(
-    config: &TranscriptionConfig,
-    audio_path: &Path,
-) -> anyhow::Result<String> {
-    let audio_data = std::fs::read(audio_path).map_err(|e| {
-        anyhow::anyhow!("Failed to read audio file: {e}")
-    })?;
+pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+    let audio_data =
+        std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
     let client = reqwest::Client::new();
 
@@ -55,7 +51,10 @@ pub async fn transcribe(
         let prompt = config.keywords.join(", ");
         form = form.text("prompt", prompt.clone());
         debug_params.push(format!("prompt={prompt}"));
-        tracing::debug!("Keywords used as prompt for DeepInfra model: {:?}", config.keywords);
+        tracing::debug!(
+            "Keywords used as prompt for DeepInfra model: {:?}",
+            config.keywords
+        );
     }
 
     tracing::debug!(
@@ -78,7 +77,8 @@ pub async fn transcribe(
         Ok(resp) => resp,
         Err(e) => {
             let error_msg = if e.is_connect() {
-                "Failed to connect to DeepInfra API server. Check your internet connection.".to_string()
+                "Failed to connect to DeepInfra API server. Check your internet connection."
+                    .to_string()
             } else if e.is_timeout() {
                 "Request to DeepInfra timed out. The API server is not responding.".to_string()
             } else if e.to_string().contains("builder") {
@@ -92,7 +92,10 @@ pub async fn transcribe(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
 
         let human_readable = match status.as_u16() {
             401 => "DeepInfra API key is invalid or expired. Please run 'ostt auth' to update your API key.".to_string(),

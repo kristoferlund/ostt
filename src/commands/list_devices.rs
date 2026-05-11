@@ -19,7 +19,7 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
         let device_iter = host
             .input_devices()
             .map_err(|e| anyhow!("Failed to enumerate audio devices: {e}"))?;
-        
+
         // Collect devices, skipping any that fail to query
         let devices: Vec<cpal::Device> = device_iter
             .filter_map(|d| {
@@ -30,7 +30,7 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
                 }
             })
             .collect();
-        
+
         Ok((host, devices))
     })?;
 
@@ -47,9 +47,7 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
     println!();
 
     // Find the default device
-    let default_device = host
-        .default_input_device()
-        .and_then(|d| d.name().ok());
+    let default_device = host.default_input_device().and_then(|d| d.name().ok());
 
     for (index, device) in device_results.iter().enumerate() {
         let device_name = device.name().unwrap_or_else(|_| "Unknown".to_string());
@@ -64,9 +62,7 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
                 let channels = config.channels();
                 format!(" ({sample_rate}Hz, {channels} channels)")
             }
-            Err(_) => {
-                " (configuration unavailable)".to_string()
-            }
+            Err(_) => " (configuration unavailable)".to_string(),
         };
 
         println!("  ID: {index}");
@@ -92,7 +88,7 @@ where
         .map_err(|e| anyhow!("Failed to open /dev/null: {e}"))?;
 
     let dev_null_fd = dev_null.as_raw_fd();
-    
+
     // Save the current stderr file descriptor
     let old_stderr = unsafe { libc::dup(libc::STDERR_FILENO) };
     if old_stderr == -1 {
