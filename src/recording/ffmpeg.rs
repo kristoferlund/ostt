@@ -4,8 +4,8 @@
 //! locations before falling back to PATH search. This ensures ffmpeg can be found
 //! even when running in environments with limited PATH setup (e.g., iTerm commands).
 
-use std::path::PathBuf;
 use anyhow::{anyhow, Result};
+use std::path::PathBuf;
 
 /// Locates the ffmpeg binary on the system.
 ///
@@ -21,15 +21,15 @@ pub fn find_ffmpeg() -> Result<PathBuf> {
     // Check common installation locations by platform
     let candidates = if cfg!(target_os = "macos") {
         vec![
-            PathBuf::from("/opt/homebrew/bin/ffmpeg"),      // Apple Silicon Homebrew
-            PathBuf::from("/usr/local/bin/ffmpeg"),         // Intel Homebrew or manual install
-            PathBuf::from("/usr/bin/ffmpeg"),               // Direct system install
+            PathBuf::from("/opt/homebrew/bin/ffmpeg"), // Apple Silicon Homebrew
+            PathBuf::from("/usr/local/bin/ffmpeg"),    // Intel Homebrew or manual install
+            PathBuf::from("/usr/bin/ffmpeg"),          // Direct system install
         ]
     } else if cfg!(target_os = "linux") {
         vec![
-            PathBuf::from("/usr/bin/ffmpeg"),               // Standard Linux
-            PathBuf::from("/usr/local/bin/ffmpeg"),         // Manual install
-            PathBuf::from("/snap/bin/ffmpeg"),              // Snap installation
+            PathBuf::from("/usr/bin/ffmpeg"),       // Standard Linux
+            PathBuf::from("/usr/local/bin/ffmpeg"), // Manual install
+            PathBuf::from("/snap/bin/ffmpeg"),      // Snap installation
         ]
     } else if cfg!(target_os = "windows") {
         vec![

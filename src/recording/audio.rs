@@ -4,13 +4,13 @@
 //! format conversion using ffmpeg. Audio is captured from the system's default
 //! input device, converted to mono, and saved in the requested format.
 
+use super::ffmpeg::find_ffmpeg;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use super::ffmpeg::find_ffmpeg;
 
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
@@ -383,10 +383,7 @@ impl AudioRecorder {
 ///
 /// # Errors
 /// - If no device with the specified name/index is found
-fn find_device_by_name(
-    host: &cpal::Host,
-    device_spec: &str,
-) -> Result<cpal::Device> {
+fn find_device_by_name(host: &cpal::Host, device_spec: &str) -> Result<cpal::Device> {
     // Try to parse as a numeric index first
     if let Ok(index) = device_spec.parse::<usize>() {
         let devices: Vec<_> = host

@@ -189,6 +189,26 @@ impl Default for AssemblyAIConfig {
     }
 }
 
+/// ElevenLabs Scribe API configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ElevenLabsConfig {
+    /// Optional ISO-639-1 or ISO-639-3 language code (e.g. "eng", "swe").
+    /// When set, can improve accuracy for known languages.
+    /// Defaults to null (auto-detect).
+    pub language_code: Option<String>,
+}
+
+/// Provider-specific configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProviderConfig {
+    /// Deepgram provider configuration
+    #[serde(rename = "deepgram")]
+    Deepgram(DeepgramConfig),
+    /// OpenAI provider configuration
+    #[serde(rename = "openai")]
+    OpenAi(OpenAiConfig),
+}
+
 /// All provider configurations
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProvidersConfig {
@@ -198,6 +218,8 @@ pub struct ProvidersConfig {
     pub openai: OpenAiConfig,
     #[serde(default)]
     pub assemblyai: AssemblyAIConfig,
+    #[serde(default)]
+    pub elevenlabs: ElevenLabsConfig,
 }
 
 /// Complete application configuration.

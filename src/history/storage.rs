@@ -102,9 +102,8 @@ impl HistoryManager {
     pub fn get_all_transcriptions(&mut self) -> Result<Vec<TranscriptionEntry>> {
         let connection = self.get_connection()?;
 
-        let mut statement = connection.prepare(
-            "SELECT id, text, created_at FROM transcriptions ORDER BY created_at DESC",
-        )?;
+        let mut statement = connection
+            .prepare("SELECT id, text, created_at FROM transcriptions ORDER BY created_at DESC")?;
 
         let entries = statement
             .query_map([], |row| {
@@ -143,8 +142,8 @@ impl HistoryManager {
     pub fn get_transcription(&mut self, id: i64) -> Result<Option<TranscriptionEntry>> {
         let connection = self.get_connection()?;
 
-        let mut statement = connection
-            .prepare("SELECT id, text, created_at FROM transcriptions WHERE id = ?1")?;
+        let mut statement =
+            connection.prepare("SELECT id, text, created_at FROM transcriptions WHERE id = ?1")?;
 
         let entry = statement
             .query_row(params![id], |row| {

@@ -92,4 +92,3 @@ fn make_executable(path: &Path) -> anyhow::Result<()> {
     std::fs::set_permissions(path, perms)?;
     Ok(())
 }
-

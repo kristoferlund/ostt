@@ -2,8 +2,8 @@
 //!
 //! Handles transcription requests to Groq's OpenAI-compatible Whisper API using multipart form data.
 
-use std::path::Path;
 use serde::Deserialize;
+use std::path::Path;
 
 use super::TranscriptionConfig;
 
@@ -17,15 +17,11 @@ struct GroqResponse {
 ///
 /// Uses multipart form data with bearer token authentication.
 /// Groq provides an OpenAI-compatible API endpoint.
-/// 
+///
 /// Keywords are passed as the `prompt` parameter to guide transcription context.
-pub async fn transcribe(
-    config: &TranscriptionConfig,
-    audio_path: &Path,
-) -> anyhow::Result<String> {
-    let audio_data = std::fs::read(audio_path).map_err(|e| {
-        anyhow::anyhow!("Failed to read audio file: {e}")
-    })?;
+pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+    let audio_data =
+        std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
     let client = reqwest::Client::new();
 
@@ -45,16 +41,17 @@ pub async fn transcribe(
         .text("model", config.model.api_model_name().to_string());
 
     // Debug log: Log the API call details (without the audio data)
-    let mut debug_params = vec![
-        format!("model={}", config.model.api_model_name()),
-    ];
+    let mut debug_params = vec![format!("model={}", config.model.api_model_name())];
 
     // Add keywords as prompt for better transcription context
     if !config.keywords.is_empty() {
         let prompt = config.keywords.join(", ");
         form = form.text("prompt", prompt.clone());
         debug_params.push(format!("prompt={prompt}"));
-        tracing::debug!("Keywords used as prompt for Groq model: {:?}", config.keywords);
+        tracing::debug!(
+            "Keywords used as prompt for Groq model: {:?}",
+            config.keywords
+        );
     }
 
     let endpoint = config.model.endpoint();
@@ -89,7 +86,10 @@ pub async fn transcribe(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
 
         let human_readable = match status.as_u16() {
             401 => "Groq API key is invalid or expired. Please run 'ostt auth' to update your API key.".to_string(),

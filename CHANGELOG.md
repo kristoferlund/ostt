@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **ElevenLabs provider** - New transcription provider with Scribe v2 and Scribe v1 models. Supports optional language hints via `[providers.elevenlabs].language_code`.
+
 ## 0.0.8 - 2026-03-31
 
 ### Added
@@ -119,4 +123,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hyprland/Omarchy floating window integration
 - Cross-platform support (Linux and macOS)
 - Multiple installation methods (Homebrew, AUR, shell installer)
-
