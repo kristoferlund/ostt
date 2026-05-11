@@ -1,6 +1,10 @@
 # OSTT - Open Speech-to-Text
 
-**OSTT** is an interactive terminal-based speech-to-text recorder for Linux and macOS. It records from your microphone, transcribes with your chosen provider, keeps local history, and can optionally post-process the result with shell commands or AI CLI tools.
+**Open source voice-to-text for developers who want Linux-first support, provider choice, and a scriptable pipeline.**
+
+OSTT is a terminal-native speech-to-text tool for Linux and macOS. It records from your microphone, transcribes with the provider and model you choose, keeps local history, and works from both the shell and a global hotkey popup. Instead of locking you into one vendor, one subscription, or one app-specific workflow, OSTT lets you bring your own API key and choose from OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, and ElevenLabs.
+
+OSTT is built for people who treat the terminal as a first-class workspace. You can print to stdout, copy to the clipboard, write to files, retry the same recording with another model, transcribe existing audio, and post-process text with either AI prompts or normal shell commands. The process pipeline is the core differentiator: your voice can become cleaned dictation, a translated note, a generated CLI command, or input to any script you already use.
 
 > [!TIP]
 > Use OSTT as a global hotkey popup with `ostt launch -c`. Press once to start recording, press again to stop and transcribe.
@@ -20,6 +24,7 @@ Start here:
 - [Commands](https://ostt.ai/guide/commands)
 - [Processing Actions](https://ostt.ai/guide/processing)
 - [Configuration](https://ostt.ai/guide/configuration)
+- [Why OSTT?](https://ostt.ai/guide/why-ostt)
 - [Platform Setup](https://ostt.ai/guide/platforms)
 - [Providers and Models](https://ostt.ai/reference/providers)
 
