@@ -60,10 +60,7 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
         }
         None => {
             // Config exists and version matches, no setup needed
-            tracing::debug!(
-                "Config version up to date ({})",
-                env!("CARGO_PKG_VERSION")
-            );
+            tracing::debug!("Config version up to date ({})", env!("CARGO_PKG_VERSION"));
         }
     }
 
@@ -75,7 +72,9 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
 #[command(name = "ostt")]
 #[command(version)]
 #[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
-#[command(long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config")]
+#[command(
+    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
+)]
 #[command(
     after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
 )]
@@ -204,6 +203,25 @@ enum Commands {
     /// Useful for troubleshooting issues.
     Logs,
 
+    /// Launch ostt in a popup terminal window
+    ///
+    /// Spawns a terminal emulator with ostt running inside it. Pressing the
+    /// same hotkey again (re-running `ostt launch`) sends SIGUSR1 to the
+    /// running ostt process, which finishes recording and triggers transcription.
+    ///
+    /// Configure window settings in ~/.config/ostt/ostt.toml under [popup].
+    ///
+    /// Examples:
+    ///   ostt launch -c                  # Record, transcribe, copy to clipboard
+    ///   ostt launch -c -p clean         # Record, transcribe, clean, copy
+    ///   ostt launch -- -c -p translate  # Record, transcribe, translate, copy
+    #[command(visible_alias = "l")]
+    Launch {
+        /// Arguments to pass to the ostt instance (e.g. "-c", "-p clean")
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+
     /// Generate shell completion script
     ///
     /// Generate completion script for your shell. Save the output to your
@@ -317,6 +335,20 @@ pub async fn run() -> Result<(), anyhow::Error> {
         }
         Some(Commands::Config) => {
             commands::handle_config()?;
+        }
+        Some(Commands::Launch { args }) => {
+            // Reconstruct the full ostt args list. Global flags (-c, -o) are
+            // consumed by clap before they reach the Launch args vec, so we
+            // re-inject them here so they get passed to the spawned ostt instance.
+            let mut full_args = args;
+            if cli.clipboard {
+                full_args.insert(0, "-c".to_string());
+            }
+            if let Some(ref out) = cli.output {
+                full_args.insert(0, out.clone());
+                full_args.insert(0, "-o".to_string());
+            }
+            commands::handle_launch(full_args).await?;
         }
         Some(Commands::Completions { .. }) | Some(Commands::ListDevices) | Some(Commands::Logs) => {
             unreachable!("These commands are handled earlier")

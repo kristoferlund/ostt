@@ -1,9 +1,9 @@
 # OSTT - Open Speech-to-Text
 
-**OSTT** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, ostt works seamlessly on **Linux and macOS**.
+**OSTT** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, OSTT works seamlessly on **Linux and macOS**.
 
 > [!TIP]
-> **Omarchy and Hyprland users!** Configure ostt to run as a floating popup window to record and transcribe in any app. 
+> **Use OSTT as a global hotkey popup!** Works on all supported platforms, both Linux and macOS. Run `ostt launch -c` from a keyboard shortcut to record and transcribe from any app. See [Platform Setup](#platform-specific-setup) below.
 
 <video src="https://github.com/user-attachments/assets/a4124692-9d70-4d36-a4de-613b2209d81f" controls width="600">
   Your browser does not support the video tag.
@@ -22,16 +22,9 @@
 - **Keyword management** for improved accuracy
 - **Cross-platform support** - Linux and macOS
 
-> [!IMPORTANT]
-> **Upgrading from 0.0.5?** Version 0.0.7 introduces output flags (`-c`, `-o`) that change default behavior for popup integrations.
-> - **Hyprland users**: See [Hyprland Upgrade Guide](environments/hyprland/README.md#upgrading-from-005)
-> - **macOS users**: See [macOS Upgrade Guide](environments/macOS/README.md#upgrading-from-005)
-> 
-> Without updates, transcriptions will output to stdout instead of clipboard in popup windows.
-
 ## Supported Providers & Models
 
-ostt supports multiple AI transcription providers. Bring your own API key and choose from the following:
+OSTT supports multiple AI transcription providers. Bring your own API key and choose from the following:
 
 ### OpenAI
 - **gpt-4o-transcribe** - Latest model with best accuracy
@@ -61,64 +54,32 @@ Berget is a Swedish cloud provider guaranteeing that data never leaves Sweden. A
 - **berget-whisper-nb-large** - NB Whisper Large, developed by the National Library of Norway. Trained on 66,000 hours of Norwegian speech, optimized for Norwegian ASR.
 - **berget-whisper-large-v3** - OpenAI Whisper Large V3, general-purpose multilingual model hosted on Berget infrastructure.
 
+### ElevenLabs
+
+- **elevenlabs-scribe-v2** - Scribe v2, highest accuracy with support for 99 languages
+- **elevenlabs-scribe-v1** - Scribe v1, previous generation model
+
 Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
 
-### Linux
+### Recommended
 
-**Arch Linux (AUR):**
+Install OSTT and required runtime dependencies with the website installer:
+
 ```bash
-yay -S ostt
+curl -fsSL https://ostt.ai/install | bash
 ```
 
-**Shell Installer (All Distributions):**
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
-```
+The installer detects your platform, installs missing dependencies, downloads the latest OSTT release, verifies its checksum, and installs the `ostt` CLI.
 
-**Debian/Ubuntu (.deb):**
-```bash
-curl -sLO https://github.com/kristoferlund/ostt/releases/latest/download/ostt_latest_amd64.deb && sudo apt install ./ostt_latest_amd64.deb
-```
+### Alternative Methods
 
-**Fedora/RHEL (.rpm):**
-```bash
-sudo dnf install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
-```
-
-**openSUSE (.rpm):**
-```bash
-sudo zypper install https://github.com/kristoferlund/ostt/releases/latest/download/ostt-latest.x86_64.rpm
-```
-
-### macOS
-
-**Homebrew (Recommended):**
-```bash
-brew install kristoferlund/ostt/ostt
-```
-
-**Shell Installer:**
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
-```
+If you prefer installing through your platform's normal package tooling instead of a shell installer, see the platform-specific setup guides for Homebrew, AUR, `.deb`, and `.rpm` options.
 
 ### Dependencies
 
-Dependencies need only to be installed manually if you used the shell installer. `yay` and `brew` installs the dependencies automatically.
-
-**macOS:**
-```bash
-ffmpeg
-```
-
-**Linux:**
-```bash
-ffmpeg wl-clipboard  # For Wayland
-# OR
-ffmpeg xclip         # For X11
-```
+The recommended installer and native package-manager installs handle runtime dependencies for supported platforms. If you install from archives or source, make sure `ffmpeg` is available. Linux clipboard output also requires `wl-clipboard` on Wayland or `xclip` on X11.
 
 **Optional (Recommended for better audio playback):**
 ```bash
@@ -131,7 +92,7 @@ mpv  # Recommended for best audio playback experience with ostt replay
 
 After installation, set up authentication and start recording:
 
-**Authentication:** ostt is a bring-your-own-API-key application. Authenticate once with your preferred provider, then freely switch between available models.
+**Authentication:** OSTT is a bring-your-own-API-key application. Authenticate once with your preferred provider, then freely switch between available models.
 
 ```bash
 # Configure your transcription provider
@@ -148,21 +109,25 @@ The app will create a default configuration file on first run at `~/.config/ostt
 
 ## Platform-Specific Setup
 
-For the best experience, configure ostt to run as a floating popup window tied to a global hotkey. This allows you to:
+For the best experience, configure OSTT to run as a floating popup window tied to a global hotkey. This allows you to:
 
 1. Press a hotkey from any application
 2. Record your speech in a popup window
 3. Have it automatically transcribed
 4. Paste the result directly into your current app
 
+The `ostt launch` command handles terminal detection, window configuration, and toggle behavior (press the hotkey again to finish recording). Bind `ostt launch -c` to a system keyboard shortcut on any platform.
+
 Platform-specific setup instructions:
 
-- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration (recommended)
-- **[macOS Setup](environments/macOS/README.md)** - Hammerspoon-based popup configuration
+- **[macOS Setup](environments/macOS/README.md)** - Uses Shortcuts.app (built-in, no third-party tools)
+- **[Hyprland / Omarchy Setup](environments/hyprland/README.md)** - Tiling window manager integration
+- **[GNOME Setup](environments/gnome/README.md)** - Ubuntu, Fedora, and other GNOME desktops
+- **[KDE Plasma Setup](environments/kde/README.md)** - Kubuntu, Fedora KDE, openSUSE, and other KDE desktops
 
 ### Other Platforms
 
-ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal.
+OSTT works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (XFCE, Sway, Cinnamon), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
 
 ## Commands
 
@@ -174,6 +139,8 @@ ostt -c              # Record and copy to clipboard (shorthand)
 ostt record -c       # Record and copy to clipboard (explicit)
 ostt -o file         # Record and write to file (shorthand)
 ostt record -o file  # Record and write to file (explicit)
+ostt launch -c       # Launch popup terminal, record, copy to clipboard
+ostt launch -c -p clean  # Launch popup, record, process with "clean", copy
 ostt transcribe file # Transcribe a pre-recorded audio file
 ostt transcribe f -c # Transcribe and copy to clipboard
 ostt transcribe f -o out.txt # Transcribe and write to file
@@ -192,14 +159,15 @@ ostt -h              # Quick help
 ostt --help          # Detailed help with examples
 ```
 
-**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
+**Command Aliases:** Most commands have short aliases for faster typing: `r` (record), `t` (transcribe), `l` (launch), `a` (auth), `h` (history), `k` (keywords), `c` (config), `rp` (replay).
 
 ```bash
 ostt r -c            # Same as: ostt record -c
+ostt l -c            # Same as: ostt launch -c
 ostt a               # Same as: ostt auth
 ```
 
-**Transcribe:** The `transcribe` command enables use of ostt's transcription pipeline for pre-recorded audio files, without interactive recording. This is useful for non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts where you have an existing audio file and want to leverage ostt's multi-provider transcription infrastructure.
+**Transcribe:** The `transcribe` command enables use of OSTT's transcription pipeline for pre-recorded audio files, without interactive recording. This is useful for non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts where you have an existing audio file and want to leverage OSTT's multi-provider transcription infrastructure.
 
 ```bash
 ostt transcribe recording.ogg              # Transcribe to stdout
@@ -217,7 +185,7 @@ ostt -o file.txt     # Same as: ostt record -o file.txt
 
 ## Shell Completions
 
-ostt can generate completion scripts for your shell to enable tab completion of commands and options.
+OSTT can generate completion scripts for your shell to enable tab completion of commands and options.
 
 **Bash:**
 ```bash
@@ -248,7 +216,7 @@ After installation, restart your shell or source the completion file to enable c
 
 ## Configuration
 
-ostt uses a TOML configuration file at `~/.config/ostt/ostt.toml`.
+OSTT uses a TOML configuration file at `~/.config/ostt/ostt.toml`.
 
 ### Audio Device Configuration
 
@@ -289,6 +257,34 @@ visualization = "spectrum"      # "spectrum" (default) or "waveform"
 - `spectrum` (default) - Shows frequency spectrum with energy distribution across frequencies optimized for human voice (100-1500 Hz range).
 - `waveform` - Shows time-domain waveform with amplitude over time. Classic oscilloscope-style display showing raw audio envelope.
 
+### Popup Configuration
+
+`ostt launch` opens OSTT in a popup terminal and auto-detects a terminal emulator in this order: Ghostty, kitty, Alacritty, foot, Konsole, GNOME Terminal, then Xfce Terminal.
+
+Configure popup behavior in `~/.config/ostt/ostt.toml`:
+
+```toml
+[popup]
+# Optional. If unset, OSTT auto-detects a supported terminal.
+terminal = "ghostty"
+
+# Window position in pixels. Some compositors ignore this.
+x = 630
+y = 790
+
+# Window size in terminal columns and rows.
+width = 90
+height = 15
+
+# Font size for the popup terminal.
+font_size = 6
+
+# Hide window decorations when supported by the terminal/compositor.
+borderless = true
+```
+
+Platform-specific setup guides explain any compositor-specific behavior, such as Omarchy/Hyprland window rules or GNOME Wayland placement limitations.
+
 ### Transcription Setup
 
 Configure your AI provider:
@@ -328,24 +324,16 @@ format_text = true        # Punctuation, casing, and numeral formatting
 disfluencies = false      # Include filler words (uh, um)
 filter_profanity = false  # Filter profanity from transcript
 language_detection = true  # Automatic language detection
+
+[providers.elevenlabs]
+# Optional ISO-639-1 or ISO-639-3 language code, e.g. "en" or "eng".
+# Leave unset to auto-detect the spoken language.
+# language_code = "eng"
 ```
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.
 
-## Usage
-
-### Recording
-
-```bash
-ostt                 # Output to stdout (default)
-ostt record          # Output to stdout (explicit)
-ostt -c              # Copy to clipboard (shorthand)
-ostt record -c       # Copy to clipboard (explicit)
-ostt -o file         # Write to file (shorthand)
-ostt record -o file  # Write to file (explicit)
-```
-
-**Keyboard Controls:**
+## Recording Controls
 
 | Key | Action |
 |-----|--------|
@@ -356,40 +344,17 @@ ostt record -o file  # Write to file (explicit)
 **Display Elements:**
 
 - **Visualization**: Real-time audio display (spectrum or waveform, configurable)
-  - **Spectrum mode**: Shows frequency distribution across the voice range. Peaks in the visualization align with volume meter peaks
-  - **Waveform mode**: Shows amplitude envelope over time
+  - **Spectrum mode**: Frequency distribution across the voice range
+  - **Waveform mode**: Amplitude envelope over time
 - **Vol %**: Current volume level
 - **Peak %**: Maximum volume in last 3 seconds
-- **Red indicator**: Clipping warning (appears in both visualization modes)
-
-### History
-
-Browse your transcription history:
-
-```bash
-ostt history
-```
-
-Use arrow keys to navigate, Enter to copy selected transcription to clipboard, and Esc to exit.
-
-### Keywords
-
-Manage keywords for improved transcription accuracy:
-
-```bash
-ostt keywords
-```
-
-Add technical terms, names, or domain-specific vocabulary to help the AI transcribe more accurately.
+- **Red indicator**: Clipping warning
 
 ## File Locations
 
 ```
 ~/.config/ostt/
-├── ostt.toml              # Main configuration
-└── hyprland/              # Hyprland integration (if set up)
-    ├── ostt-float.sh
-    └── alacritty-float.toml
+└── ostt.toml              # Main configuration
 
 ~/.local/share/ostt/
 └── credentials            # API keys (0600 permissions)
@@ -402,7 +367,7 @@ Add technical terms, names, or domain-specific vocabulary to help the AI transcr
 
 ### Logging
 
-ostt logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation and automatic cleanup. Log files are kept for the 7 most recent days and older logs are automatically deleted on startup. By default, logs are set to `info` level.
+OSTT logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation and automatic cleanup. Log files are kept for the 7 most recent days and older logs are automatically deleted on startup. By default, logs are set to `info` level.
 
 **View recent logs:**
 ```bash
@@ -428,7 +393,7 @@ ostt config
 
 ### Volume Meter Not Reaching 100%
 
-The reference level may be set too high/low for your audio card. Run ostt, maximize your microphone gain, note the peak dBFS value, and update `reference_level_db` in your config.
+The reference level may be set too high/low for your audio card. Run `ostt`, maximize your microphone gain, note the peak dBFS value, and update `reference_level_db` in your config.
 
 ### Transcription Not Working
 
@@ -443,8 +408,8 @@ RUST_LOG=debug ostt record
 ### Hyprland Window Not Appearing
 
 ```bash
-# Test the script directly
-bash ~/.local/bin/ostt-float
+# Test launch directly
+ostt launch -c
 
 # Verify Hyprland config loaded
 hyprctl reload

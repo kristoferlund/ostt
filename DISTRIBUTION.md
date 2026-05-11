@@ -9,11 +9,8 @@ ostt/
 ├── src/
 │   ├── setup/mod.rs             # Setup module with embedded files
 │   └── ...                      # Other source code
-├── environments/                 # Embedded into binary at compile time
-│   ├── ostt.toml                # Configuration template
-│   └── hyprland/                # Hyprland window manager support
-│       ├── ostt-float.sh        # Launch script for floating window
-│       └── alacritty-float.toml # Terminal configuration
+├── environments/                 # Platform-specific setup documentation
+│   └── ostt.toml                # Configuration template embedded into binary
 ├── Cargo.toml                   # Rust package manifest
 ├── dist-workspace.toml          # cargo-dist configuration
 └── README.md                    # Main documentation
@@ -21,15 +18,17 @@ ostt/
 
 **Note:** The AUR PKGBUILD is maintained in the separate [AUR repository](https://aur.archlinux.org/packages/ostt), not in this repository.
 
-**Note:** Configuration files in `environments/` are embedded into the binary at compile time using `include_str!()`. They are automatically extracted on first run.
+**Note:** The default configuration template is embedded into the binary at compile time using `include_str!()` and is automatically extracted on first run.
 
 ## Installation Methods
 
 ### 1. Shell Installer (Linux/macOS) - Recommended
 
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
+curl -fsSL https://ostt.ai/install | bash
 ```
+
+The website installer is the primary install path. It detects the platform, installs missing runtime dependencies where possible, downloads a release artifact, verifies its checksum, and installs `ostt`.
 
 Then configure:
 ```bash
@@ -63,6 +62,8 @@ makepkg -si
 curl -sLO https://github.com/kristoferlund/ostt/releases/latest/download/ostt_latest_amd64.deb && sudo apt install ./ostt_latest_amd64.deb
 ```
 
+Native packages are release artifacts for users who prefer OS package manager installation. They also give the website installer a distro-native artifact to use on supported Linux systems instead of manually installing the tarball.
+
 ### 5. Fedora/RHEL (.rpm)
 
 ```bash
@@ -91,12 +92,12 @@ cd ostt-<platform>
 sudo cp ostt /usr/local/bin/
 ```
 
-### 7. Compile from Source
+### 8. Compile from Source
 
 ```bash
 git clone https://github.com/kristoferlund/ostt.git
 cd ostt
-cargo build --release --profile dist
+cargo build --profile dist
 sudo cp target/dist/ostt /usr/local/bin/
 ```
 
@@ -176,9 +177,6 @@ ostt follows the XDG Base Directory Specification:
 
 On first run, ostt automatically:
 1. Creates `~/.config/ostt/ostt.toml` with default configuration
-2. Detects Hyprland environment and sets up integration files:
-   - `~/.config/ostt/alacritty-float.toml` - Terminal configuration
-   - `~/.local/bin/ostt-float` - Launcher script (automatically made executable)
 
 ### Hyprland Integration
 
@@ -186,17 +184,16 @@ If you're using Hyprland, add a keybinding and window rules to your Hyprland con
 
 ```hyprland
 # Keybinding for ostt (clipboard output)
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+bindd = SUPER, R, ostt, exec, ostt launch -c
 
 # OSTT window rules
 windowrule = float on, match:title ostt
-windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
-windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.85), match:title ostt
 ```
 
 Then reload your Hyprland configuration: `hyprctl reload`
 
-This will launch ostt in a floating Alacritty terminal window, centered horizontally and positioned at the bottom of the screen.
+This will launch ostt in a floating popup terminal window, centered horizontally and positioned near the bottom of the screen.
 
 ## Distribution Details
 
@@ -228,10 +225,10 @@ ostt uses [cargo-deb](https://github.com/kornelski/cargo-deb) to build `.deb` pa
 **Configuration:** `[package.metadata.deb]` in `Cargo.toml`
 
 **How it works:**
-- `cargo build --release --locked` compiles the binary
+- `cargo build --profile dist --locked` compiles the binary
 - `cargo deb --no-build` packages the pre-built binary into a `.deb`
 - Output goes to `target/debian/`
-- The package is uploaded as a GitHub Release asset on every tagged release
+- The package and checksum are uploaded as GitHub Release assets on every tagged release
 
 **Dependencies declared in package:**
 - `ffmpeg` (required)
@@ -244,10 +241,10 @@ ostt uses [cargo-generate-rpm](https://github.com/cat-in-136/cargo-generate-rpm)
 **Configuration:** `[package.metadata.generate-rpm]` in `Cargo.toml`
 
 **How it works:**
-- `cargo build --release --locked` compiles the binary
+- `cargo build --profile dist --locked` compiles the binary
 - `cargo generate-rpm` packages the pre-built binary into an `.rpm`
 - Output goes to `target/generate-rpm/`
-- The package is uploaded as a GitHub Release asset on every tagged release
+- The package and checksum are uploaded as GitHub Release assets on every tagged release
 
 **Dependencies declared in package:**
 - `ffmpeg` (required)

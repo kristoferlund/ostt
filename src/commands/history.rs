@@ -2,8 +2,8 @@
 //!
 //! Displays and manages transcription history with copy-to-clipboard functionality.
 
-use crate::history::{HistoryManager, HistoryViewer};
 use crate::clipboard::copy_to_clipboard;
+use crate::history::{HistoryManager, HistoryViewer};
 
 /// Displays the transcription history viewer with copy-to-clipboard functionality.
 ///

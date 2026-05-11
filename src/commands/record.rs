@@ -20,7 +20,10 @@ use std::fs;
 /// # Arguments
 /// * `clipboard` - If true, copy to clipboard instead of stdout
 /// * `output_file` - Optional file path to write output to instead of stdout
-pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Result<(), anyhow::Error> {
+pub async fn handle_record(
+    clipboard: bool,
+    output_file: Option<String>,
+) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
 
     let config_data = match config::OsttConfig::load() {
@@ -45,7 +48,10 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
         config_data.audio.reference_level_db
     );
 
-    let mut audio_recorder = AudioRecorder::new(config_data.audio.sample_rate, config_data.audio.device.clone());
+    let mut audio_recorder = AudioRecorder::new(
+        config_data.audio.sample_rate,
+        config_data.audio.device.clone(),
+    );
 
     if let Err(e) = audio_recorder.start_recording() {
         tracing::error!("Failed to start recording: {e}");
@@ -156,10 +162,7 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>) -> Resu
             e
         })?;
 
-    tracing::info!(
-        "Recording saved to: {}",
-        filepath.display()
-    );
+    tracing::info!("Recording saved to: {}", filepath.display());
 
     // Clean up old recordings to keep only 10 most recent
     if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
@@ -314,9 +317,7 @@ async fn transcribe_recording_with_animation(
         }
 
         // Check for cancel input (Escape, 'q', or Ctrl+C)
-        if crossterm::event::poll(std::time::Duration::from_millis(0))
-            .unwrap_or(false)
-        {
+        if crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
             if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
                 match key.code {
                     crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {

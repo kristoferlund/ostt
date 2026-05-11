@@ -216,7 +216,7 @@ jobs:
     name: build-linux-packages
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' }}
+    if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' }}
     runs-on: "ubuntu-22.04"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -234,7 +234,7 @@ jobs:
       - name: Install cargo-generate-rpm
         run: cargo install cargo-generate-rpm
       - name: Build release binary
-        run: cargo build --release --locked
+        run: cargo build --profile dist --locked
       - name: Build .deb package
         run: cargo deb --no-build
       - name: Build .rpm package
@@ -243,13 +243,21 @@ jobs:
         run: |
           cp target/debian/*.deb target/debian/ostt_latest_amd64.deb
           cp target/generate-rpm/*.rpm target/generate-rpm/ostt-latest.x86_64.rpm
+      - name: Create package checksums
+        run: |
+          cd target/debian
+          sha256sum ostt_latest_amd64.deb > ostt_latest_amd64.deb.sha256
+          cd ../generate-rpm
+          sha256sum ostt-latest.x86_64.rpm > ostt-latest.x86_64.rpm.sha256
       - name: "Upload Linux packages"
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-linux-packages
           path: |
             target/debian/*.deb
+            target/debian/*.sha256
             target/generate-rpm/*.rpm
+            target/generate-rpm/*.sha256
 
   # Determines if we should publish/announce
   host:
@@ -307,11 +315,6 @@ jobs:
         run: |
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
-      - name: "Download Linux package artifacts"
-        uses: actions/download-artifact@v4
-        with:
-          name: artifacts-linux-packages
-          path: artifacts-linux-packages/
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
@@ -322,7 +325,7 @@ jobs:
           # Write and read notes from a file to avoid quoting breaking things
           echo "$ANNOUNCEMENT_BODY" > $RUNNER_TEMP/notes.txt
 
-          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/* artifacts-linux-packages/*
+          gh release create "${{ needs.plan.outputs.tag }}" --target "$RELEASE_COMMIT" $PRERELEASE_FLAG --title "$ANNOUNCEMENT_TITLE" --notes-file "$RUNNER_TEMP/notes.txt" artifacts/*
 
   publish-homebrew-formula:
     needs:

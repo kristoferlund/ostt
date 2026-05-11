@@ -17,10 +17,7 @@ use std::time::Duration;
 pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(mut child) = Command::new("pbcopy")
-            .stdin(Stdio::piped())
-            .spawn()
-        {
+        if let Ok(mut child) = Command::new("pbcopy").stdin(Stdio::piped()).spawn() {
             if let Some(mut stdin) = child.stdin.take() {
                 match write!(stdin, "{text}") {
                     Ok(_) => {
@@ -38,26 +35,31 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
             tracing::debug!("pbcopy not found or not executable");
         }
     }
-    if let Ok(mut child) = Command::new("wl-copy")
-        .args(["--type", "text/plain", "--trim-newline"])
-        .stdin(Stdio::piped())
-        .spawn()
-    {
-        if let Some(mut stdin) = child.stdin.take() {
-            match write!(stdin, "{text}") {
-                Ok(_) => {
-                    drop(stdin);
-                    thread::sleep(Duration::from_millis(100));
-                    tracing::debug!("Transcribed text copied to clipboard via wl-copy");
-                    return Ok(());
-                }
-                Err(e) => {
-                    tracing::warn!("Failed to write to wl-copy stdin: {}", e);
+    // Only try wl-copy on Wayland sessions — it spawns successfully on X11
+    // but silently fails to copy since there's no Wayland compositor.
+    let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok();
+    if is_wayland {
+        if let Ok(mut child) = Command::new("wl-copy")
+            .args(["--type", "text/plain", "--trim-newline"])
+            .stdin(Stdio::piped())
+            .spawn()
+        {
+            if let Some(mut stdin) = child.stdin.take() {
+                match write!(stdin, "{text}") {
+                    Ok(_) => {
+                        drop(stdin);
+                        thread::sleep(Duration::from_millis(100));
+                        tracing::debug!("Transcribed text copied to clipboard via wl-copy");
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to write to wl-copy stdin: {}", e);
+                    }
                 }
             }
+        } else {
+            tracing::debug!("wl-copy not found or not executable");
         }
-    } else {
-        tracing::debug!("wl-copy not found or not executable");
     }
 
     if let Ok(mut child) = Command::new("xclip")

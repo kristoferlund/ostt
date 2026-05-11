@@ -2,8 +2,8 @@
 //!
 //! Handles transcription requests to OpenAI's Whisper API using multipart form data.
 
-use std::path::Path;
 use serde::Deserialize;
+use std::path::Path;
 
 use super::TranscriptionConfig;
 
@@ -16,16 +16,12 @@ struct OpenAiResponse {
 /// Transcribes an audio file using OpenAI's Whisper API.
 ///
 /// Uses multipart form data with bearer token authentication.
-/// 
+///
 /// Keywords are passed as the `prompt` parameter to guide transcription context.
 /// OpenAI's Whisper API uses the prompt to improve accuracy for domain-specific terms.
-pub async fn transcribe(
-    config: &TranscriptionConfig,
-    audio_path: &Path,
-) -> anyhow::Result<String> {
-    let audio_data = std::fs::read(audio_path).map_err(|e| {
-        anyhow::anyhow!("Failed to read audio file: {e}")
-    })?;
+pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+    let audio_data =
+        std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
     let client = reqwest::Client::new();
 
@@ -45,26 +41,30 @@ pub async fn transcribe(
         .text("model", config.model.api_model_name().to_string());
 
     // Debug log: Log the API call details (without the audio data)
-    let mut debug_params = vec![
-        format!("model={}", config.model.api_model_name()),
-    ];
+    let mut debug_params = vec![format!("model={}", config.model.api_model_name())];
 
     // Add keywords as prompt for better transcription context
     // Note: gpt-4o-transcribe doesn't support prompt parameter, only whisper-1 and gpt-4o-mini-transcribe do
     if !config.keywords.is_empty() {
         let should_use_prompt = match config.model.api_model_name() {
             "gpt-4o-transcribe" => false, // gpt-4o-transcribe doesn't support prompt
-            _ => true, // whisper-1 and gpt-4o-mini-transcribe support it
+            _ => true,                    // whisper-1 and gpt-4o-mini-transcribe support it
         };
-        
+
         if should_use_prompt {
             let prompt = config.keywords.join(", ");
             form = form.text("prompt", prompt.clone());
             debug_params.push(format!("prompt={prompt}"));
-            tracing::debug!("Keywords used as prompt for OpenAI model: {:?}", config.keywords);
+            tracing::debug!(
+                "Keywords used as prompt for OpenAI model: {:?}",
+                config.keywords
+            );
         } else {
-            tracing::debug!("Keywords defined but {} does not support prompt parameter. Keywords: {:?}", 
-                config.model.api_model_name(), config.keywords);
+            tracing::debug!(
+                "Keywords defined but {} does not support prompt parameter. Keywords: {:?}",
+                config.model.api_model_name(),
+                config.keywords
+            );
         }
     }
 
@@ -88,11 +88,14 @@ pub async fn transcribe(
         Ok(resp) => resp,
         Err(e) => {
             let error_msg = if e.is_connect() {
-                "Failed to connect to OpenAI API server. Check your internet connection.".to_string()
+                "Failed to connect to OpenAI API server. Check your internet connection."
+                    .to_string()
             } else if e.is_timeout() {
                 "Request to OpenAI timed out. The API server is not responding.".to_string()
             } else if e.to_string().contains("builder") {
-                format!("Failed to build OpenAI API request: {e}. This may be a configuration error.")
+                format!(
+                    "Failed to build OpenAI API request: {e}. This may be a configuration error."
+                )
             } else {
                 format!("OpenAI network error: {e}")
             };
@@ -102,7 +105,10 @@ pub async fn transcribe(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
 
         let human_readable = match status.as_u16() {
             401 => "OpenAI API key is invalid or expired. Please run 'ostt auth' to update your API key.".to_string(),

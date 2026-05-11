@@ -14,6 +14,7 @@ pub enum TranscriptionProvider {
     Groq,
     AssemblyAI,
     Berget,
+    ElevenLabs,
 }
 
 impl TranscriptionProvider {
@@ -25,6 +26,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Groq => "groq",
             TranscriptionProvider::AssemblyAI => "assemblyai",
             TranscriptionProvider::Berget => "berget",
+            TranscriptionProvider::ElevenLabs => "elevenlabs",
         }
     }
 
@@ -36,6 +38,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Groq => "Groq",
             TranscriptionProvider::AssemblyAI => "AssemblyAI",
             TranscriptionProvider::Berget => "Berget",
+            TranscriptionProvider::ElevenLabs => "ElevenLabs",
         }
     }
 
@@ -47,6 +50,7 @@ impl TranscriptionProvider {
             "groq" => Some(TranscriptionProvider::Groq),
             "assemblyai" => Some(TranscriptionProvider::AssemblyAI),
             "berget" => Some(TranscriptionProvider::Berget),
+            "elevenlabs" => Some(TranscriptionProvider::ElevenLabs),
             _ => None,
         }
     }
@@ -59,6 +63,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Groq,
             TranscriptionProvider::AssemblyAI,
             TranscriptionProvider::Berget,
+            TranscriptionProvider::ElevenLabs,
         ]
     }
 }

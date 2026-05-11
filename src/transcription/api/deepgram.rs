@@ -2,12 +2,12 @@
 //!
 //! Handles transcription requests to Deepgram's API using binary audio data.
 
-use std::path::Path;
 use serde::Deserialize;
+use std::path::Path;
 use urlencoding;
 
-use super::TranscriptionConfig;
 use super::super::model::TranscriptionModel;
+use super::TranscriptionConfig;
 
 /// Deepgram response structure (kept for potential future use)
 #[allow(dead_code)]
@@ -39,13 +39,9 @@ struct DeepgramResults {
 /// Transcribes an audio file using Deepgram's API.
 ///
 /// Sends raw binary audio data with Token authentication and model specified in query parameters.
-pub async fn transcribe(
-    config: &TranscriptionConfig,
-    audio_path: &Path,
-) -> anyhow::Result<String> {
-    let audio_data = std::fs::read(audio_path).map_err(|e| {
-        anyhow::anyhow!("Failed to read audio file: {e}")
-    })?;
+pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+    let audio_data =
+        std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
     let client = reqwest::Client::new();
 
@@ -119,11 +115,14 @@ pub async fn transcribe(
         Ok(resp) => resp,
         Err(e) => {
             let error_msg = if e.is_connect() {
-                "Failed to connect to Deepgram API server. Check your internet connection.".to_string()
+                "Failed to connect to Deepgram API server. Check your internet connection."
+                    .to_string()
             } else if e.is_timeout() {
                 "Request to Deepgram timed out. The API server is not responding.".to_string()
             } else if e.to_string().contains("builder") {
-                format!("Failed to build Deepgram API request: {e}. This may be a configuration error.")
+                format!(
+                    "Failed to build Deepgram API request: {e}. This may be a configuration error."
+                )
             } else {
                 format!("Deepgram network error: {e}")
             };
@@ -133,7 +132,10 @@ pub async fn transcribe(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_body = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
 
         let human_readable = match status.as_u16() {
             401 => "Deepgram API key is invalid or expired. Please run 'ostt auth' to update your API key.".to_string(),
