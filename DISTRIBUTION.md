@@ -9,11 +9,8 @@ ostt/
 ├── src/
 │   ├── setup/mod.rs             # Setup module with embedded files
 │   └── ...                      # Other source code
-├── environments/                 # Embedded into binary at compile time
-│   ├── ostt.toml                # Configuration template
-│   └── hyprland/                # Hyprland window manager support
-│       ├── ostt-float.sh        # Launch script for floating window
-│       └── alacritty-float.toml # Terminal configuration
+├── environments/                 # Platform-specific setup documentation
+│   └── ostt.toml                # Configuration template embedded into binary
 ├── Cargo.toml                   # Rust package manifest
 ├── dist-workspace.toml          # cargo-dist configuration
 └── README.md                    # Main documentation
@@ -21,7 +18,7 @@ ostt/
 
 **Note:** The AUR PKGBUILD is maintained in the separate [AUR repository](https://aur.archlinux.org/packages/ostt), not in this repository.
 
-**Note:** Configuration files in `environments/` are embedded into the binary at compile time using `include_str!()`. They are automatically extracted on first run.
+**Note:** The default configuration template is embedded into the binary at compile time using `include_str!()` and is automatically extracted on first run.
 
 ## Installation Methods
 
@@ -158,9 +155,6 @@ ostt follows the XDG Base Directory Specification:
 
 On first run, ostt automatically:
 1. Creates `~/.config/ostt/ostt.toml` with default configuration
-2. Detects Hyprland environment and sets up integration files:
-   - `~/.config/ostt/alacritty-float.toml` - Terminal configuration
-   - `~/.local/bin/ostt-float` - Launcher script (automatically made executable)
 
 ### Hyprland Integration
 
@@ -168,17 +162,16 @@ If you're using Hyprland, add a keybinding and window rules to your Hyprland con
 
 ```hyprland
 # Keybinding for ostt (clipboard output)
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+bindd = SUPER, R, ostt, exec, ostt launch -c
 
 # OSTT window rules
 windowrule = float on, match:title ostt
-windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
-windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.85), match:title ostt
 ```
 
 Then reload your Hyprland configuration: `hyprctl reload`
 
-This will launch ostt in a floating Alacritty terminal window, centered horizontally and positioned at the bottom of the screen.
+This will launch ostt in a floating popup terminal window, centered horizontally and positioned near the bottom of the screen.
 
 ## Distribution Details
 

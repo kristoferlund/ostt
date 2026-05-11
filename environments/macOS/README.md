@@ -1,205 +1,110 @@
-# macOS - Hammerspoon Popup Integration
+# macOS Setup
 
-## About Hammerspoon
+## Quick Setup (Shortcuts.app)
 
-[Hammerspoon](https://www.hammerspoon.org/) is a powerful, well-established open-source automation tool for macOS. It allows you to control your Mac using Lua scripts, enabling deep system integration and custom workflows. Hammerspoon has been actively maintained for years and is trusted by thousands of macOS power users.
+The recommended way to set up OSTT on macOS. No third-party tools required.
 
-With ostt integrated via Hammerspoon, you get instant voice-to-text transcription accessible from any application through a global hotkey.
+### Install OSTT
 
-**Alternative:** If you use [iTerm2](https://iterm2.com/), you can achieve similar functionality using its built-in [Hotkey Window](https://iterm2.com/features.html) feature without needing Hammerspoon.
+```bash
+curl -fsSL https://ostt.ai/install | bash
+ostt auth
+```
 
-## Setup
+For popup mode, OSTT auto-detects Ghostty, kitty, or Alacritty. The installer warns you if none are installed. [Ghostty](https://ghostty.org/) is recommended.
 
-### Prerequisites
+### Bind to a Hotkey
 
-1. **Install Hammerspoon:**
-   - Download from [hammerspoon.org](https://www.hammerspoon.org/)
-   - Or install via Homebrew: `brew install --cask hammerspoon`
-
-2. **Install ostt:**
-   ```bash
-   brew install kristoferlund/ostt/ostt
+1. Open **Shortcuts.app** (search "Shortcuts" in Spotlight)
+2. Click **+** to create a new shortcut
+3. Search for **"Run Shell Script"** in the actions panel and add it
+4. Replace the default script text with:
    ```
+   ostt launch -c
+   ```
+5. Name the shortcut (click the title at top), e.g. **"OSTT"**
+6. Right-click the shortcut in the sidebar (or click the **(i)** button) and select **Add Keyboard Shortcut**
+7. Press your desired key combination, e.g. `Option+Space`
 
-3. **Install Ghostty terminal:**
-   - Download from [ghostty.org](https://ghostty.org/)
-   - Follow the installation instructions on their website
+That's it. Press the hotkey from any application to start recording.
 
-### One-Time Configuration
+### Usage
 
-1. **Launch Hammerspoon** - It will appear in your menu bar
-2. **Open Hammerspoon config** - Click the Hammerspoon menu bar icon → "Open Config"
-3. **Add the following to your `init.lua`:**
+1. **Press your hotkey** — a popup terminal opens and recording starts
+2. **Speak**
+3. **Press the hotkey again** — recording stops, transcription runs, result is copied to clipboard
+4. **Cmd+V** — paste the transcription
 
-```lua
--- === ostt Configuration ===
-local OSTT_BIN = "/opt/homebrew/bin/ostt"
-local GHOSTTY_BIN = "/Applications/Ghostty.app/Contents/MacOS/ghostty"
-local OSTT_ARGS = "-c"  -- Copy to clipboard by default. Use "" for stdout, or "-o file" for file output
+The toggle works because pressing the hotkey a second time sends a signal (SIGUSR1) to the running OSTT process, which finishes the recording. You never need to focus the popup window.
 
-local function osttExists()
-	local attr = hs.fs.attributes(OSTT_BIN)
-	return attr ~= nil and attr.mode == "file"
-end
+### Multiple Shortcuts
 
-local function spawnOsttPopup()
-	if not osttExists() then
-		hs.alert.show("OSTT not found or not executable:\n" .. OSTT_BIN)
-		return
-	end
+Create additional shortcuts in Shortcuts.app for different workflows:
 
-	-- Remember the currently focused app to restore later
-	local frontApp = hs.application.frontmostApplication()
+| Shortcut | Shell command | What it does |
+|----------|--------------|--------------|
+| OSTT | `ostt launch -c` | Record, transcribe, copy |
+| OSTT Clean | `ostt launch -c -p clean` | Record, transcribe, clean up text, copy |
+| OSTT Translate | `ostt launch -c -p translate` | Record, transcribe, translate, copy |
 
-	-- Build the command with args
-	local args = {
-		"--window-position-x=630",
-		"--window-position-y=790",
-		"--window-width=50",
-		"--window-height=10",
-		"--font-size=8",
-		"--background=#000000",
-		"--window-decoration=none",
-		"--macos-window-shadow=false",
-		"-e",
-		OSTT_BIN,
-	}
-	
-	-- Add ostt arguments if specified
-	if OSTT_ARGS ~= "" then
-		for arg in string.gmatch(OSTT_ARGS, "%S+") do
-			table.insert(args, arg)
-		end
-	end
+Each shortcut gets its own keyboard binding.
 
-	-- Start Ghostty running OSTT with window position/size flags
-	local task = hs.task.new(GHOSTTY_BIN, function(exitCode, stdOut, stdErr)
-		-- When Ghostty/OSTT exits, go back to the previous app
-		if frontApp then
-			frontApp:activate()
-		end
-	end, args)
+## Output Options
 
-	task:start()
-end
+The `ostt launch` command passes arguments through to ostt:
 
--- Hotkey: Cmd+Shift+R
-hs.hotkey.bind({ "cmd", "shift" }, "R", spawnOsttPopup)
+```bash
+ostt launch -c              # Copy to clipboard
+ostt launch -o file.txt     # Write to file
+ostt launch                 # Output to stdout (not useful in popup)
 ```
 
-4. **Reload Hammerspoon** - Click the menu bar icon → "Reload Config"
+## Advanced: Hammerspoon Integration
 
-That's it!
+For power users who want more control (multiple hotkeys with different window sizes, app-switching behavior, etc.), a Hammerspoon configuration is available.
 
-## Usage
+See [init.lua](init.lua) for a template configuration.
 
-### Basic Usage (Clipboard Output)
+### Hammerspoon Setup
 
-1. **Press `Cmd+Shift+R`**: Opens ostt in a popup window and starts recording
-2. **Speak your text**: Watch the real-time waveform visualization
-3. **Press `Enter`**: Stops recording, transcribes, and copies to clipboard
-4. **Press `Cmd+V`**: Paste the transcribed text anywhere
+1. Install [Hammerspoon](https://www.hammerspoon.org/): `brew install --cask hammerspoon`
+2. Copy the contents of [init.lua](init.lua) to `~/.hammerspoon/init.lua`
+3. Reload Hammerspoon (menu bar icon > Reload Config)
 
-### Output Options
-
-By default, the Hammerspoon integration copies transcriptions to the clipboard. You can customize this by changing the `OSTT_ARGS` variable in your `init.lua`:
-
-**Clipboard (default):**
-```lua
-local OSTT_ARGS = "-c"
-```
-
-**Stdout (for piping to other commands):**
-```lua
-local OSTT_ARGS = ""
-```
-
-**File output:**
-```lua
-local OSTT_ARGS = "-o ~/transcription.txt"
-```
-
-## Customization
-
-### Window Position and Size
-
-Adjust the window parameters in `init.lua`:
-
-```lua
-{
-	"--window-position-x=630",  -- Horizontal position (pixels from left)
-	"--window-position-y=790",  -- Vertical position (pixels from top)
-	"--window-width=50",        -- Width in columns
-	"--window-height=10",       -- Height in rows
-	"--font-size=8",            -- Font size
-	-- ...
-}
-```
-
-**Note:** These values are static and don't adapt to different screen sizes. Adjust based on your display resolution.
-
-### Different Hotkey
-
-Change the hotkey binding in `init.lua`:
-
-```lua
--- Example: Use Ctrl+Alt+R instead
-hs.hotkey.bind({ "ctrl", "alt" }, "R", spawnOsttPopup)
-```
-
-## Upgrading from 0.0.5
-
-If you're upgrading from ostt 0.0.5, you need to update your Hammerspoon configuration to support the new output flags.
-
-### Update Your init.lua
-
-Edit your `~/.hammerspoon/init.lua` (or wherever you placed the ostt configuration) and add the `OSTT_ARGS` variable:
-
-**1. Add the OSTT_ARGS variable after the other config variables:**
-
-```lua
-local OSTT_BIN = "/opt/homebrew/bin/ostt"
-local GHOSTTY_BIN = "/Applications/Ghostty.app/Contents/MacOS/ghostty"
-local OSTT_ARGS = "-c"  -- Add this line for clipboard output
-```
-
-**2. Update the `spawnOsttPopup` function to build args dynamically:**
-
-Replace the existing function with the updated version from this README (see the "One-Time Configuration" section above), which includes:
-- Building an `args` table
-- Parsing and adding `OSTT_ARGS` to the command
-
-**3. Reload Hammerspoon:**
-
-Click the Hammerspoon menu bar icon → "Reload Config"
-
-**Alternative:** If you prefer, you can copy the entire updated configuration from the [init.lua template](init.lua) in this repository.
-
-**Note:** Without the `-c` flag in `OSTT_ARGS`, transcriptions will output to stdout instead of clipboard (which won't be visible in the popup window).
+The Hammerspoon template includes:
+- Multiple hotkeys with different ostt arguments
+- Toggle behavior (press hotkey again to finish recording)
+- Automatic focus restoration to the previous app
+- Per-hotkey window size/position overrides
 
 ## Troubleshooting
 
 ### Popup Not Appearing
 
 ```bash
-# Check if ostt is installed at the expected path
-ls -l /opt/homebrew/bin/ostt
-
-# Check Hammerspoon console for errors
-# Click Hammerspoon menu bar icon → Console
-```
-
-### Wrong ostt Path
-
-If ostt is installed elsewhere (e.g., via shell installer):
-
-```bash
-# Find ostt location
+# Verify ostt is installed
 which ostt
 
-# Update OSTT_BIN in init.lua with the correct path
+# Verify a supported terminal is installed
+which ghostty || which kitty || which alacritty
+
+# Test the launch command directly
+ostt launch -c
+```
+
+### No Transcription in Clipboard
+
+Make sure `-c` is in the shell command. Without it, output goes to stdout which isn't visible in the popup.
+
+### Terminal Not Found
+
+Set the terminal explicitly in `~/.config/ostt/ostt.toml`:
+
+```toml
+[popup]
+terminal = "ghostty"
 ```
 
 ### Popup Not Working with Full-Screen Apps
 
-Due to macOS window manager limitations, full-screen apps run in their own Space, preventing other windows from appearing on top. Consider using ostt in a regular terminal window or switching out of full-screen mode when needed.
+macOS full-screen apps run in their own Space. Other windows cannot appear on top. Switch out of full-screen mode or use a different Space.

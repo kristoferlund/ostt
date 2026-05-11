@@ -97,7 +97,8 @@ fn read_config_version_from_file(config_path: &Path) -> anyhow::Result<Option<St
 /// Returns the version that the config file was at (None if file doesn't exist or has no version).
 pub fn check_setup_needed(config_path: &Path) -> anyhow::Result<Option<String>> {
     if !config_path.exists() {
-        return Ok(None);
+        // Config doesn't exist — setup is needed (fresh install)
+        return Ok(Some("none (fresh install)".to_string()));
     }
 
     let config_version_opt = read_config_version_from_file(config_path)?;
