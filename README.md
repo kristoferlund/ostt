@@ -1,9 +1,9 @@
 # OSTT - Open Speech-to-Text
 
-**OSTT** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, ostt works seamlessly on **Linux and macOS**.
+**OSTT** is an interactive terminal-based audio recording and speech-to-text transcription tool. Record audio with real-time waveform visualization, automatically transcribe using multiple AI providers and models, and maintain a browsable history of all your transcriptions. Built with Rust for performance and minimal dependencies, OSTT works seamlessly on **Linux and macOS**.
 
 > [!TIP]
-> **Use ostt as a global hotkey popup!** Run `ostt launch -c` from a keyboard shortcut to record and transcribe from any app. See [Platform Setup](#platform-specific-setup) below.
+> **Use OSTT as a global hotkey popup!** Works on all supported platforms, both Linux and macOS. Run `ostt launch -c` from a keyboard shortcut to record and transcribe from any app. See [Platform Setup](#platform-specific-setup) below.
 
 <video src="https://github.com/user-attachments/assets/a4124692-9d70-4d36-a4de-613b2209d81f" controls width="600">
   Your browser does not support the video tag.
@@ -22,12 +22,9 @@
 - **Keyword management** for improved accuracy
 - **Cross-platform support** - Linux and macOS
 
-> [!IMPORTANT]
-> **New in 0.0.8:** The `ostt launch` command provides a simple way to set up popup hotkeys on any platform. Bind `ostt launch -c` to a keyboard shortcut — no external tools needed. See [Platform Setup](#platform-specific-setup).
-
 ## Supported Providers & Models
 
-ostt supports multiple AI transcription providers. Bring your own API key and choose from the following:
+OSTT supports multiple AI transcription providers. Bring your own API key and choose from the following:
 
 ### OpenAI
 - **gpt-4o-transcribe** - Latest model with best accuracy
@@ -119,7 +116,7 @@ mpv  # Recommended for best audio playback experience with ostt replay
 
 After installation, set up authentication and start recording:
 
-**Authentication:** ostt is a bring-your-own-API-key application. Authenticate once with your preferred provider, then freely switch between available models.
+**Authentication:** OSTT is a bring-your-own-API-key application. Authenticate once with your preferred provider, then freely switch between available models.
 
 ```bash
 # Configure your transcription provider
@@ -136,7 +133,7 @@ The app will create a default configuration file on first run at `~/.config/ostt
 
 ## Platform-Specific Setup
 
-For the best experience, configure ostt to run as a floating popup window tied to a global hotkey. This allows you to:
+For the best experience, configure OSTT to run as a floating popup window tied to a global hotkey. This allows you to:
 
 1. Press a hotkey from any application
 2. Record your speech in a popup window
@@ -154,7 +151,7 @@ Platform-specific setup instructions:
 
 ### Other Platforms
 
-ostt works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (XFCE, Sway, Cinnamon), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
+OSTT works on all Linux distributions and macOS without additional setup. Simply use `ostt` or `ostt record` from your terminal. For popup integration on other Linux desktops (XFCE, Sway, Cinnamon), bind `ostt launch -c` to a hotkey in your desktop environment's keyboard shortcut settings.
 
 ## Commands
 
@@ -194,7 +191,7 @@ ostt l -c            # Same as: ostt launch -c
 ostt a               # Same as: ostt auth
 ```
 
-**Transcribe:** The `transcribe` command enables use of ostt's transcription pipeline for pre-recorded audio files, without interactive recording. This is useful for non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts where you have an existing audio file and want to leverage ostt's multi-provider transcription infrastructure.
+**Transcribe:** The `transcribe` command enables use of OSTT's transcription pipeline for pre-recorded audio files, without interactive recording. This is useful for non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts where you have an existing audio file and want to leverage OSTT's multi-provider transcription infrastructure.
 
 ```bash
 ostt transcribe recording.ogg              # Transcribe to stdout
@@ -212,7 +209,7 @@ ostt -o file.txt     # Same as: ostt record -o file.txt
 
 ## Shell Completions
 
-ostt can generate completion scripts for your shell to enable tab completion of commands and options.
+OSTT can generate completion scripts for your shell to enable tab completion of commands and options.
 
 **Bash:**
 ```bash
@@ -243,7 +240,7 @@ After installation, restart your shell or source the completion file to enable c
 
 ## Configuration
 
-ostt uses a TOML configuration file at `~/.config/ostt/ostt.toml`.
+OSTT uses a TOML configuration file at `~/.config/ostt/ostt.toml`.
 
 ### Audio Device Configuration
 
@@ -364,7 +361,7 @@ For detailed configuration options, see the config file comments or run `ostt co
 
 ### Logging
 
-ostt logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation and automatic cleanup. Log files are kept for the 7 most recent days and older logs are automatically deleted on startup. By default, logs are set to `info` level.
+OSTT logs all activity to `~/.local/state/ostt/ostt.log.*` with daily rotation and automatic cleanup. Log files are kept for the 7 most recent days and older logs are automatically deleted on startup. By default, logs are set to `info` level.
 
 **View recent logs:**
 ```bash
@@ -390,7 +387,7 @@ ostt config
 
 ### Volume Meter Not Reaching 100%
 
-The reference level may be set too high/low for your audio card. Run ostt, maximize your microphone gain, note the peak dBFS value, and update `reference_level_db` in your config.
+The reference level may be set too high/low for your audio card. Run `ostt`, maximize your microphone gain, note the peak dBFS value, and update `reference_level_db` in your config.
 
 ### Transcription Not Working
 
