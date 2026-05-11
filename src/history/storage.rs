@@ -130,6 +130,50 @@ impl HistoryManager {
         Ok(entries)
     }
 
+    /// Gets the Nth most recent transcription (1-indexed).
+    ///
+    /// # Arguments
+    /// * `index` - 1-based index (1 = most recent, 2 = second most recent, etc.)
+    ///
+    /// # Errors
+    /// - If database connection fails
+    /// - If query execution fails
+    pub fn get_transcription_by_index(
+        &mut self,
+        index: usize,
+    ) -> Result<Option<TranscriptionEntry>> {
+        let connection = self.get_connection()?;
+        let offset = index.saturating_sub(1);
+
+        let mut statement = connection.prepare(
+            "SELECT id, text, created_at FROM transcriptions ORDER BY created_at DESC LIMIT 1 OFFSET ?1",
+        )?;
+
+        let entry = statement
+            .query_row(params![offset], |row| {
+                let id = row.get::<_, i64>(0)?;
+                let text = row.get::<_, String>(1)?;
+                let timestamp_str = row.get::<_, String>(2)?;
+
+                let created_at = DateTime::parse_from_rfc3339(&timestamp_str)
+                    .map(|dt| dt.with_timezone(&Local))
+                    .map_err(|_| {
+                        rusqlite::Error::InvalidParameterName(
+                            "Invalid timestamp format".to_string(),
+                        )
+                    })?;
+
+                Ok(TranscriptionEntry {
+                    id,
+                    text,
+                    created_at,
+                })
+            })
+            .optional()?;
+
+        Ok(entry)
+    }
+
     /// Retrieves a single transcription by ID.
     ///
     /// # Arguments

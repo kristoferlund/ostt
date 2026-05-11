@@ -19,6 +19,7 @@ pub mod config;
 pub mod history;
 pub mod keywords;
 pub mod logging;
+pub mod process;
 pub mod recording;
 pub mod setup;
 pub mod transcription;

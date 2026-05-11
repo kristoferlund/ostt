@@ -68,24 +68,6 @@ ostt launch -o file.txt     # Write to file
 ostt launch                 # Output to stdout (not useful in popup)
 ```
 
-## Advanced: Hammerspoon Integration
-
-For power users who want more control (multiple hotkeys with different window sizes, app-switching behavior, etc.), a Hammerspoon configuration is available.
-
-See [init.lua](init.lua) for a template configuration.
-
-### Hammerspoon Setup
-
-1. Install [Hammerspoon](https://www.hammerspoon.org/): `brew install --cask hammerspoon`
-2. Copy the contents of [init.lua](init.lua) to `~/.hammerspoon/init.lua`
-3. Reload Hammerspoon (menu bar icon > Reload Config)
-
-The Hammerspoon template includes:
-- Multiple hotkeys with different ostt arguments
-- Toggle behavior (press hotkey again to finish recording)
-- Automatic focus restoration to the previous app
-- Per-hotkey window size/position overrides
-
 ## Troubleshooting
 
 ### Popup Not Appearing

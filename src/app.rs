@@ -87,6 +87,10 @@ struct Cli {
     #[arg(short, long, value_name = "FILE", global = true)]
     output: Option<String>,
 
+    /// Enable processing after transcription
+    #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+    process: Option<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -106,6 +110,10 @@ enum Commands {
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+        process: Option<String>,
     },
 
     /// Retry transcription of a previous recording
@@ -124,6 +132,10 @@ enum Commands {
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+        process: Option<String>,
     },
 
     /// Transcribe a pre-recorded audio file
@@ -149,6 +161,10 @@ enum Commands {
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
+        process: Option<String>,
     },
 
     /// Replay a previous recording using system audio player
@@ -202,6 +218,40 @@ enum Commands {
     /// Display the last 50 lines of the most recent log file.
     /// Useful for troubleshooting issues.
     Logs,
+
+    /// Post-process a transcription from history
+    ///
+    /// Run a processing action on an existing transcription.
+    /// Shows the action picker if no --action is specified.
+    ///
+    /// Examples:
+    ///   ostt process                    # Process most recent, show picker
+    ///   ostt process 3                  # Process #3, show picker
+    ///   ostt process -a clean           # Process most recent with "clean" action
+    ///   ostt process 5 -a cmd -c        # Process #5 with "cmd", copy to clipboard
+    ///   ostt process --list             # List configured actions
+    #[command(visible_alias = "p")]
+    Process {
+        /// History index (1 = most recent, 2 = second most recent, etc.)
+        #[arg(value_name = "N")]
+        index: Option<usize>,
+
+        /// Run action by ID, skip the action picker
+        #[arg(short, long, value_name = "ID")]
+        action: Option<String>,
+
+        /// List all configured actions and exit
+        #[arg(long)]
+        list: bool,
+
+        /// Copy result to clipboard instead of stdout (shadows global -c)
+        #[arg(short, long)]
+        clipboard: bool,
+
+        /// Write result to file instead of stdout (shadows global -o)
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<String>,
+    },
 
     /// Launch ostt in a popup terminal window
     ///
@@ -291,26 +341,32 @@ pub async fn run() -> Result<(), anyhow::Error> {
             // Default command is record
             // Merge top-level options with explicit record command options
             // If both are specified, the explicit record command options take precedence
-            let (clipboard, output) = match cli.command {
-                Some(Commands::Record { clipboard, output }) => (clipboard, output),
-                None => (cli.clipboard, cli.output),
+            let (clipboard, output, process) = match cli.command {
+                Some(Commands::Record {
+                    clipboard,
+                    output,
+                    process,
+                }) => (clipboard, output, process),
+                None => (cli.clipboard, cli.output, cli.process),
                 _ => unreachable!(),
             };
-            commands::handle_record(clipboard, output).await?;
+            commands::handle_record(clipboard, output, process).await?;
         }
         Some(Commands::Retry {
             index,
             clipboard,
             output,
+            process,
         }) => {
-            commands::handle_retry(index, clipboard, output).await?;
+            commands::handle_retry(index, clipboard, output, process).await?;
         }
         Some(Commands::Transcribe {
             file,
             clipboard,
             output,
+            process,
         }) => {
-            commands::handle_transcribe(file, clipboard, output).await?;
+            commands::handle_transcribe(file, clipboard, output, process).await?;
         }
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;
@@ -336,11 +392,24 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Config) => {
             commands::handle_config()?;
         }
+        Some(Commands::Process {
+            index,
+            action,
+            list,
+            clipboard,
+            output,
+        }) => {
+            commands::handle_process(index, action, list, clipboard, output).await?;
+        }
         Some(Commands::Launch { args }) => {
-            // Reconstruct the full ostt args list. Global flags (-c, -o) are
+            // Reconstruct the full ostt args list. Global flags (-c, -o, -p) are
             // consumed by clap before they reach the Launch args vec, so we
             // re-inject them here so they get passed to the spawned ostt instance.
             let mut full_args = args;
+            if let Some(process) = cli.process {
+                full_args.insert(0, process);
+                full_args.insert(0, "-p".to_string());
+            }
             if cli.clipboard {
                 full_args.insert(0, "-c".to_string());
             }
