@@ -35,9 +35,7 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
         .spawn()
         .map_err(|e| {
             tracing::error!("Bash command failed to start: {e}");
-            anyhow::anyhow!(
-                "Command failed to start: {e}. Make sure the command is installed."
-            )
+            anyhow::anyhow!("Command failed to start: {e}. Make sure the command is installed.")
         })?;
 
     // Write input to stdin, then close it to signal EOF
@@ -65,13 +63,20 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
                 stderr.trim()
             );
         }
-        tracing::error!("Bash command exited with status {}: {}", code, stderr.trim());
+        tracing::error!(
+            "Bash command exited with status {}: {}",
+            code,
+            stderr.trim()
+        );
         anyhow::bail!("Command exited with status {code}:\n{}", stderr.trim());
     }
 
     // Return trimmed stdout on success
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    tracing::debug!("Bash command completed successfully ({} bytes)", stdout.len());
+    tracing::debug!(
+        "Bash command completed successfully ({} bytes)",
+        stdout.len()
+    );
     Ok(stdout)
 }
 

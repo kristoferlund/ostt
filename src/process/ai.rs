@@ -193,7 +193,11 @@ pub async fn execute_ai_action(
         "Invoking AI tool: {} {}",
         binary,
         args.iter()
-            .map(|a| if a.len() > 50 { format!("{}...", &a[..50]) } else { a.clone() })
+            .map(|a| if a.len() > 50 {
+                format!("{}...", &a[..50])
+            } else {
+                a.clone()
+            })
             .collect::<Vec<_>>()
             .join(" ")
     );
@@ -231,7 +235,11 @@ pub async fn execute_ai_action(
     let output = timeout(TOOL_TIMEOUT, child.wait_with_output())
         .await
         .map_err(|_| {
-            tracing::error!("AI tool '{}' timed out after {} seconds", binary, TOOL_TIMEOUT.as_secs());
+            tracing::error!(
+                "AI tool '{}' timed out after {} seconds",
+                binary,
+                TOOL_TIMEOUT.as_secs()
+            );
             anyhow::anyhow!(
                 "AI tool '{}' timed out after {} seconds",
                 binary,
@@ -318,10 +326,7 @@ mod tests {
             msg(InputRole::User, "Second paragraph."),
         ];
         let (system, user) = build_prompts(&messages);
-        assert_eq!(
-            system,
-            "You are a transcription editor.\n\nBe concise."
-        );
+        assert_eq!(system, "You are a transcription editor.\n\nBe concise.");
         assert_eq!(user, "First paragraph.\n\nSecond paragraph.");
     }
 
@@ -378,8 +383,6 @@ mod tests {
         }
     }
 
-
-
     #[tokio::test]
     async fn tool_binary_override_changes_binary_used() {
         // Use a nonexistent custom binary path to verify the override is used.
@@ -410,7 +413,7 @@ mod tests {
     #[test]
     fn tool_args_appended_after_required_args() {
         let model = "test-model";
-        let extra = vec!["--flag".to_string(), "value".to_string()];
+        let extra = ["--flag".to_string(), "value".to_string()];
 
         let mut args = AiTool::ClaudeCode.build_required_args(model);
         args.extend(extra.iter().cloned());
@@ -481,8 +484,7 @@ mod tests {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755))
-                .unwrap();
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
 
         // Small delay to avoid "Text file busy" race condition on Linux

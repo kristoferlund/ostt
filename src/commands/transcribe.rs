@@ -32,10 +32,7 @@ pub async fn handle_transcribe(
 
     // Validate the input file exists
     if !file.exists() {
-        return Err(anyhow::anyhow!(
-            "Audio file not found: {}",
-            file.display()
-        ));
+        return Err(anyhow::anyhow!("Audio file not found: {}", file.display()));
     }
 
     tracing::info!("Transcribing file: {}", file.display());
@@ -57,13 +54,9 @@ pub async fn handle_transcribe(
         .ok_or_else(|| anyhow::anyhow!("Unknown model: {model_id}"))?;
     let provider = model.provider();
 
-    let api_key = config::get_api_key(provider.id())?
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "No API key for {}. Please run 'ostt auth'",
-                provider.name()
-            )
-        })?;
+    let api_key = config::get_api_key(provider.id())?.ok_or_else(|| {
+        anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
+    })?;
 
     // Load keywords
     let config_dir = dirs::config_dir()
@@ -134,12 +127,8 @@ pub async fn handle_transcribe(
                     let keywords_manager = KeywordsManager::new(&config_dir)?;
                     let keywords = keywords_manager.load_keywords()?;
 
-                    match process::execute_action_with_animation(
-                        &action,
-                        &trimmed_text,
-                        &keywords,
-                    )
-                    .await?
+                    match process::execute_action_with_animation(&action, &trimmed_text, &keywords)
+                        .await?
                     {
                         Some(result) => result,
                         None => {
@@ -189,7 +178,9 @@ pub async fn handle_transcribe(
             }
             Err(e) => {
                 tracing::warn!("Failed to write to file '{file_path}': {e}");
-                return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
+                return Err(anyhow::anyhow!(
+                    "Failed to write to file '{file_path}': {e}"
+                ));
             }
         }
     } else if clipboard {

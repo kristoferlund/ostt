@@ -58,10 +58,7 @@ pub async fn handle_retry(
         ));
     }
 
-    tracing::info!(
-        "Retrying transcription for recording #{}",
-        index
-    );
+    tracing::info!("Retrying transcription for recording #{}", index);
 
     // Load configuration
     let config_data = config::OsttConfig::load().map_err(|err| {
@@ -129,9 +126,7 @@ pub async fn handle_retry(
                             ));
                         }
 
-                        match process::picker::show_action_picker(
-                            &config_data.process.actions,
-                        )? {
+                        match process::picker::show_action_picker(&config_data.process.actions)? {
                             process::picker::PickerResult::Selected(selected_id) => {
                                 let action = config_data
                                     .process
@@ -185,7 +180,9 @@ pub async fn handle_retry(
                         }
                         Err(e) => {
                             tracing::warn!("Failed to write to file '{file_path}': {e}");
-                            return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
+                            return Err(anyhow::anyhow!(
+                                "Failed to write to file '{file_path}': {e}"
+                            ));
                         }
                     }
                 } else if clipboard {

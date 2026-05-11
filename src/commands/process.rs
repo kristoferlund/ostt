@@ -133,7 +133,9 @@ pub async fn handle_process(
             }
             Err(e) => {
                 tracing::warn!("Failed to write to file '{file_path}': {e}");
-                return Err(anyhow::anyhow!("Failed to write to file '{file_path}': {e}"));
+                return Err(anyhow::anyhow!(
+                    "Failed to write to file '{file_path}': {e}"
+                ));
             }
         }
     } else if clipboard {

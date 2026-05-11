@@ -189,6 +189,26 @@ impl Default for AssemblyAIConfig {
     }
 }
 
+/// ElevenLabs Scribe API configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ElevenLabsConfig {
+    /// Optional ISO-639-1 or ISO-639-3 language code (e.g. "eng", "swe").
+    /// When set, can improve accuracy for known languages.
+    /// Defaults to null (auto-detect).
+    pub language_code: Option<String>,
+}
+
+/// Provider-specific configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ProviderConfig {
+    /// Deepgram provider configuration
+    #[serde(rename = "deepgram")]
+    Deepgram(DeepgramConfig),
+    /// OpenAI provider configuration
+    #[serde(rename = "openai")]
+    OpenAi(OpenAiConfig),
+}
+
 /// All provider configurations
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProvidersConfig {
@@ -198,6 +218,66 @@ pub struct ProvidersConfig {
     pub openai: OpenAiConfig,
     #[serde(default)]
     pub assemblyai: AssemblyAIConfig,
+    #[serde(default)]
+    pub elevenlabs: ElevenLabsConfig,
+}
+
+/// Popup window configuration for the `launch` subcommand.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PopupConfig {
+    /// Terminal emulator to use. If not set, auto-detects from available terminals.
+    /// Preferred: "ghostty", "kitty", "alacritty"
+    /// Fallbacks: "foot", "konsole", "gnome-terminal", "xfce4-terminal"
+    #[serde(default)]
+    pub terminal: Option<String>,
+    /// Window x position in pixels
+    #[serde(default = "default_popup_x")]
+    pub x: u32,
+    /// Window y position in pixels
+    #[serde(default = "default_popup_y")]
+    pub y: u32,
+    /// Window width in terminal columns
+    #[serde(default = "default_popup_width")]
+    pub width: u32,
+    /// Window height in terminal rows
+    #[serde(default = "default_popup_height")]
+    pub height: u32,
+    /// Font size
+    #[serde(default = "default_popup_font_size")]
+    pub font_size: u32,
+    /// Hide window decorations (titlebar, borders)
+    #[serde(default = "default_true")]
+    pub borderless: bool,
+}
+
+fn default_popup_x() -> u32 {
+    630
+}
+fn default_popup_y() -> u32 {
+    790
+}
+fn default_popup_width() -> u32 {
+    90
+}
+fn default_popup_height() -> u32 {
+    15
+}
+fn default_popup_font_size() -> u32 {
+    6
+}
+
+impl Default for PopupConfig {
+    fn default() -> Self {
+        Self {
+            terminal: None,
+            x: default_popup_x(),
+            y: default_popup_y(),
+            width: default_popup_width(),
+            height: default_popup_height(),
+            font_size: default_popup_font_size(),
+            borderless: true,
+        }
+    }
 }
 
 /// The role of an input message sent to an LLM.
@@ -392,6 +472,8 @@ pub struct OsttConfig {
     pub providers: ProvidersConfig,
     #[serde(default)]
     pub process: ProcessConfig,
+    #[serde(default)]
+    pub popup: PopupConfig,
 }
 
 impl OsttConfig {
@@ -438,6 +520,7 @@ impl OsttConfig {
             },
             providers: ProvidersConfig::default(),
             process: ProcessConfig::default(),
+            popup: PopupConfig::default(),
         }
     }
 }

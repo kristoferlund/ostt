@@ -185,14 +185,27 @@ impl OsttTui {
 
         self.terminal.draw(|frame| {
             let area = frame.area();
+            let background = ratatui::widgets::Block::default().style(
+                Style::default()
+                    .bg(Color::Rgb(0, 0, 0))
+                    .fg(Color::Rgb(185, 207, 212)),
+            );
+            frame.render_widget(background, area);
+
+            let padded_area = Rect {
+                x: area.x.saturating_add(2),
+                y: area.y.saturating_add(1),
+                width: area.width.saturating_sub(4),
+                height: area.height.saturating_sub(2),
+            };
 
             let footer_height = 1;
 
             let content_area = Rect {
-                x: area.x,
-                y: area.y,
-                width: area.width,
-                height: area.height.saturating_sub(footer_height),
+                x: padded_area.x,
+                y: padded_area.y,
+                width: padded_area.width,
+                height: padded_area.height.saturating_sub(footer_height),
             };
 
             let top_area_height = content_area.height / 3 * 2;
@@ -237,9 +250,9 @@ impl OsttTui {
             frame.render_widget(bottom_sparkline, bottom_area);
 
             let footer_area = Rect {
-                x: area.x,
-                y: area.y + area.height.saturating_sub(footer_height),
-                width: area.width,
+                x: padded_area.x,
+                y: padded_area.y + padded_area.height.saturating_sub(footer_height),
+                width: padded_area.width,
                 height: footer_height,
             };
 

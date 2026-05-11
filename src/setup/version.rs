@@ -46,7 +46,6 @@ impl SemanticVersion {
             patch,
         })
     }
-
 }
 
 impl fmt::Display for SemanticVersion {
@@ -68,17 +67,15 @@ fn read_config_version_from_file(config_path: &Path) -> anyhow::Result<Option<St
     }
 
     // Read only the first line
-    let first_line = std::fs::read_to_string(config_path)
-        .and_then(|content| {
-            content
-                .lines()
-                .next()
-                .ok_or_else(|| std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "config file is empty",
-                ))
-                .map(|s| s.to_string())
-        })?;
+    let first_line = std::fs::read_to_string(config_path).and_then(|content| {
+        content
+            .lines()
+            .next()
+            .ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "config file is empty")
+            })
+            .map(|s| s.to_string())
+    })?;
 
     // Parse version with regex: ^config_version = "X.Y.Z"
     // Must start with optional whitespace, then 'config_version', not a comment
@@ -100,7 +97,8 @@ fn read_config_version_from_file(config_path: &Path) -> anyhow::Result<Option<St
 /// Returns the version that the config file was at (None if file doesn't exist or has no version).
 pub fn check_setup_needed(config_path: &Path) -> anyhow::Result<Option<String>> {
     if !config_path.exists() {
-        return Ok(None);
+        // Config doesn't exist — setup is needed (fresh install)
+        return Ok(Some("none (fresh install)".to_string()));
     }
 
     let config_version_opt = read_config_version_from_file(config_path)?;

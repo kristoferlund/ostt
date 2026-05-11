@@ -24,7 +24,11 @@ use std::fs;
 /// * `clipboard` - If true, copy to clipboard instead of stdout
 /// * `output_file` - Optional file path to write output to instead of stdout
 /// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
-pub async fn handle_record(clipboard: bool, output_file: Option<String>, process: Option<String>) -> Result<(), anyhow::Error> {
+pub async fn handle_record(
+    clipboard: bool,
+    output_file: Option<String>,
+    process: Option<String>,
+) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
 
     let config_data = match config::OsttConfig::load() {
@@ -49,7 +53,10 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
         config_data.audio.reference_level_db
     );
 
-    let mut audio_recorder = AudioRecorder::new(config_data.audio.sample_rate, config_data.audio.device.clone());
+    let mut audio_recorder = AudioRecorder::new(
+        config_data.audio.sample_rate,
+        config_data.audio.device.clone(),
+    );
 
     if let Err(e) = audio_recorder.start_recording() {
         tracing::error!("Failed to start recording: {e}");
@@ -165,16 +172,15 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
     let filename = format!("ostt-recording-{timestamp}.{extension}");
     let filepath = recordings_dir.join(&filename);
 
-    if let Err(e) = audio_recorder.stop_recording(Some(filepath.clone()), &config_data.audio.output_format) {
+    if let Err(e) =
+        audio_recorder.stop_recording(Some(filepath.clone()), &config_data.audio.output_format)
+    {
         tracing::error!("Failed to save recording: {}", e);
         tui.cleanup().ok();
         return Err(e);
     }
 
-    tracing::info!(
-        "Recording saved to: {}",
-        filepath.display()
-    );
+    tracing::info!("Recording saved to: {}", filepath.display());
 
     // Clean up old recordings to keep only 10 most recent
     if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
@@ -237,7 +243,8 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                     let mut list_state = ListState::default();
                     list_state.select(Some(0));
                     loop {
-                        match tui.render_action_picker(&config_data.process.actions, &mut list_state)
+                        match tui
+                            .render_action_picker(&config_data.process.actions, &mut list_state)
                             .map_err(|e| anyhow::anyhow!("{e}"))?
                         {
                             Some(PickerEvent::Selected(id)) => break Some(id),
@@ -259,7 +266,9 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                             Some(dir) => dir,
                             None => {
                                 tui.cleanup().ok();
-                                return Err(anyhow::anyhow!("Could not determine config directory"));
+                                return Err(anyhow::anyhow!(
+                                    "Could not determine config directory"
+                                ));
                             }
                         };
                         let keywords_manager = match KeywordsManager::new(&config_dir) {
@@ -285,7 +294,8 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                         let text_clone = text.clone();
                         let keywords_clone = keywords.clone();
                         let task_handle = tokio::spawn(async move {
-                            process::execute_action(&action_clone, &text_clone, &keywords_clone).await
+                            process::execute_action(&action_clone, &text_clone, &keywords_clone)
+                                .await
                         });
 
                         let mut cancelled = false;
@@ -301,16 +311,21 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                             if crossterm::event::poll(std::time::Duration::from_millis(0))
                                 .unwrap_or(false)
                             {
-                                if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
+                                if let Ok(crossterm::event::Event::Key(key)) =
+                                    crossterm::event::read()
+                                {
                                     match key.code {
-                                        crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {
+                                        crossterm::event::KeyCode::Esc
+                                        | crossterm::event::KeyCode::Char('q') => {
                                             tracing::info!("Processing cancelled by user");
                                             task_handle.abort();
                                             cancelled = true;
                                             break;
                                         }
                                         crossterm::event::KeyCode::Char('c')
-                                            if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                                            if key.modifiers.contains(
+                                                crossterm::event::KeyModifiers::CONTROL,
+                                            ) =>
                                         {
                                             tracing::info!("Processing cancelled by user (Ctrl+C)");
                                             task_handle.abort();
@@ -402,19 +417,21 @@ pub async fn handle_record(clipboard: bool, output_file: Option<String>, process
                         break;
                     }
 
-                    if crossterm::event::poll(std::time::Duration::from_millis(0))
-                        .unwrap_or(false)
+                    if crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false)
                     {
                         if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
                             match key.code {
-                                crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {
+                                crossterm::event::KeyCode::Esc
+                                | crossterm::event::KeyCode::Char('q') => {
                                     tracing::info!("Processing cancelled by user");
                                     task_handle.abort();
                                     cancelled = true;
                                     break;
                                 }
                                 crossterm::event::KeyCode::Char('c')
-                                    if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL) =>
+                                    if key
+                                        .modifiers
+                                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
                                 {
                                     tracing::info!("Processing cancelled by user (Ctrl+C)");
                                     task_handle.abort();
@@ -558,9 +575,7 @@ async fn transcribe_recording_with_animation(
         }
 
         // Check for cancel input (Escape, 'q', or Ctrl+C)
-        if crossterm::event::poll(std::time::Duration::from_millis(0))
-            .unwrap_or(false)
-        {
+        if crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
             if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
                 match key.code {
                     crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => {

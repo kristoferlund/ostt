@@ -4,12 +4,13 @@
 //! (OpenAI, Deepgram, etc.) with their respective APIs. Each provider implements the
 //! `TranscriptionProvider` trait to handle authentication and API communication.
 
-mod openai;
-mod deepgram;
-mod deepinfra;
-mod groq;
 mod assemblyai;
 mod berget;
+mod deepgram;
+mod deepinfra;
+mod elevenlabs;
+mod groq;
+mod openai;
 
 use serde::Deserialize;
 use std::path::Path;
@@ -65,10 +66,7 @@ pub struct TranscriptionResponse {
 /// - If the API request fails due to network issues (connection, timeout)
 /// - If the API returns an HTTP error (401 for invalid key, 429 for rate limit, etc.)
 /// - If the API response cannot be parsed
-pub async fn transcribe(
-    config: &TranscriptionConfig,
-    audio_path: &Path,
-) -> anyhow::Result<String> {
+pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
     tracing::info!(
         "Transcribing with {} ({})",
         config.model.provider().name(),
@@ -76,24 +74,13 @@ pub async fn transcribe(
     );
 
     let result = match config.model.provider() {
-        TranscriptionProvider::OpenAI => {
-            openai::transcribe(config, audio_path).await
-        }
-        TranscriptionProvider::Deepgram => {
-            deepgram::transcribe(config, audio_path).await
-        }
-        TranscriptionProvider::DeepInfra => {
-            deepinfra::transcribe(config, audio_path).await
-        }
-        TranscriptionProvider::Groq => {
-            groq::transcribe(config, audio_path).await
-        }
-        TranscriptionProvider::AssemblyAI => {
-            assemblyai::transcribe(config, audio_path).await
-        }
-        TranscriptionProvider::Berget => {
-            berget::transcribe(config, audio_path).await
-        }
+        TranscriptionProvider::OpenAI => openai::transcribe(config, audio_path).await,
+        TranscriptionProvider::Deepgram => deepgram::transcribe(config, audio_path).await,
+        TranscriptionProvider::DeepInfra => deepinfra::transcribe(config, audio_path).await,
+        TranscriptionProvider::Groq => groq::transcribe(config, audio_path).await,
+        TranscriptionProvider::AssemblyAI => assemblyai::transcribe(config, audio_path).await,
+        TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
+        TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
     }?;
 
     Ok(result)

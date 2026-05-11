@@ -15,25 +15,27 @@
 //! - `replay`: Replay a previous recording from history
 
 pub mod auth;
-pub mod record;
+pub mod config;
 pub mod history;
 pub mod keywords;
-pub mod config;
+pub mod launch;
 pub mod list_devices;
 pub mod logs;
-pub mod retry;
-pub mod replay;
-pub mod transcribe;
 pub mod process;
+pub mod record;
+pub mod replay;
+pub mod retry;
+pub mod transcribe;
 
 pub use auth::handle_auth;
-pub use record::handle_record;
+pub use config::handle_config;
 pub use history::handle_history;
 pub use keywords::handle_keywords;
-pub use config::handle_config;
+pub use launch::handle_launch;
 pub use list_devices::handle_list_devices;
 pub use logs::handle_logs;
-pub use retry::handle_retry;
-pub use replay::handle_replay;
-pub use transcribe::handle_transcribe;
 pub use process::handle_process;
+pub use record::handle_record;
+pub use replay::handle_replay;
+pub use retry::handle_retry;
+pub use transcribe::handle_transcribe;

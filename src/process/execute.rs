@@ -38,11 +38,7 @@ pub async fn execute_action(
         ActionDetails::Bash { .. } => "bash",
         ActionDetails::Ai { .. } => "ai",
     };
-    tracing::info!(
-        "Dispatching action '{}' (type: {})",
-        action.id,
-        action_type
-    );
+    tracing::info!("Dispatching action '{}' (type: {})", action.id, action_type);
 
     let result = match &action.details {
         ActionDetails::Bash { command } => {

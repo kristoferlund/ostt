@@ -1,30 +1,47 @@
-# Hyprland / Omarchy - Floating Window Integration
+# Omarchy / Hyprland Setup
 
-## About Hyprland
+## About Omarchy
 
-[Hyprland](https://hyprland.org/) is a dynamic tiling Wayland compositor that provides smooth animations and extensive customization options. [Omarchy](https://omakub.org/omakub-omarchy) is a Hyprland-based desktop configuration that combines aesthetics with productivity.
-
-With ostt integrated into Hyprland, you get instant voice-to-text transcription accessible from any application through a global hotkey.
+[Omarchy](https://omarchy.org/) is an opinionated Arch Linux setup built on [Hyprland](https://hyprland.org/). With OSTT integrated into Omarchy, you get instant voice-to-text transcription accessible from any application through a global hotkey.
 
 ## Setup
 
-### One-Time Configuration
+Install OSTT and run initial authentication first:
 
-On first run, ostt automatically detects Hyprland and creates the integration script at `~/.local/bin/ostt-float`.
+```bash
+curl -fsSL https://ostt.ai/install | bash
+ostt auth
+```
 
-Add the following to your `~/.config/hypr/hyprland.conf`:
+Prefer the Arch package route? Omarchy is Arch-based, so you can install OSTT from the AUR with an AUR helper:
+
+```bash
+paru -S ostt
+# or
+yay -S ostt
+```
+
+`pacman` is the default package manager on Arch Linux, but it does not install AUR packages directly unless you build them manually.
+
+### Keybinding
+
+Add the keybinding to `~/.config/hypr/bindings.conf`:
 
 ```hyprland
 # ostt - Speech-to-Text hotkey (clipboard output)
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+bindd = SUPER, R, ostt, exec, ostt launch -c
+```
 
+### Window Rules
+
+Add the window rules to `~/.config/hypr/hyprland.conf`:
+
+```hyprland
 # OSTT window overrides
 # Float the window
 windowrule = float on, match:title ostt
-# Resize with dynamic expressions (14% width, 8% height)
-windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
-# Position centered horizontally at bottom (90% from top)
-windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
+# Position centered horizontally at bottom (85% from top)
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.85), match:title ostt
 ```
 
 Then reload your Hyprland configuration:
@@ -48,86 +65,48 @@ Alternatively, you can press `Super+R` again instead of `Enter` to stop recordin
 
 ### Output Options
 
-By default, the Hyprland integration copies transcriptions to the clipboard. You can customize this by passing flags to ostt:
+By default, the Omarchy integration copies transcriptions to the clipboard. You can customize this by passing flags to `ostt launch` in `~/.config/hypr/bindings.conf`:
 
 **Clipboard (default):**
 ```hyprland
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -c
+bindd = SUPER, R, ostt, exec, ostt launch -c
 ```
 
 **Stdout (for piping to other commands):**
 ```hyprland
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float
+bindd = SUPER, R, ostt, exec, ostt launch
 ```
 
 **File output:**
 ```hyprland
-bindd = SUPER, R, ostt, exec, bash ~/.local/bin/ostt-float -o ~/transcription.txt
+bindd = SUPER, R, ostt, exec, ostt launch -o ~/transcription.txt
 ```
 
 ## Customization
 
-### Window Position and Size
+### Window Position
 
-Adjust the window rules in your `hyprland.conf` to change size and position. Use dynamic expressions with `monitor_w`, `monitor_h`, `window_w`, and `window_h` for responsive sizing:
+Adjust the move rule in `~/.config/hypr/hyprland.conf` to change position. Use dynamic expressions with `monitor_w`, `monitor_h`, `window_w`, and `window_h` for responsive placement:
 
 ```hyprland
-# Default: 14% width, 8% height, centered horizontally at bottom
-windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
-windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
+# Default: centered horizontally at bottom
+windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.85), match:title ostt
 
-# Example: larger centered window (50% width, 30% height, centered)
-windowrule = size (monitor_w*0.5) (monitor_h*0.3), match:title ostt
+# Example: centered on screen
 windowrule = move ((monitor_w*0.5)-(window_w*0.5)) ((monitor_h*0.5)-(window_h*0.5)), match:title ostt
 ```
 
 ### Terminal Appearance
 
-The terminal appearance can be customized by editing `~/.config/ostt/ghostty-float.conf`.
+On Omarchy, popup position is controlled by the Hyprland window rules in `~/.config/hypr/hyprland.conf`. Popup terminal selection, size, font size, and borderless behavior are configured in OSTT's `[popup]` settings. See the main README for shared popup configuration.
 
 ### Different Hotkey
 
-Change `SUPER, R` to your preferred key combination in `hyprland.conf`:
+Change `SUPER, R` to your preferred key combination in `~/.config/hypr/bindings.conf`:
 
 ```hyprland
 # Example: Use Ctrl+Alt+R instead
-bindd = CTRL_ALT, R, ostt, exec, bash ~/.local/bin/ostt-float
-```
-
-## Upgrading from 0.0.5
-
-If you're upgrading from ostt 0.0.5, you only need to update your Hyprland window rules. Everything else is handled automatically!
-
-> ⚠️ **BREAKING CHANGE:** Hyprland window rules syntax has changed. The old `windowrule` syntax is deprecated in recent Hyprland versions. You **must** update your window rules to the new syntax or the floating window will not appear correctly.
-
-### Update Hyprland Window Rules (REQUIRED)
-
-The window rule syntax has changed from the old format to a new format using `match:` patterns and dynamic expressions. Update your `hyprland.conf`:
-
-**Old syntax (0.0.5):**
-```hyprland
-windowrule = float, title:ostt
-windowrule = size 14% 8%, title:ostt
-windowrule = move 43% 90%, title:ostt
-```
-
-**New syntax (0.0.7+):**
-```hyprland
-windowrule = float on, match:title ostt
-windowrule = size (monitor_w*0.14) (monitor_h*0.08), match:title ostt
-windowrule = move ((monitor_w*0.5)-(window_w*0.5)) (monitor_h*0.9), match:title ostt
-```
-
-Key changes:
-- Use `match:title ostt` instead of `title:ostt`
-- Add `on` parameter to the float rule: `float on`
-- Use dynamic expressions for responsive sizing: `(monitor_w*0.14)` instead of `14%`
-- Centering now uses expressions: `((monitor_w*0.5)-(window_w*0.5))` for horizontal centering
-
-Then reload your Hyprland configuration:
-
-```bash
-hyprctl reload
+bindd = CTRL_ALT, R, ostt, exec, ostt launch -c
 ```
 
 ## Troubleshooting
@@ -135,8 +114,8 @@ hyprctl reload
 ### Window Not Appearing
 
 ```bash
-# Test the script directly
-bash ~/.local/bin/ostt-float
+# Test launch directly
+ostt launch -c
 
 # Verify Hyprland config loaded
 hyprctl reload

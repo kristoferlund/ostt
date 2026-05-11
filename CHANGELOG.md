@@ -7,11 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `.deb` package for Debian/Ubuntu/Mint installation via `cargo-deb`
+- `.rpm` package for Fedora/RHEL/openSUSE installation via `cargo-generate-rpm`
+- Both packages are automatically built and uploaded to GitHub Releases via CI
+- **ElevenLabs provider** - New transcription provider with Scribe v2 and Scribe v1 models. Supports optional language hints via `[providers.elevenlabs].language_code`.
+
+### Removed
+
+- **Hyprland float script** - Removed legacy `ostt-float` and `alacritty-float.toml` generation. Hyprland integrations now use `ostt launch` directly.
+
 ## 0.0.8 - 2026-03-31
 
 ### Added
 
-- **Transcribe command** - Transcribe pre-recorded audio files without recording (`ostt transcribe <file>`). Enables use of ostt's transcription pipeline in non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts. Supports the same output flags as `record` and `retry` (`-c` for clipboard, `-o` for file, stdout by default). Alias: `t`.
+- **Transcribe command** - Transcribe pre-recorded audio files without recording (`ostt transcribe <file>`). Enables use of OSTT's transcription pipeline in non-interactive workflows such as CI pipelines, GitHub Actions, or agentic scripts. Supports the same output flags as `record` and `retry` (`-c` for clipboard, `-o` for file, stdout by default). Alias: `t`.
 - **Deepgram language detection** - Enable automatic language detection with `detect_language` option (default: true). Previously Deepgram defaulted to English only.
 - **Deepgram language detection restriction** - Restrict detectable languages with `detect_language_codes` option. For example, `detect_language_codes = ["en", "es"]` will only detect English or Spanish.
 - **AssemblyAI provider** - New transcription provider with the `universal-3-pro` model. Configurable via `[providers.assemblyai]` in `ostt.toml`.
@@ -21,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Transcription cancel support** - Users can now press Escape, q, or Ctrl+C to cancel during transcription. Previously the UI was stuck until the API responded.
 - **ErrorScreen reserved for TUI commands** - Non-TUI commands (retry, transcribe) now use standard error output instead of launching a full-screen error display.
-- **macOS Hammerspoon popup** - Fixed terminal noise in Ghostty popup by launching ostt via `clear; exec` through a login shell.
+- **macOS Hammerspoon popup** - Fixed terminal noise in Ghostty popup by launching `ostt` via `clear; exec` through a login shell.
 
 ## 0.0.7 - 2026-02-05
 
@@ -119,4 +130,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hyprland/Omarchy floating window integration
 - Cross-platform support (Linux and macOS)
 - Multiple installation methods (Homebrew, AUR, shell installer)
-
