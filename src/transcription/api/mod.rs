@@ -8,6 +8,7 @@ mod assemblyai;
 mod berget;
 mod deepgram;
 mod deepinfra;
+mod elevenlabs;
 mod groq;
 mod openai;
 
@@ -79,6 +80,7 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::Groq => groq::transcribe(config, audio_path).await,
         TranscriptionProvider::AssemblyAI => assemblyai::transcribe(config, audio_path).await,
         TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
+        TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
     }?;
 
     Ok(result)

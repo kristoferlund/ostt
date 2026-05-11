@@ -54,6 +54,11 @@ Berget is a Swedish cloud provider guaranteeing that data never leaves Sweden. A
 - **berget-whisper-nb-large** - NB Whisper Large, developed by the National Library of Norway. Trained on 66,000 hours of Norwegian speech, optimized for Norwegian ASR.
 - **berget-whisper-large-v3** - OpenAI Whisper Large V3, general-purpose multilingual model hosted on Berget infrastructure.
 
+### ElevenLabs
+
+- **elevenlabs-scribe-v2** - Scribe v2, highest accuracy with support for 99 languages
+- **elevenlabs-scribe-v1** - Scribe v1, previous generation model
+
 Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
@@ -333,6 +338,11 @@ format_text = true        # Punctuation, casing, and numeral formatting
 disfluencies = false      # Include filler words (uh, um)
 filter_profanity = false  # Filter profanity from transcript
 language_detection = true  # Automatic language detection
+
+[providers.elevenlabs]
+# Optional ISO-639-1 or ISO-639-3 language code, e.g. "en" or "eng".
+# Leave unset to auto-detect the spoken language.
+# language_code = "eng"
 ```
 
 For detailed configuration options, see the config file comments or run `ostt config` to edit.
