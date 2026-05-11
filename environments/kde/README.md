@@ -4,31 +4,12 @@
 
 Bind `ostt launch -c` to a global hotkey using KDE's built-in Custom Shortcuts. No third-party tools required.
 
-### Prerequisites
+### Install OSTT
 
-1. **Install ostt** (see main README for distribution-specific instructions)
-
-2. **Install dependencies:**
-   ```bash
-   # Ubuntu/Kubuntu/Debian
-   sudo apt install -y ffmpeg xclip          # X11 session
-   sudo apt install -y ffmpeg wl-clipboard   # Wayland session
-
-   # Fedora KDE
-   sudo dnf install -y ffmpeg xclip          # X11 session
-   sudo dnf install -y ffmpeg wl-clipboard   # Wayland session
-
-   # Arch/Manjaro
-   sudo pacman -S ffmpeg xclip               # X11 session
-   sudo pacman -S ffmpeg wl-clipboard        # Wayland session
-   ```
-
-   Check which session you're on: `echo $XDG_SESSION_TYPE`
-
-3. **Run initial setup:**
-   ```bash
-   ostt auth
-   ```
+```bash
+curl -fsSL https://ostt.ai/install | bash
+ostt auth
+```
 
 ### Bind to a Hotkey
 
@@ -36,11 +17,11 @@ Bind `ostt launch -c` to a global hotkey using KDE's built-in Custom Shortcuts. 
 2. Click **Edit** > **New** > **Global Shortcut** > **Command/URL**
 3. Name it **OSTT**
 4. **Trigger tab:** click the shortcut button and press your desired key combination (e.g. `Meta+Space`)
-5. **Action tab:** enter the full path to ostt:
+5. **Action tab:** enter the command:
    ```
-   /usr/bin/ostt launch -c
+   ostt launch -c
    ```
-   (Use `which ostt` to find the correct path if different)
+   If KDE cannot find `ostt`, use the full path from `which ostt`.
 6. Click **Apply**
 
 That's it. Press the hotkey from any application to start recording.
@@ -52,7 +33,7 @@ That's it. Press the hotkey from any application to start recording.
 3. **Press the hotkey again** — recording stops, transcription runs, result is copied to clipboard
 4. **Ctrl+V** — paste the transcription
 
-The toggle works because pressing the hotkey a second time sends a signal to the running ostt process, which finishes the recording. You never need to focus the popup window.
+The toggle works because pressing the hotkey a second time sends a signal to the running OSTT process, which finishes the recording. You never need to focus the popup window.
 
 ### Multiple Hotkeys
 
@@ -81,7 +62,7 @@ Then optionally set it in `~/.config/ostt/ostt.toml`:
 terminal = "kitty"
 ```
 
-If not set, ostt auto-detects in this order: Ghostty > kitty > alacritty > foot > konsole > gnome-terminal > xfce4-terminal. The first one found is used.
+If not set, OSTT auto-detects a supported terminal. See the main README for the shared popup configuration.
 
 ### Window Rules (Optional)
 
@@ -98,29 +79,6 @@ KDE supports window rules for fine-grained control over popup appearance. If you
 5. Click **Apply**
 
 This gives you precise window placement that works even on Wayland.
-
-## Popup Window Configuration
-
-Configure window size, position, and appearance in `~/.config/ostt/ostt.toml`:
-
-```toml
-[popup]
-# terminal = "kitty"
-
-# Window position (pixels from top-left corner)
-x = 630
-y = 790
-
-# Window size (terminal columns and rows)
-width = 50
-height = 10
-
-# Font size
-font_size = 8
-
-# Hide window decorations
-borderless = true
-```
 
 ## Troubleshooting
 

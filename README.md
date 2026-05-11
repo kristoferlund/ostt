@@ -58,52 +58,37 @@ Configure your preferred provider and model using `ostt auth`.
 
 ## Installation
 
-### Linux
+### Recommended
 
-**Arch Linux (AUR):**
+Install OSTT and required runtime dependencies with the website installer:
+
 ```bash
-yay -S ostt
+curl -fsSL https://ostt.ai/install | bash
 ```
 
-**Shell Installer (All Distributions):**
-```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
-```
+The installer detects your platform, installs missing dependencies, downloads the latest OSTT release, verifies its checksum, and installs the `ostt` CLI.
 
-### macOS
+### Alternative Methods
 
-**Homebrew (Recommended):**
+**Homebrew:**
+
 ```bash
 brew install kristoferlund/ostt/ostt
 ```
 
-**Shell Installer:**
+**Arch Linux (AUR):**
+
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/kristoferlund/ostt/releases/latest/download/ostt-installer.sh | sh
+paru -S ostt
+# or
+yay -S ostt
 ```
+
+`pacman` is the default package manager on Arch Linux, but AUR packages require an AUR helper such as `paru` or `yay` unless you build them manually.
 
 ### Dependencies
 
-Dependencies need only to be installed manually if you used the shell installer. `yay` and `brew` installs the dependencies automatically.
-
-**macOS:**
-```bash
-brew install ffmpeg
-```
-
-**Linux (Wayland):**
-```bash
-sudo apt install ffmpeg wl-clipboard   # Debian/Ubuntu
-sudo dnf install ffmpeg wl-clipboard   # Fedora
-```
-
-**Linux (X11):**
-```bash
-sudo apt install ffmpeg xclip          # Debian/Ubuntu
-sudo dnf install ffmpeg xclip          # Fedora
-```
-
-Check your session type with `echo $XDG_SESSION_TYPE`.
+The recommended installer handles runtime dependencies for supported platforms. If you use an alternative install method, make sure `ffmpeg` is available. Linux clipboard output also requires `wl-clipboard` on Wayland or `xclip` on X11.
 
 **Optional (Recommended for better audio playback):**
 ```bash
@@ -281,6 +266,34 @@ visualization = "spectrum"      # "spectrum" (default) or "waveform"
 - `spectrum` (default) - Shows frequency spectrum with energy distribution across frequencies optimized for human voice (100-1500 Hz range).
 - `waveform` - Shows time-domain waveform with amplitude over time. Classic oscilloscope-style display showing raw audio envelope.
 
+### Popup Configuration
+
+`ostt launch` opens OSTT in a popup terminal and auto-detects a terminal emulator in this order: Ghostty, kitty, Alacritty, foot, Konsole, GNOME Terminal, then Xfce Terminal.
+
+Configure popup behavior in `~/.config/ostt/ostt.toml`:
+
+```toml
+[popup]
+# Optional. If unset, OSTT auto-detects a supported terminal.
+terminal = "ghostty"
+
+# Window position in pixels. Some compositors ignore this.
+x = 630
+y = 790
+
+# Window size in terminal columns and rows.
+width = 90
+height = 15
+
+# Font size for the popup terminal.
+font_size = 6
+
+# Hide window decorations when supported by the terminal/compositor.
+borderless = true
+```
+
+Platform-specific setup guides explain any compositor-specific behavior, such as Omarchy/Hyprland window rules or GNOME Wayland placement limitations.
+
 ### Transcription Setup
 
 Configure your AI provider:
@@ -345,10 +358,7 @@ For detailed configuration options, see the config file comments or run `ostt co
 
 ```
 ~/.config/ostt/
-├── ostt.toml              # Main configuration
-└── hyprland/              # Hyprland integration (if set up)
-    ├── ostt-float.sh
-    └── alacritty-float.toml
+└── ostt.toml              # Main configuration
 
 ~/.local/share/ostt/
 └── credentials            # API keys (0600 permissions)
@@ -402,8 +412,8 @@ RUST_LOG=debug ostt record
 ### Hyprland Window Not Appearing
 
 ```bash
-# Test the script directly
-bash ~/.local/bin/ostt-float
+# Test launch directly
+ostt launch -c
 
 # Verify Hyprland config loaded
 hyprctl reload

@@ -209,11 +209,11 @@ language_detection = true
 # y = 790
 
 # Window size in terminal columns and rows.
-# width = 50
-# height = 10
+width = 90
+height = 15
 
 # Font size for the popup terminal.
-# font_size = 8
+font_size = 6
 
 # Hide window decorations (titlebar, borders).
-# borderless = true
+borderless = true

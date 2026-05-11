@@ -242,12 +242,16 @@ fn build_terminal_args(
 
             let mut args = vec![
                 binary.to_string(),
+                "--class=ostt-popup".to_string(),
+                "--title=ostt".to_string(),
                 format!("--window-position-x={}", config.x),
                 format!("--window-position-y={}", config.y),
                 format!("--window-width={}", config.width),
                 format!("--window-height={}", config.height),
                 format!("--font-size={}", config.font_size),
                 "--background=#000000".to_string(),
+                "--window-padding-x=0".to_string(),
+                "--window-padding-y=0".to_string(),
                 "--macos-window-shadow=false".to_string(),
             ];
             if config.borderless {

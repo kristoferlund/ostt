@@ -235,13 +235,13 @@ fn default_popup_y() -> u32 {
     790
 }
 fn default_popup_width() -> u32 {
-    50
+    90
 }
 fn default_popup_height() -> u32 {
-    10
+    15
 }
 fn default_popup_font_size() -> u32 {
-    8
+    6
 }
 
 impl Default for PopupConfig {

@@ -2,21 +2,16 @@
 
 ## Quick Setup (Shortcuts.app)
 
-The recommended way to set up ostt on macOS. No third-party tools required.
+The recommended way to set up OSTT on macOS. No third-party tools required.
 
-### Prerequisites
+### Install OSTT
 
-1. **Install ostt:**
-   ```bash
-   brew install kristoferlund/ostt/ostt
-   ```
+```bash
+curl -fsSL https://ostt.ai/install | bash
+ostt auth
+```
 
-2. **Install a terminal emulator** — ostt auto-detects from: Ghostty, kitty, alacritty. At least one must be installed. [Ghostty](https://ghostty.org/) is recommended.
-
-3. **Run initial setup:**
-   ```bash
-   ostt auth
-   ```
+For popup mode, OSTT auto-detects Ghostty, kitty, or Alacritty. The installer warns you if none are installed. [Ghostty](https://ghostty.org/) is recommended.
 
 ### Bind to a Hotkey
 
@@ -40,7 +35,7 @@ That's it. Press the hotkey from any application to start recording.
 3. **Press the hotkey again** — recording stops, transcription runs, result is copied to clipboard
 4. **Cmd+V** — paste the transcription
 
-The toggle works because pressing the hotkey a second time sends a signal (SIGUSR1) to the running ostt process, which finishes the recording. You never need to focus the popup window.
+The toggle works because pressing the hotkey a second time sends a signal (SIGUSR1) to the running OSTT process, which finishes the recording. You never need to focus the popup window.
 
 ### Multiple Shortcuts
 
@@ -54,43 +49,7 @@ Create additional shortcuts in Shortcuts.app for different workflows:
 
 Each shortcut gets its own keyboard binding.
 
-## Configuration
-
-### Popup Window Settings
-
-Configure the popup window size, position, and terminal in `~/.config/ostt/ostt.toml`:
-
-```toml
-[popup]
-# Terminal emulator to use. Auto-detected if not set.
-# Setting this skips auto-detection (faster startup).
-#
-# Preferred (recommended, cross-platform):
-#   ghostty, kitty, alacritty
-#
-# Platform defaults (used as fallback if none of the above are found):
-#   foot, konsole, gnome-terminal, xfce4-terminal
-#
-# On macOS, the default Terminal.app does not support true color and
-# is not suitable for ostt. Install one of the preferred terminals.
-# terminal = "ghostty"
-
-# Window position (pixels from top-left corner)
-x = 630
-y = 790
-
-# Window size (terminal columns and rows)
-width = 50
-height = 10
-
-# Font size
-font_size = 8
-
-# Hide window decorations (titlebar, borders)
-borderless = true
-```
-
-### Output Options
+## Output Options
 
 The `ostt launch` command passes arguments through to ostt:
 

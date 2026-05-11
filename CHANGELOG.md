@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- **Hyprland float script** - Removed legacy `ostt-float` and `alacritty-float.toml` generation. Hyprland integrations now use `ostt launch` directly.
+
 ## 0.0.8 - 2026-03-31
 
 ### Added
