@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed invalid TOML in the embedded default config template for AssemblyAI language detection options.
+
 ## 0.0.9 - 2026-05-12
 
 ### Added

@@ -259,6 +259,5 @@ language_detection = true
 #
 # [providers.assemblyai.language_detection_options]
 # expected_languages = ["en", "es", "fr"]  # Only expect these languages
-:with# fallback_language = "auto"               # "auto" or specific code like "en"
-
+# fallback_language = "auto"               # "auto" or specific code like "en"
 
