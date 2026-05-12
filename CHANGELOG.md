@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fixed invalid TOML in the embedded default config template for AssemblyAI language detection options.
 - Suppressed VLC GUI and DBus noise during `ostt replay` on Linux by using terminal-friendly playback commands.
+- Added ARM64 Linux package builds so Ubuntu arm64 users can install a matching `.deb` package.
 
 ## 0.0.9 - 2026-05-12
 
