@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.9 - 2026-05-12
+
 ### Added
 
 - **Process command** - New `ostt process` subcommand for running processing actions on history items. New `-p`/`--process` flag on `record`, `transcribe`, and `retry` commands for post-transcription processing. Includes AI tool execution (OpenCode, Claude Code, Gemini CLI, Codex CLI), bash command execution, and an action picker TUI for selecting which action to run. Actions are configured under `[process.actions]` in `~/.config/ostt/ostt.toml`.

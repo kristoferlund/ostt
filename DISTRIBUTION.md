@@ -184,7 +184,7 @@ If you're using Hyprland, add a keybinding and window rules to your Hyprland con
 
 ```hyprland
 # Keybinding for ostt (clipboard output)
-bindd = SUPER, R, ostt, exec, ostt launch -c
+bindd = ALT, SPACE, ostt, exec, ostt launch -c
 
 # OSTT window rules
 windowrule = float on, match:title ostt
