@@ -14,11 +14,28 @@ ostt auth
 Prefer a normal package-manager install? Use Homebrew instead:
 
 ```bash
-brew install kristoferlund/ostt/ostt
+brew tap kristoferlund/ostt
+brew install ostt
 ostt auth
 ```
 
 The Homebrew route installs OSTT as a managed package and allows normal uninstall with `brew uninstall ostt`.
+
+### Locate the Binary
+
+Shortcuts.app requires the full path to the OSTT binary. Find it with:
+
+```bash
+which ostt
+```
+
+Typical locations:
+
+| Install method | Path |
+| --- | --- |
+| Install script | `~/.local/bin/ostt` |
+| Homebrew (Intel) | `/usr/local/bin/ostt` |
+| Homebrew (Apple Silicon) | `/opt/homebrew/bin/ostt` |
 
 For popup mode, OSTT auto-detects Ghostty, kitty, or Alacritty. The installer warns you if none are installed. [Ghostty](https://ghostty.org/) is recommended.
 
@@ -27,15 +44,17 @@ For popup mode, OSTT auto-detects Ghostty, kitty, or Alacritty. The installer wa
 1. Open **Shortcuts.app** (search "Shortcuts" in Spotlight)
 2. Click **+** to create a new shortcut
 3. Search for **"Run Shell Script"** in the actions panel and add it
-4. Replace the default script text with:
+4. Replace the default script text with the full path to OSTT:
    ```
-   ostt launch -c
+   /opt/homebrew/bin/ostt launch -c
    ```
-5. Name the shortcut (click the title at top), e.g. **"OSTT"**
-6. Right-click the shortcut in the sidebar (or click the **(i)** button) and select **Add Keyboard Shortcut**
-7. Press your desired key combination, e.g. `Option+Space`
+   Use the path from `which ostt` if yours differs.
 
-That's it. Press the hotkey from any application to start recording.
+5. Name the shortcut (click the title at top), e.g. **"OSTT"**
+6. Open the shortcut details (click the info button, the encircled **i**) and select **Add Keyboard Shortcut**
+7. Press **Control+Space**
+
+> **Note:** `Control+Space` is the suggested default for macOS because many other key combinations are reserved by the system. If you choose a different shortcut, verify it does not collide with an existing system or application hotkey. The suggested hotkey differs from the one used on Linux platforms because macOS reserves more keyboard shortcuts at the system level.
 
 ### Usage
 
@@ -52,9 +71,9 @@ Create additional shortcuts in Shortcuts.app for different workflows:
 
 | Shortcut | Shell command | What it does |
 |----------|--------------|--------------|
-| OSTT | `ostt launch -c` | Record, transcribe, copy |
-| OSTT Clean | `ostt launch -c -p clean` | Record, transcribe, clean up text, copy |
-| OSTT Translate | `ostt launch -c -p translate` | Record, transcribe, translate, copy |
+| OSTT | `/path/to/ostt launch -c` | Record, transcribe, copy |
+| OSTT Clean | `/path/to/ostt launch -c -p clean` | Record, transcribe, clean up text, copy |
+| OSTT Translate | `/path/to/ostt launch -c -p translate` | Record, transcribe, translate, copy |
 
 Each shortcut gets its own keyboard binding.
 
