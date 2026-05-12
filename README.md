@@ -68,7 +68,8 @@ Processing actions transform transcriptions after recording or from history.
 ostt -p clean -c              # Record, transcribe, clean, copy
 ostt launch -c -p clean       # Popup hotkey workflow with processing
 ostt process                  # Process most recent history item, show picker
-ostt process 3 -a clean -c    # Process history item #3 with clean action
+ostt process clean            # Process most recent history item with clean action
+ostt process 3 clean -c       # Process history item #3 with clean action
 ostt process --list           # List configured actions
 ```
 

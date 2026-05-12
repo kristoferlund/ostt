@@ -222,22 +222,19 @@ enum Commands {
     /// Post-process a transcription from history
     ///
     /// Run a processing action on an existing transcription.
-    /// Shows the action picker if no --action is specified.
+    /// Shows the action picker if no action is specified.
     ///
-    /// Examples:
-    ///   ostt process                    # Process most recent, show picker
-    ///   ostt process 3                  # Process #3, show picker
-    ///   ostt process -a clean           # Process most recent with "clean" action
-    ///   ostt process 5 -a cmd -c        # Process #5 with "cmd", copy to clipboard
-    ///   ostt process --list             # List configured actions
+    #[command(
+        after_help = "EXAMPLES:\n    ostt process                      Process most recent, show picker\n    ostt process clean                Process most recent with the clean action\n    ostt process 5                    Process #5, show picker\n    ostt process 5 clean -c           Process #5 with clean, copy to clipboard\n    ostt process --list               List configured actions"
+    )]
     #[command(visible_alias = "p")]
     Process {
-        /// History index (1 = most recent, 2 = second most recent, etc.)
-        #[arg(value_name = "N")]
-        index: Option<usize>,
+        /// History index or action ID
+        #[arg(value_name = "INDEX_OR_ACTION")]
+        index_or_action: Option<String>,
 
-        /// Run action by ID, skip the action picker
-        #[arg(short, long, value_name = "ID")]
+        /// Action ID when the first argument is a history index
+        #[arg(value_name = "ACTION")]
         action: Option<String>,
 
         /// List all configured actions and exit
@@ -286,6 +283,28 @@ enum Commands {
         #[arg(value_enum)]
         shell: Shell,
     },
+}
+
+fn resolve_process_args(
+    index_or_action: Option<String>,
+    action: Option<String>,
+) -> Result<(Option<usize>, Option<String>), anyhow::Error> {
+    match (index_or_action, action) {
+        (None, None) => Ok((None, None)),
+        (Some(first), None) => match first.parse::<usize>() {
+            Ok(index) => Ok((Some(index), None)),
+            Err(_) => Ok((None, Some(first))),
+        },
+        (Some(first), Some(action)) => {
+            let index = first.parse::<usize>().map_err(|_| {
+                anyhow!(
+                    "Invalid process arguments. Use 'ostt process [INDEX] [ACTION]' or 'ostt process [ACTION]'."
+                )
+            })?;
+            Ok((Some(index), Some(action)))
+        }
+        (None, Some(_)) => unreachable!("clap cannot populate the second positional first"),
+    }
 }
 
 /// Runs the main application based on command-line arguments.
@@ -393,12 +412,13 @@ pub async fn run() -> Result<(), anyhow::Error> {
             commands::handle_config()?;
         }
         Some(Commands::Process {
-            index,
+            index_or_action,
             action,
             list,
             clipboard,
             output,
         }) => {
+            let (index, action) = resolve_process_args(index_or_action, action)?;
             commands::handle_process(index, action, list, clipboard, output).await?;
         }
         Some(Commands::Launch { args }) => {
@@ -407,7 +427,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
             // re-inject them here so they get passed to the spawned ostt instance.
             let mut full_args = args;
             if let Some(process) = cli.process {
-                full_args.insert(0, process);
+                if !process.is_empty() {
+                    full_args.insert(0, process);
+                }
                 full_args.insert(0, "-p".to_string());
             }
             if cli.clipboard {

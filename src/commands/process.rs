@@ -17,7 +17,7 @@ use dirs;
 ///
 /// # Arguments
 /// * `index` - History index (1 = most recent, None = most recent)
-/// * `action_id` - Optional action ID to skip the picker
+/// * `action_id` - Optional positional action ID to skip the picker
 /// * `list` - If true, list configured actions and exit
 /// * `clipboard` - If true, copy result to clipboard instead of stdout
 /// * `output_file` - Optional file path to write result to instead of stdout
