@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Process command** - New `ostt process` subcommand for running processing actions on history items. New `-p`/`--process` flag on `record`, `transcribe`, and `retry` commands for post-transcription processing. Includes AI tool execution (OpenCode, Claude Code, Gemini CLI, Codex CLI), bash command execution, and an action picker TUI for selecting which action to run. Actions are configured in `~/.config/ostt/ostt.toml`.
+- **Process command** - New `ostt process` subcommand for running processing actions on history items. New `-p`/`--process` flag on `record`, `transcribe`, and `retry` commands for post-transcription processing. Includes AI tool execution (OpenCode, Claude Code, Gemini CLI, Codex CLI), bash command execution, and an action picker TUI for selecting which action to run. Actions are configured under `[process.actions]` in `~/.config/ostt/ostt.toml`.
 - **Launch command** - New `ostt launch` subcommand for cross-platform popup recording. Opens a terminal popup that starts recording immediately, with toggle support (press hotkey again to stop). Auto-detects ghostty, kitty, alacritty, foot, konsole, gnome-terminal, and xfce4-terminal. Replaces the old Hyprland-specific float script.
 - **ElevenLabs provider** - New transcription provider with Scribe v2 and Scribe v1 models. Supports optional language hints via `[providers.elevenlabs].language_code`.
 - `.deb` package for Debian/Ubuntu/Mint installation via `cargo-deb`
@@ -17,10 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Both packages are automatically built and uploaded to GitHub Releases via CI
 - **GNOME setup guide** - Platform-specific README in `environments/gnome/`
 - **KDE Plasma setup guide** - Platform-specific README in `environments/kde/`
-
-### Changed
-
-- **Suggested default hotkeys** - Changed from `Super+R` / `Meta+Space` to `Alt+Space` (basic popup) and `Alt+Ctrl+Space` (popup with action picker)
 
 ### Removed
 
