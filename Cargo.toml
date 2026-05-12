@@ -100,8 +100,8 @@ ostt is an interactive terminal-based audio recording and speech-to-text \
 transcription tool. Record via microphone with real-time waveform visualization \
 and transcribe using your choice of AI provider.\
 """
-requires = ["ffmpeg"]
-recommends = ["wl-clipboard"]
+requires = "ffmpeg"
+recommends = "wl-clipboard"
 
 [[package.metadata.generate-rpm.assets]]
 source = "target/dist/ostt"
