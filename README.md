@@ -1,13 +1,13 @@
 # OSTT - Open Speech-to-Text
 
-**Open source voice-to-text for developers who want Linux-first support, provider choice, and a scriptable pipeline.**
+**Open source voice-to-text for Linux. And macOS.**
 
-OSTT is a terminal-native speech-to-text tool for Linux and macOS. It records from your microphone, transcribes with the provider and model you choose, keeps local history, and works from both the shell and a global hotkey popup. Instead of locking you into one vendor, one subscription, or one app-specific workflow, OSTT lets you bring your own API key and choose from OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, and ElevenLabs.
+OSTT is a terminal-native speech-to-text tool. Record from a hotkey, transcribe with your chosen provider, then send the result to your clipboard, a file, stdout, an AI prompt, or any shell command. It does not assume one vendor, one subscription, or one app-specific workflow: bring your own API key and choose from OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, and ElevenLabs.
 
-OSTT is built for people who treat the terminal as a first-class workspace. You can print to stdout, copy to the clipboard, write to files, retry the same recording with another model, transcribe existing audio, and post-process text with either AI prompts or normal shell commands. The process pipeline is the core differentiator: your voice can become cleaned dictation, a translated note, a generated CLI command, or input to any script you already use.
+OSTT is built for people who treat the terminal as a normal place for voice input to land. You can print to stdout, copy to the clipboard, write to files, retry the same recording with another model, transcribe existing audio, and post-process text with AI prompts or shell commands. Voice becomes text that can move through the same tools as everything else.
 
 > [!TIP]
-> Use OSTT as a global hotkey popup with `ostt launch -c`. Press once to start recording, press again to stop and transcribe.
+> Bind `Alt+Space` to `ostt launch -c` for a global hotkey popup. Press once to start recording, press again to stop and transcribe. Use `Alt+Ctrl+Space` with `ostt launch -c -p` for a popup with an action picker.
 
 <video src="https://github.com/user-attachments/assets/a4124692-9d70-4d36-a4de-613b2209d81f" controls width="600">
   Your browser does not support the video tag.
@@ -17,12 +17,12 @@ OSTT is built for people who treat the terminal as a first-class workspace. You 
 
 - **Linux-first voice input** - Global hotkey setup for Omarchy/Hyprland, GNOME, KDE, and other Linux desktops, with macOS support too.
 - **Provider choice** - Bring your own API key and switch between OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, and ElevenLabs.
-- **Terminal-native workflow** - Use stdout, clipboard, files, aliases, shell completions, logs, and pipes as normal parts of the product.
+- **Terminal-native workflow** - Use stdout, clipboard, files, aliases, shell completions, logs, and pipes.
 - **Scriptable post-processing** - Transform transcripts with AI prompts or bash commands using `ostt -p` and `ostt process`.
 - **Retry without re-recording** - Save recordings locally, then re-transcribe them with a different provider or model.
 - **File transcription and replay** - Transcribe existing audio files and replay saved recordings from history.
 - **Keywords and custom vocabulary** - Improve recognition for names, technical terms, and project-specific language.
-- **Open source, no subscription** - Transparent code, local configuration, and no vendor lock-in beyond the providers you choose.
+- **Open source, no subscription** - Public code, local configuration, and no vendor lock-in beyond the providers you choose.
 
 ## Documentation
 
@@ -105,7 +105,14 @@ Run `ostt auth` to select your provider/model and save credentials securely.
 
 ## Platform Setup
 
-Bind `ostt launch -c` to a global shortcut for the best workflow. Platform-specific setup notes are available in the docs:
+Suggested default keybindings:
+
+| Hotkey | Command | Action |
+| --- | --- | --- |
+| `Alt+Space` | `ostt launch -c` | Popup recorder, clipboard output |
+| `Alt+Ctrl+Space` | `ostt launch -c -p` | Popup with action picker |
+
+Platform-specific setup notes are available in the docs:
 
 - [macOS](https://ostt.ai/guide/platforms/macos)
 - [Omarchy / Hyprland](https://ostt.ai/guide/platforms/hyprland)
