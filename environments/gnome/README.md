@@ -32,7 +32,7 @@ The package-manager route installs OSTT as a system package, installs declared d
 4. Fill in:
    - **Name:** `OSTT`
    - **Command:** `ostt launch -c`
-5. Click **Set Shortcut** and press your desired key combination (e.g. `Super+Space` or `Ctrl+Alt+R`)
+5. Click **Set Shortcut** and press your desired key combination (e.g. `Alt+Space` or `Ctrl+Alt+R`)
 6. Click **Add**
 
 That's it. Press the hotkey from any application to start recording.
@@ -52,8 +52,8 @@ Add additional custom shortcuts for different workflows:
 
 | Name | Command | Hotkey |
 |------|---------|--------|
-| OSTT | `ostt launch -c` | `Super+Space` |
-| OSTT Clean | `ostt launch -c -p clean` | `Super+Shift+Space` |
+| OSTT | `ostt launch -c` | `Alt+Space` |
+| OSTT Process | `ostt launch -c -p` | `Alt+Ctrl+Space` |
 | OSTT Translate | `ostt launch -c -p translate` | `Ctrl+Alt+T` |
 
 ## Terminal Selection

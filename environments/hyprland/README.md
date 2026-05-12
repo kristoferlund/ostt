@@ -29,7 +29,7 @@ Add the keybinding to `~/.config/hypr/bindings.conf`:
 
 ```hyprland
 # ostt - Speech-to-Text hotkey (clipboard output)
-bindd = SUPER, R, ostt, exec, ostt launch -c
+bindd = ALT, SPACE, ostt, exec, ostt launch -c
 ```
 
 ### Window Rules
@@ -56,12 +56,12 @@ That's it!
 
 ### Basic Usage (Clipboard Output)
 
-1. **Press `Super+R`**: Opens ostt in a floating window and starts recording
+1. **Press `Alt+Space`**: Opens ostt in a floating window and starts recording
 2. **Speak your text**: Watch the real-time waveform visualization
 3. **Press `Enter`**: Stops recording, transcribes, and copies to clipboard
 4. **Press `Ctrl+V`**: Paste the transcribed text anywhere
 
-Alternatively, you can press `Super+R` again instead of `Enter` to stop recording and transcribe.
+Alternatively, you can press `Alt+Space` again instead of `Enter` to stop recording and transcribe.
 
 ### Output Options
 
@@ -69,17 +69,22 @@ By default, the Omarchy integration copies transcriptions to the clipboard. You 
 
 **Clipboard (default):**
 ```hyprland
-bindd = SUPER, R, ostt, exec, ostt launch -c
+bindd = ALT, SPACE, ostt, exec, ostt launch -c
 ```
 
 **Stdout (for piping to other commands):**
 ```hyprland
-bindd = SUPER, R, ostt, exec, ostt launch
+bindd = ALT, SPACE, ostt, exec, ostt launch
 ```
 
 **File output:**
 ```hyprland
-bindd = SUPER, R, ostt, exec, ostt launch -o ~/transcription.txt
+bindd = ALT, SPACE, ostt, exec, ostt launch -o ~/transcription.txt
+```
+
+**Processing (action picker):**
+```hyprland
+bindd = ALT CTRL, SPACE, ostt process, exec, ostt launch -c -p
 ```
 
 ## Customization
@@ -102,11 +107,11 @@ On Omarchy, popup position is controlled by the Hyprland window rules in `~/.con
 
 ### Different Hotkey
 
-Change `SUPER, R` to your preferred key combination in `~/.config/hypr/bindings.conf`:
+The suggested defaults are `Alt+Space` (basic popup) and `Alt+Ctrl+Space` (popup with action picker). Change the key combination in `~/.config/hypr/bindings.conf` to whatever you prefer:
 
 ```hyprland
-# Example: Use Ctrl+Alt+R instead
-bindd = CTRL_ALT, R, ostt, exec, ostt launch -c
+# Example: Use Ctrl+Shift+R instead
+bindd = CTRL SHIFT, R, ostt, exec, ostt launch -c
 ```
 
 ## Troubleshooting

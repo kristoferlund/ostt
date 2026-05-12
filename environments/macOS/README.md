@@ -53,7 +53,7 @@ Create additional shortcuts in Shortcuts.app for different workflows:
 | Shortcut | Shell command | What it does |
 |----------|--------------|--------------|
 | OSTT | `ostt launch -c` | Record, transcribe, copy |
-| OSTT Clean | `ostt launch -c -p clean` | Record, transcribe, clean up text, copy |
+| OSTT Process | `ostt launch -c -p` | Record, show action picker, copy |
 | OSTT Translate | `ostt launch -c -p translate` | Record, transcribe, translate, copy |
 
 Each shortcut gets its own keyboard binding.

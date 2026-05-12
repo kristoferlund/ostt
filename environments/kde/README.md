@@ -32,7 +32,7 @@ The package-manager route installs OSTT as a system package, installs declared d
 1. Open **System Settings** > **Shortcuts** > **Custom Shortcuts**
 2. Click **Edit** > **New** > **Global Shortcut** > **Command/URL**
 3. Name it **OSTT**
-4. **Trigger tab:** click the shortcut button and press your desired key combination (e.g. `Meta+Space`)
+4. **Trigger tab:** click the shortcut button and press your desired key combination (e.g. `Alt+Space`)
 5. **Action tab:** enter the command:
    ```
    ostt launch -c
@@ -57,8 +57,8 @@ Add additional Custom Shortcuts for different workflows:
 
 | Name | Command | Hotkey |
 |------|---------|--------|
-| OSTT | `ostt launch -c` | `Meta+Space` |
-| OSTT Clean | `ostt launch -c -p clean` | `Meta+Shift+Space` |
+| OSTT | `ostt launch -c` | `Alt+Space` |
+| OSTT Process | `ostt launch -c -p` | `Alt+Ctrl+Space` |
 | OSTT Translate | `ostt launch -c -p translate` | `Ctrl+Alt+T` |
 
 ## Terminal Selection

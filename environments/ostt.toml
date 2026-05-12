@@ -70,7 +70,7 @@ visualization = "spectrum"
 #   tool = "codex-cli"    # Codex CLI (https://github.com/openai/codex)
 #
 # Use `ostt process --list` to see all configured actions.
-# Use `ostt process -a <id>` to run a specific action.
+# Use `ostt process <id>` to run a specific action.
 # Use `ostt -p` to process immediately after recording.
 
 # --- AI Actions ---
