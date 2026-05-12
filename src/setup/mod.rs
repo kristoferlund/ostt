@@ -34,3 +34,17 @@ pub fn run_setup() -> anyhow::Result<()> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::OsttConfig;
+
+    #[test]
+    fn embedded_default_config_is_valid_toml() {
+        let config_with_version = format!(r#"config_version = "{}""#, CURRENT_VERSION);
+        let full_config = format!("{}\n{}", config_with_version, DEFAULT_CONFIG);
+
+        toml::from_str::<OsttConfig>(&full_config).unwrap();
+    }
+}

@@ -87,14 +87,15 @@ fn read_config_version_from_file(config_path: &Path) -> anyhow::Result<Option<St
     Ok(None)
 }
 
-/// Determines if setup is needed by checking version and config file existence.
+/// Determines if setup/version maintenance is needed.
 ///
-/// Setup is needed if:
+/// Maintenance is needed if:
 /// 1. Config file doesn't exist, OR
 /// 2. Config file exists but has no version (legacy config), OR
 /// 3. Config file version is older than current version
 ///
-/// Returns the version that the config file was at (None if file doesn't exist or has no version).
+/// Returns the version that the config file was at. Callers decide whether to
+/// create the default config, run migrations, or only update `config_version`.
 pub fn check_setup_needed(config_path: &Path) -> anyhow::Result<Option<String>> {
     if !config_path.exists() {
         // Config doesn't exist — setup is needed (fresh install)
@@ -191,5 +192,31 @@ mod tests {
         assert!(SemanticVersion::parse("0.0").is_err());
         assert!(SemanticVersion::parse("0.0.5.1").is_err());
         assert!(SemanticVersion::parse("invalid").is_err());
+    }
+
+    #[test]
+    fn update_config_version_preserves_existing_config() {
+        let path = std::env::temp_dir().join(format!(
+            "ostt-config-version-test-{}.toml",
+            std::process::id()
+        ));
+        let original = r#"config_version = "0.0.9"
+[process.actions.caveman]
+name = "Caveman speak"
+type = "ai"
+"#;
+
+        std::fs::write(&path, original).unwrap();
+        update_config_version(&path).unwrap();
+
+        let updated = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        assert!(updated.starts_with(&format!(
+            r#"config_version = "{}""#,
+            CURRENT_VERSION
+        )));
+        assert!(updated.contains("[process.actions.caveman]"));
+        assert!(updated.contains(r#"name = "Caveman speak""#));
     }
 }
