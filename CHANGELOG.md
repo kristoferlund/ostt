@@ -9,14 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Process command** - New `ostt process` subcommand for running processing actions on history items. New `-p`/`--process` flag on `record`, `transcribe`, and `retry` commands for post-transcription processing. Includes AI tool execution (OpenCode, Claude Code, Gemini CLI, Codex CLI), bash command execution, and an action picker TUI for selecting which action to run. Actions are configured in `~/.config/ostt/ostt.toml`.
+- **Launch command** - New `ostt launch` subcommand for cross-platform popup recording. Opens a terminal popup that starts recording immediately, with toggle support (press hotkey again to stop). Auto-detects ghostty, kitty, alacritty, foot, konsole, gnome-terminal, and xfce4-terminal. Replaces the old Hyprland-specific float script.
+- **ElevenLabs provider** - New transcription provider with Scribe v2 and Scribe v1 models. Supports optional language hints via `[providers.elevenlabs].language_code`.
 - `.deb` package for Debian/Ubuntu/Mint installation via `cargo-deb`
 - `.rpm` package for Fedora/RHEL/openSUSE installation via `cargo-generate-rpm`
 - Both packages are automatically built and uploaded to GitHub Releases via CI
-- **ElevenLabs provider** - New transcription provider with Scribe v2 and Scribe v1 models. Supports optional language hints via `[providers.elevenlabs].language_code`.
+- **GNOME setup guide** - Platform-specific README in `environments/gnome/`
+- **KDE Plasma setup guide** - Platform-specific README in `environments/kde/`
+
+### Changed
+
+- **Suggested default hotkeys** - Changed from `Super+R` / `Meta+Space` to `Alt+Space` (basic popup) and `Alt+Ctrl+Space` (popup with action picker)
 
 ### Removed
 
-- **Hyprland float script** - Removed legacy `ostt-float` and `alacritty-float.toml` generation. Hyprland integrations now use `ostt launch` directly.
+- **Hyprland float script** - Removed legacy `ostt-float.sh` and `alacritty-float.toml` generation. Superseded by the new `ostt launch` command.
+- **macOS Hammerspoon config** - Removed `init.lua` generation. Superseded by the new `ostt launch` command.
 
 ## 0.0.8 - 2026-03-31
 
