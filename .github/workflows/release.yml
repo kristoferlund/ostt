@@ -315,6 +315,10 @@ jobs:
         run: |
           # Remove the granular manifests
           rm -f artifacts/*-dist-manifest.json
+          # Linux package artifacts are downloaded with their source directories;
+          # flatten them so gh release only receives files.
+          find artifacts -mindepth 2 -type f -exec mv -t artifacts {} +
+          find artifacts -mindepth 1 -type d -empty -delete
       - name: Create GitHub Release
         env:
           PRERELEASE_FLAG: "${{ fromJson(steps.host.outputs.manifest).announcement_is_prerelease && '--prerelease' || '' }}"
