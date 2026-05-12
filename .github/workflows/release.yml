@@ -213,11 +213,21 @@ jobs:
             ${{ env.BUILD_MANIFEST_NAME }}
   # Build .deb and .rpm Linux packages
   build-linux-packages:
-    name: build-linux-packages
+    name: build-linux-packages (${{ matrix.deb_arch }})
     needs:
       - plan
     if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' }}
-    runs-on: "ubuntu-22.04"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            deb_arch: amd64
+            rpm_arch: x86_64
+          - runner: ubuntu-22.04-arm
+            deb_arch: arm64
+            rpm_arch: aarch64
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -241,18 +251,18 @@ jobs:
         run: cargo generate-rpm
       - name: Create stable-name copies
         run: |
-          cp target/debian/*.deb target/debian/ostt_latest_amd64.deb
-          cp target/generate-rpm/*.rpm target/generate-rpm/ostt-latest.x86_64.rpm
+          cp target/debian/*.deb target/debian/ostt_latest_${{ matrix.deb_arch }}.deb
+          cp target/generate-rpm/*.rpm target/generate-rpm/ostt-latest.${{ matrix.rpm_arch }}.rpm
       - name: Create package checksums
         run: |
           cd target/debian
-          sha256sum ostt_latest_amd64.deb > ostt_latest_amd64.deb.sha256
+          sha256sum ostt_latest_${{ matrix.deb_arch }}.deb > ostt_latest_${{ matrix.deb_arch }}.deb.sha256
           cd ../generate-rpm
-          sha256sum ostt-latest.x86_64.rpm > ostt-latest.x86_64.rpm.sha256
+          sha256sum ostt-latest.${{ matrix.rpm_arch }}.rpm > ostt-latest.${{ matrix.rpm_arch }}.rpm.sha256
       - name: "Upload Linux packages"
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts-linux-packages
+          name: artifacts-linux-packages-${{ matrix.deb_arch }}
           path: |
             target/debian/*.deb
             target/debian/*.sha256
