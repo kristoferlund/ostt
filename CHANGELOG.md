@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserved user `ostt.toml` changes during version updates and added validation for the embedded default config template.
 
+### Added
+
+- Added process-level default AI tool and model settings for processing actions.
+
 ## 0.0.10 - 2026-05-12
 
 ### Fixed

@@ -212,10 +212,7 @@ type = "ai"
         let updated = std::fs::read_to_string(&path).unwrap();
         std::fs::remove_file(&path).unwrap();
 
-        assert!(updated.starts_with(&format!(
-            r#"config_version = "{}""#,
-            CURRENT_VERSION
-        )));
+        assert!(updated.starts_with(&format!(r#"config_version = "{}""#, CURRENT_VERSION)));
         assert!(updated.contains("[process.actions.caveman]"));
         assert!(updated.contains(r#"name = "Caveman speak""#));
     }

@@ -52,6 +52,12 @@ pub async fn execute_action(
             tool_args,
         } => {
             let messages = super::input::resolve_inputs(inputs, transcription, keywords)?;
+            let tool = tool
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no tool", action.id))?;
+            let model = model
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no model", action.id))?;
             super::ai::execute_ai_action(
                 tool,
                 model,

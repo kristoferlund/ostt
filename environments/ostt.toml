@@ -73,13 +73,18 @@ visualization = "spectrum"
 # Use `ostt process <id>` to run a specific action.
 # Use `ostt -p` to process immediately after recording.
 
+[process]
+
+# Defaults used by AI actions that omit `tool` and/or `model`.
+# Individual actions can override either setting.
+default_tool = "opencode"
+default_model = "anthropic/claude-sonnet-4-6"
+
 # --- AI Actions ---
 
 [process.actions.clean]
 name = "Clean up text"
 type = "ai"
-tool = "opencode"
-model = "anthropic/claude-sonnet-4-6"
 inputs = [
   { role = "system", content = "Clean up the following transcribed text. Remove filler words (uh, um, like), fix grammar, improve phrasing, and remove false starts or repetitions. Keep the original meaning and tone. Output only the cleaned text, nothing else." },
   { role = "user", source = "transcription" },
@@ -88,8 +93,6 @@ inputs = [
 [process.actions.cmd]
 name = "Generate CLI command"
 type = "ai"
-tool = "opencode"
-model = "anthropic/claude-sonnet-4-6"
 inputs = [
   { role = "system", content = "The user described a task via voice. Generate the exact CLI command(s) to accomplish it. Output only the command(s), one per line. No explanation, no markdown fences, no commentary. If multiple commands are needed, separate them with && on a single line." },
   { role = "user", source = "transcription" },
@@ -260,4 +263,3 @@ language_detection = true
 # [providers.assemblyai.language_detection_options]
 # expected_languages = ["en", "es", "fr"]  # Only expect these languages
 # fallback_language = "auto"               # "auto" or specific code like "en"
-

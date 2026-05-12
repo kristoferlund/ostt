@@ -407,9 +407,11 @@ pub enum ActionDetails {
     /// An AI chat completion action
     Ai {
         /// Which CLI tool to invoke
-        tool: AiTool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool: Option<AiTool>,
         /// Provider/model string (e.g. "openai/gpt-4o")
-        model: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
         /// Input messages for the LLM
         inputs: Vec<ActionInput>,
         /// Override the binary path (e.g., "/usr/local/bin/claude" instead of "claude").
@@ -439,6 +441,10 @@ pub struct ProcessAction {
 /// Top-level process configuration.
 #[derive(Debug, Clone, Default)]
 pub struct ProcessConfig {
+    /// Default AI CLI tool for AI actions that omit `tool`.
+    pub default_tool: Option<AiTool>,
+    /// Default model for AI actions that omit `model`.
+    pub default_model: Option<String>,
     /// List of configured processing actions
     pub actions: Vec<ProcessAction>,
 }
@@ -469,6 +475,10 @@ impl<'de> Deserialize<'de> for ProcessConfig {
         #[derive(Deserialize)]
         struct RawProcessConfig {
             #[serde(default)]
+            default_tool: Option<AiTool>,
+            #[serde(default)]
+            default_model: Option<String>,
+            #[serde(default)]
             actions: IndexMap<String, ProcessActionConfig>,
         }
 
@@ -476,14 +486,30 @@ impl<'de> Deserialize<'de> for ProcessConfig {
         let actions = raw
             .actions
             .into_iter()
-            .map(|(id, action)| ProcessAction {
-                id,
-                name: action.name,
-                details: action.details,
+            .map(|(id, action)| {
+                let mut details = action.details;
+                if let ActionDetails::Ai { tool, model, .. } = &mut details {
+                    if tool.is_none() {
+                        *tool = raw.default_tool.clone();
+                    }
+                    if model.is_none() {
+                        *model = raw.default_model.clone();
+                    }
+                }
+
+                ProcessAction {
+                    id,
+                    name: action.name,
+                    details,
+                }
             })
             .collect();
 
-        Ok(Self { actions })
+        Ok(Self {
+            default_tool: raw.default_tool,
+            default_model: raw.default_model,
+            actions,
+        })
     }
 }
 
@@ -494,6 +520,10 @@ impl Serialize for ProcessConfig {
     {
         #[derive(Serialize)]
         struct RawProcessConfig<'a> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            default_tool: &'a Option<AiTool>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            default_model: &'a Option<String>,
             actions: IndexMap<String, ProcessActionConfigRef<'a>>,
         }
 
@@ -511,7 +541,12 @@ impl Serialize for ProcessConfig {
             })
             .collect();
 
-        RawProcessConfig { actions }.serialize(serializer)
+        RawProcessConfig {
+            default_tool: &self.default_tool,
+            default_model: &self.default_model,
+            actions,
+        }
+        .serialize(serializer)
     }
 }
 
@@ -520,7 +555,27 @@ impl ProcessAction {
     ///
     /// Returns an error if an AI action has an empty `inputs` list.
     pub fn validate(&self) -> Result<(), Box<dyn std::error::Error>> {
-        if let ActionDetails::Ai { inputs, .. } = &self.details {
+        if let ActionDetails::Ai {
+            tool,
+            model,
+            inputs,
+            ..
+        } = &self.details
+        {
+            if tool.is_none() {
+                return Err(format!(
+                    "AI action '{}' must set tool or inherit process.default_tool",
+                    self.id
+                )
+                .into());
+            }
+            if model.is_none() {
+                return Err(format!(
+                    "AI action '{}' must set model or inherit process.default_model",
+                    self.id
+                )
+                .into());
+            }
             if inputs.is_empty() {
                 return Err(format!("AI action '{}' must have at least one input", self.id).into());
             }
@@ -645,6 +700,13 @@ mod tests {
         toml::from_str(toml_str)
     }
 
+    fn validate_process_config(config: &ProcessConfig) -> Result<(), Box<dyn std::error::Error>> {
+        for action in &config.actions {
+            action.validate()?;
+        }
+        Ok(())
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // 1.1.14 — Valid configurations
     // ═══════════════════════════════════════════════════════════════════
@@ -692,8 +754,8 @@ mod tests {
                 inputs,
                 ..
             } => {
-                assert!(matches!(tool, AiTool::OpenCode));
-                assert_eq!(model, "openai/gpt-4o");
+                assert!(matches!(tool, Some(AiTool::OpenCode)));
+                assert_eq!(model.as_deref(), Some("openai/gpt-4o"));
                 assert_eq!(inputs.len(), 2);
             }
             _ => panic!("expected Ai variant"),
@@ -736,6 +798,102 @@ mod tests {
         "#;
         let config: OsttConfig = toml::from_str(toml_str).unwrap();
         assert!(config.process.actions.is_empty());
+    }
+
+    #[test]
+    fn process_defaults_apply_to_ai_actions() {
+        let toml_str = r#"
+            default_tool = "opencode"
+            default_model = "anthropic/claude-sonnet-4-6"
+
+            [actions.clean]
+            name = "Clean"
+            type = "ai"
+            inputs = [{ role = "user", source = "transcription" }]
+        "#;
+
+        let config = parse_process_config(toml_str).unwrap();
+        assert_eq!(
+            config.default_model.as_deref(),
+            Some("anthropic/claude-sonnet-4-6")
+        );
+        match &config.actions[0].details {
+            ActionDetails::Ai { tool, model, .. } => {
+                assert!(matches!(tool, Some(AiTool::OpenCode)));
+                assert_eq!(model.as_deref(), Some("anthropic/claude-sonnet-4-6"));
+            }
+            _ => panic!("expected Ai variant"),
+        }
+    }
+
+    #[test]
+    fn ai_action_without_tool_or_default_tool_fails_validation() {
+        let toml_str = r#"
+            default_model = "anthropic/claude-sonnet-4-6"
+
+            [actions.clean]
+            name = "Clean"
+            type = "ai"
+            inputs = [{ role = "user", source = "transcription" }]
+        "#;
+
+        let config = parse_process_config(toml_str).unwrap();
+        let err = validate_process_config(&config).unwrap_err().to_string();
+        assert!(err.contains("process.default_tool"));
+    }
+
+    #[test]
+    fn ai_action_without_model_or_default_model_fails_validation() {
+        let toml_str = r#"
+            default_tool = "opencode"
+
+            [actions.clean]
+            name = "Clean"
+            type = "ai"
+            inputs = [{ role = "user", source = "transcription" }]
+        "#;
+
+        let config = parse_process_config(toml_str).unwrap();
+        let err = validate_process_config(&config).unwrap_err().to_string();
+        assert!(err.contains("process.default_model"));
+    }
+
+    #[test]
+    fn ai_action_without_tool_model_or_defaults_fails_validation() {
+        let toml_str = r#"
+            [actions.clean]
+            name = "Clean"
+            type = "ai"
+            inputs = [{ role = "user", source = "transcription" }]
+        "#;
+
+        let config = parse_process_config(toml_str).unwrap();
+        let err = validate_process_config(&config).unwrap_err().to_string();
+        assert!(err.contains("process.default_tool"));
+    }
+
+    #[test]
+    fn ai_action_can_override_process_defaults() {
+        let toml_str = r#"
+            default_tool = "opencode"
+            default_model = "anthropic/claude-sonnet-4-6"
+
+            [actions.clean]
+            name = "Clean"
+            type = "ai"
+            tool = "claude-code"
+            model = "haiku"
+            inputs = [{ role = "user", source = "transcription" }]
+        "#;
+
+        let config = parse_process_config(toml_str).unwrap();
+        match &config.actions[0].details {
+            ActionDetails::Ai { tool, model, .. } => {
+                assert!(matches!(tool, Some(AiTool::ClaudeCode)));
+                assert_eq!(model.as_deref(), Some("haiku"));
+            }
+            _ => panic!("expected Ai variant"),
+        }
     }
 
     #[test]
@@ -874,7 +1032,8 @@ mod tests {
             role = "user"
             source = "transcription"
         "#;
-        assert!(parse_action(toml_str).is_err());
+        let action = parse_action(toml_str).unwrap();
+        assert!(action.validate().is_err());
     }
 
     #[test]
@@ -1016,7 +1175,7 @@ mod tests {
     }
 
     #[test]
-    fn ai_action_missing_tool_fails_deserialization() {
+    fn ai_action_missing_tool_fails_validation_without_default() {
         let toml_str = r#"
             id = "clean"
             name = "Clean"
@@ -1027,7 +1186,8 @@ mod tests {
             role = "user"
             source = "transcription"
         "#;
-        assert!(parse_action(toml_str).is_err());
+        let action = parse_action(toml_str).unwrap();
+        assert!(action.validate().is_err());
     }
 
     #[test]
