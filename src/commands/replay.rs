@@ -7,7 +7,7 @@ use std::process::Command;
 /// Plays back a previous recording using the system's best available audio player.
 ///
 /// On macOS: Uses `open` command to open with default application
-/// On Linux: Tries dedicated audio players first (mpv, vlc, ffplay, paplay) for better UX,
+/// On Linux: Tries dedicated audio players first (mpv, cvlc, ffplay, paplay) for better UX,
 ///           then falls back to xdg-open if none are available
 ///
 /// # Arguments
@@ -62,12 +62,17 @@ pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow:
 
     #[cfg(target_os = "linux")]
     {
-        // Try dedicated audio players first (prefer nice UI), then fall back to xdg-open
-        let players = vec!["mpv", "vlc", "ffplay", "paplay"];
+        // Prefer terminal-friendly playback commands to avoid GUI/DBus noise in stdout/stderr.
+        let players = [
+            ("mpv", vec!["--really-quiet", "--no-video"]),
+            ("cvlc", vec!["--play-and-exit", "--no-video"]),
+            ("ffplay", vec!["-nodisp", "-autoexit", "-loglevel", "quiet"]),
+            ("paplay", vec![]),
+        ];
         let mut played = false;
 
-        for player in players {
-            if let Ok(mut child) = Command::new(player).arg(audio_path).spawn() {
+        for (player, args) in players {
+            if let Ok(mut child) = Command::new(player).args(args).arg(audio_path).spawn() {
                 let _ = child.wait();
                 played = true;
                 break;
