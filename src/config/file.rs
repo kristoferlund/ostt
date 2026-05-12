@@ -3,6 +3,7 @@
 //! This module handles loading and saving application configuration from TOML files.
 //! Configuration is stored in the user's config directory.
 
+use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -436,11 +437,82 @@ pub struct ProcessAction {
 }
 
 /// Top-level process configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default)]
 pub struct ProcessConfig {
     /// List of configured processing actions
-    #[serde(default)]
     pub actions: Vec<ProcessAction>,
+}
+
+#[derive(Deserialize)]
+struct ProcessActionConfig {
+    /// Human-readable display name (shown in action picker)
+    name: String,
+    /// Action type and its type-specific configuration.
+    #[serde(flatten)]
+    details: ActionDetails,
+}
+
+#[derive(Serialize)]
+struct ProcessActionConfigRef<'a> {
+    /// Human-readable display name (shown in action picker)
+    name: &'a str,
+    /// Action type and its type-specific configuration.
+    #[serde(flatten)]
+    details: &'a ActionDetails,
+}
+
+impl<'de> Deserialize<'de> for ProcessConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawProcessConfig {
+            #[serde(default)]
+            actions: IndexMap<String, ProcessActionConfig>,
+        }
+
+        let raw = RawProcessConfig::deserialize(deserializer)?;
+        let actions = raw
+            .actions
+            .into_iter()
+            .map(|(id, action)| ProcessAction {
+                id,
+                name: action.name,
+                details: action.details,
+            })
+            .collect();
+
+        Ok(Self { actions })
+    }
+}
+
+impl Serialize for ProcessConfig {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        #[derive(Serialize)]
+        struct RawProcessConfig<'a> {
+            actions: IndexMap<String, ProcessActionConfigRef<'a>>,
+        }
+
+        let actions = self
+            .actions
+            .iter()
+            .map(|action| {
+                (
+                    action.id.clone(),
+                    ProcessActionConfigRef {
+                        name: action.name.as_str(),
+                        details: &action.details,
+                    },
+                )
+            })
+            .collect();
+
+        RawProcessConfig { actions }.serialize(serializer)
+    }
 }
 
 impl ProcessAction {
@@ -631,22 +703,17 @@ mod tests {
     #[test]
     fn valid_mixed_actions() {
         let toml_str = r#"
-            [[actions]]
-            id = "copy"
+            [actions.copy]
             name = "Copy"
             type = "bash"
             command = "xclip"
 
-            [[actions]]
-            id = "clean"
+            [actions.clean]
             name = "Clean"
             type = "ai"
             tool = "claude-code"
             model = "openai/gpt-4o"
-
-            [[actions.inputs]]
-            role = "user"
-            source = "transcription"
+            inputs = [{ role = "user", source = "transcription" }]
         "#;
         let config = parse_process_config(toml_str).unwrap();
         assert_eq!(config.actions.len(), 2);
@@ -1042,8 +1109,7 @@ mod tests {
     #[test]
     fn get_action_returns_matching_action() {
         let toml_str = r#"
-            [[actions]]
-            id = "clean"
+            [actions.clean]
             name = "Clean transcript"
             type = "bash"
             command = "sed 's/um//g'"
