@@ -42,11 +42,21 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
     let debug_params = [format!("model={}", config.model.api_model_name())];
 
     // Add keywords as context_bias for better transcription accuracy
+    // Mistral supports up to 100 words/phrases for context biasing
     if !config.keywords.is_empty() {
         for keyword in &config.keywords {
             form = form.text("context_bias", keyword.clone());
         }
         tracing::debug!("Keywords used as context_bias for Mistral model: {:?}", config.keywords);
+    }
+
+    // Add optional language parameter from provider config
+    let mistral_config = &config.providers.mistral;
+    if let Some(ref lang) = mistral_config.language {
+        if !lang.is_empty() {
+            form = form.text("language", lang.clone());
+            tracing::debug!("Language set for Mistral model: {}", lang);
+        }
     }
 
     let endpoint = config.model.endpoint();
