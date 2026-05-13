@@ -29,7 +29,7 @@ OSTT is built for people who treat the terminal as a normal place for voice inpu
 > [!TIP]
 > Bind `Alt+Space` to `ostt launch -c` for a global hotkey popup. Press once to start recording, press again to stop and transcribe. Use `Alt+Ctrl+Space` with `ostt launch -c -p` for a popup with an action picker.
 
-<video src="https://github.com/user-attachments/assets/a4124692-9d70-4d36-a4de-613b2209d81f" controls width="600">
+<video src="https://github.com/user-attachments/assets/8df8afb8-04f6-44d7-8cf3-8e40c4816d40" controls width="600">
   Your browser does not support the video tag.
 </video>
 
