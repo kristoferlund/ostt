@@ -263,3 +263,17 @@ language_detection = true
 # [providers.assemblyai.language_detection_options]
 # expected_languages = ["en", "es", "fr"]  # Only expect these languages
 # fallback_language = "auto"               # "auto" or specific code like "en"
+
+# =============================================================================
+# Mistral Configuration
+# =============================================================================
+
+[providers.mistral]
+
+# Optional language code for transcription.
+# When set, can improve accuracy for known languages.
+# Example: language = "en"   # English
+#          language = "sv"   # Swedish
+#          language = "fr"   # French
+# When not set (or empty), Mistral autodetects the language.
+# language = ""
