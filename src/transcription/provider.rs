@@ -15,6 +15,7 @@ pub enum TranscriptionProvider {
     AssemblyAI,
     Berget,
     ElevenLabs,
+    Mistral,
 }
 
 impl TranscriptionProvider {
@@ -27,6 +28,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::AssemblyAI => "assemblyai",
             TranscriptionProvider::Berget => "berget",
             TranscriptionProvider::ElevenLabs => "elevenlabs",
+            TranscriptionProvider::Mistral => "mistral",
         }
     }
 
@@ -39,6 +41,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::AssemblyAI => "AssemblyAI",
             TranscriptionProvider::Berget => "Berget",
             TranscriptionProvider::ElevenLabs => "ElevenLabs",
+            TranscriptionProvider::Mistral => "Mistral",
         }
     }
 
@@ -51,6 +54,7 @@ impl TranscriptionProvider {
             "assemblyai" => Some(TranscriptionProvider::AssemblyAI),
             "berget" => Some(TranscriptionProvider::Berget),
             "elevenlabs" => Some(TranscriptionProvider::ElevenLabs),
+            "mistral" => Some(TranscriptionProvider::Mistral),
             _ => None,
         }
     }
@@ -64,6 +68,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::AssemblyAI,
             TranscriptionProvider::Berget,
             TranscriptionProvider::ElevenLabs,
+            TranscriptionProvider::Mistral,
         ]
     }
 }
