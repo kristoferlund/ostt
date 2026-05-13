@@ -1,6 +1,28 @@
-# OSTT - Open Speech-to-Text
+<p align="center">
+  <img src="./ostt.png" width="160" alt="OSTT logo" />
+</p>
 
-**Open source voice-to-text for Linux. And macOS.**
+<h1 align="center">OSTT</h1>
+
+<p align="center">
+  <strong>open source voice-to-text for Linux and macOS</strong>
+</p>
+
+<p align="center">
+  <a href="https://github.com/kristoferlund/ostt/stargazers"><img src="https://img.shields.io/github/stars/kristoferlund/ostt?style=flat&color=yellow" alt="Stars"></a>
+  <a href="https://github.com/kristoferlund/ostt/commits/main"><img src="https://img.shields.io/github/last-commit/kristoferlund/ostt?style=flat" alt="Last Commit"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/kristoferlund/ostt?style=flat" alt="License"></a>
+</p>
+
+<p align="center">
+  <a href="#features">Features</a> •
+  <a href="#install">Install</a> •
+  <a href="#quick-start">Quick Start</a> •
+  <a href="#processing">Processing</a> •
+  <a href="https://ostt.ai">Docs</a>
+</p>
+
+---
 
 OSTT is a terminal-native speech-to-text tool. Record from a hotkey, transcribe with your chosen provider, then send the result to your clipboard, a file, stdout, an AI prompt, or any shell command. It does not assume one vendor, one subscription, or one app-specific workflow: bring your own API key and choose from OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, and ElevenLabs.
 
