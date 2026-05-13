@@ -89,6 +89,9 @@ assets = [
     ["target/dist/ostt", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ostt/README.md", "644"],
     ["LICENSE", "usr/share/doc/ostt/LICENSE", "644"],
+    ["completions/ostt.bash", "usr/share/bash-completion/completions/ostt", "644"],
+    ["completions/_ostt", "usr/share/zsh/site-functions/_ostt", "644"],
+    ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
 ]
 
 [package.metadata.generate-rpm]
@@ -122,3 +125,18 @@ source = "LICENSE"
 dest = "/usr/share/doc/ostt/LICENSE"
 mode = "0644"
 doc = true
+
+[[package.metadata.generate-rpm.assets]]
+source = "completions/ostt.bash"
+dest = "/usr/share/bash-completion/completions/ostt"
+mode = "0644"
+
+[[package.metadata.generate-rpm.assets]]
+source = "completions/_ostt"
+dest = "/usr/share/zsh/site-functions/_ostt"
+mode = "0644"
+
+[[package.metadata.generate-rpm.assets]]
+source = "completions/ostt.fish"
+dest = "/usr/share/fish/vendor_completions.d/ostt.fish"
+mode = "0644"

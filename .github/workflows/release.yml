@@ -245,6 +245,12 @@ jobs:
         run: cargo install cargo-generate-rpm
       - name: Build release binary
         run: cargo build --profile dist --locked
+      - name: Generate shell completions
+        run: |
+          mkdir -p completions
+          ./target/dist/ostt completions bash > completions/ostt.bash
+          ./target/dist/ostt completions zsh > completions/_ostt
+          ./target/dist/ostt completions fish > completions/ostt.fish
       - name: Build .deb package
         run: cargo deb --no-build
       - name: Build .rpm package
