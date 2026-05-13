@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Added process-level default AI tool and model settings for processing actions.
+- **Shell completions** - `ostt completions <shell> --install` auto-detects the shell and writes completions to the standard system directory. Native packages (`.deb`, `.rpm`) ship completion files pre-installed. The AUR PKGBUILD generates them at build time.
 
 ## 0.0.10 - 2026-05-12
 
