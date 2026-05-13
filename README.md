@@ -2,8 +2,6 @@
   <img src="./ostt.png" width="160" alt="OSTT logo" />
 </p>
 
-<h1 align="center">OSTT</h1>
-
 <p align="center">
   <strong>open source voice-to-text for Linux and macOS</strong>
 </p>
