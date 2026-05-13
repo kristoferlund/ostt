@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <strong>open source voice-to-text for Linux and macOS</strong>
+  <strong>Open source voice-to-text for Linux and macOS</strong>
 </p>
 
 <p align="center">
