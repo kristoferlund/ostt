@@ -9,6 +9,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use dirs;
 use std::env;
+use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::process;
@@ -278,10 +279,14 @@ enum Commands {
     ///   ostt completions bash > ostt.bash
     ///   ostt completions zsh > _ostt
     ///   ostt completions fish > ostt.fish
+    ///   ostt completions bash --install
     Completions {
         /// The shell to generate completions for
         #[arg(value_enum)]
         shell: Shell,
+        /// Install completions to the standard system directory
+        #[arg(long, short)]
+        install: bool,
     },
 }
 
@@ -323,7 +328,29 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
     // Handle commands that don't need logging or config setup
     match &cli.command {
-        Some(Commands::Completions { shell }) => {
+        Some(Commands::Completions {
+            shell,
+            install: true,
+        }) => {
+            let dir = completion_dir(*shell);
+            let filename = completion_filename(*shell);
+            fs::create_dir_all(&dir).map_err(|e| anyhow!("Failed to create {dir:?}: {e}"))?;
+            let path = dir.join(&filename);
+            let file =
+                fs::File::create(&path).map_err(|e| anyhow!("Failed to create {path:?}: {e}"))?;
+            generate(
+                *shell,
+                &mut Cli::command(),
+                "ostt",
+                &mut io::BufWriter::new(file),
+            );
+            println!("Completions installed to {}", path.display());
+            return Ok(());
+        }
+        Some(Commands::Completions {
+            shell,
+            install: false,
+        }) => {
             generate(*shell, &mut Cli::command(), "ostt", &mut io::stdout());
             return Ok(());
         }
@@ -447,4 +474,37 @@ pub async fn run() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+fn completion_dir(shell: Shell) -> PathBuf {
+    match shell {
+        Shell::Bash => PathBuf::from("/etc/bash_completion.d"),
+        Shell::Zsh => {
+            if cfg!(target_os = "macos") {
+                PathBuf::from("/usr/local/share/zsh/site-functions")
+            } else {
+                PathBuf::from("/usr/share/zsh/site-functions")
+            }
+        }
+        Shell::Fish => {
+            let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+            PathBuf::from(home).join(".config/fish/completions")
+        }
+        Shell::PowerShell => {
+            // PowerShell uses a different mechanism; users can still
+            // redirect manually: ostt completions powershell > profile.ps1
+            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        }
+        _ => env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    }
+}
+
+fn completion_filename(shell: Shell) -> String {
+    match shell {
+        Shell::Bash => "ostt".to_string(),
+        Shell::Zsh => "_ostt".to_string(),
+        Shell::Fish => "ostt.fish".to_string(),
+        Shell::PowerShell => "ostt.ps1".to_string(),
+        _ => "ostt".to_string(),
+    }
 }

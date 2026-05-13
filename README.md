@@ -91,6 +91,7 @@ ostt config                  # Open config file
 ostt list-devices            # List audio input devices
 ostt logs                    # View recent logs
 ostt completions zsh         # Generate shell completions
+ostt completions bash --install  # Install completions system-wide
 ostt --version               # Show version
 ostt --help                  # Show help
 ```
