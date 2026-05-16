@@ -11,11 +11,15 @@ use hound::WavWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
 #[cfg(target_os = "linux")]
 use std::os::unix::io::AsRawFd;
+
+const PROBE_DURATION_MS: u64 = 300;
 
 /// Records audio from a specified or default input device.
 ///
@@ -60,30 +64,10 @@ impl AudioRecorder {
         }
     }
 
-    /// Starts recording from the configured input device.
-    ///
-    /// # Errors
-    /// - If the specified device is not available
-    /// - If device configuration fails
-    /// - If audio stream creation fails
-    pub fn start_recording(&mut self) -> Result<()> {
-        // Get device while suppressing ALSA library warnings
-        let device = suppress_alsa_warnings(|| {
-            let host = cpal::default_host();
-
-            if self.device_name == "default" {
-                host.default_input_device()
-                    .ok_or_else(|| anyhow!("No audio input device available"))
-            } else {
-                // Try to find device by name or index
-                find_device_by_name(&host, &self.device_name)
-            }
-        })?;
-
+    fn try_start_with_device(&mut self, device: cpal::Device) -> Result<()> {
         let device_name = device
             .name()
             .unwrap_or_else(|_| "Unknown device".to_string());
-        tracing::info!("Recording device: {}", device_name);
 
         let device_config = device.default_input_config()?;
         let device_sample_rate = device_config.sample_rate().0;
@@ -104,20 +88,21 @@ impl AudioRecorder {
             num_channels
         );
 
-        // Update to actual device parameters
-        self.sample_rate = device_sample_rate;
-        self.device_channels = num_channels;
-
         // Set up audio callback with cloned Arc references
         let samples_arc = Arc::clone(&self.samples);
         let pause_arc = Arc::clone(&self.is_paused);
         let callback_channels = num_channels;
+        let has_samples = Arc::new(AtomicBool::new(false));
+        let has_samples_clone = Arc::clone(&has_samples);
 
         let stream = device.build_input_stream(
             &device_config.into(),
             move |data: &[i16], _: &cpal::InputCallbackInfo| {
                 let is_paused = *pause_arc.lock().unwrap();
                 if !is_paused {
+                    if !data.is_empty() {
+                        has_samples_clone.store(true, Ordering::Relaxed);
+                    }
                     Self::handle_audio_callback(data, &samples_arc, callback_channels);
                 }
             },
@@ -129,10 +114,62 @@ impl AudioRecorder {
 
         // Start playback and store stream
         stream.play()?;
-        self.stream = Some(stream);
 
+        // Probe for a short duration to ensure the device is producing samples
+        std::thread::sleep(Duration::from_millis(PROBE_DURATION_MS));
+        if !has_samples.load(Ordering::Relaxed) {
+            return Err(anyhow!("Audio probe timed out (no samples)"));
+        }
+
+        self.stream = Some(stream);
+        self.sample_rate = device_sample_rate;
+        self.device_channels = num_channels;
+
+        tracing::info!("Recording device: {}", device_name);
         tracing::debug!("Audio stream started");
         Ok(())
+    }
+
+    /// Starts recording from the configured input device.
+    ///
+    pub fn start_recording(&mut self) -> Result<()> {
+        // If device is set to "default", get a list of candidates
+        // If a device name is set, try to find it by name (one candidate)
+        let candidates = suppress_alsa_warnings(|| {
+            let host = cpal::default_host();
+
+            if self.device_name == "default" {
+                collect_default_then_inputs(&host)
+            } else {
+                Ok(vec![find_device_by_name(&host, &self.device_name)?])
+            }
+        })?;
+
+        if candidates.is_empty() {
+            return Err(anyhow!("No audio input device available"));
+        }
+
+        // Attempt to record with candidate devices until one works
+        let mut last_err: Option<anyhow::Error> = None;
+        for device in candidates {
+            let device_name = device
+                .name()
+                .unwrap_or_else(|_| "Unknown device".to_string());
+
+            match self.try_start_with_device(device) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to start recording on device {}: {}",
+                        device_name,
+                        e
+                    );
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| anyhow!("No usable audio input device found")))
     }
 
     /// Stops recording and saves audio to the specified output file.
@@ -375,14 +412,30 @@ impl AudioRecorder {
     }
 }
 
+/// Collects the default input device followed by all other input devices.
+fn collect_default_then_inputs(host: &cpal::Host) -> Result<Vec<cpal::Device>> {
+    let mut devices = Vec::new();
+
+    if let Some(default_dev) = host.default_input_device() {
+        devices.push(default_dev);
+    }
+
+    let input_devices = host
+        .input_devices()
+        .map_err(|e| anyhow!("Failed to enumerate devices: {e}"))?;
+
+    for dev in input_devices {
+        devices.push(dev);
+    }
+
+    Ok(devices)
+}
+
 /// Finds an audio input device by name or numeric index.
 ///
 /// # Arguments
 /// * `host` - The cpal audio host
 /// * `device_spec` - Either "default" for system default, a device name, or a numeric index (0, 1, 2, etc.)
-///
-/// # Errors
-/// - If no device with the specified name/index is found
 fn find_device_by_name(host: &cpal::Host, device_spec: &str) -> Result<cpal::Device> {
     // Try to parse as a numeric index first
     if let Ok(index) = device_spec.parse::<usize>() {
