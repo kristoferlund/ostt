@@ -12,11 +12,15 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 #[cfg(target_os = "linux")]
 use std::fs::OpenOptions;
 #[cfg(target_os = "linux")]
 use std::os::unix::io::AsRawFd;
+
+const PROBE_DURATION_MS: u64 = 300;
 
 /// Records audio from a specified or default input device.
 ///
@@ -61,11 +65,10 @@ impl AudioRecorder {
         }
     }
 
-    fn try_start_with_device(&mut self, device: cpal::Device) -> Result<()> {
+    fn try_start_with_device(&mut self, device: cpal::Device, probe: bool) -> Result<()> {
         let device_name = device
             .name()
             .unwrap_or_else(|_| "Unknown device".to_string());
-        tracing::debug!("Trying recording device: {}", device_name);
 
         let device_config = device.default_input_config()?;
         let device_sample_rate = device_config.sample_rate().0;
@@ -90,12 +93,17 @@ impl AudioRecorder {
         let samples_arc = Arc::clone(&self.samples);
         let pause_arc = Arc::clone(&self.is_paused);
         let callback_channels = num_channels;
+        let has_samples = Arc::new(AtomicBool::new(false));
+        let has_samples_clone = Arc::clone(&has_samples);
 
         let stream = device.build_input_stream(
             &device_config.into(),
             move |data: &[i16], _: &cpal::InputCallbackInfo| {
                 let is_paused = *pause_arc.lock().unwrap();
                 if !is_paused {
+                    if !data.is_empty() {
+                        has_samples_clone.store(true, Ordering::Relaxed);
+                    }
                     Self::handle_audio_callback(data, &samples_arc, callback_channels);
                 }
             },
@@ -107,6 +115,14 @@ impl AudioRecorder {
 
         // Start playback and store stream
         stream.play()?;
+
+        if probe {
+            std::thread::sleep(Duration::from_millis(PROBE_DURATION_MS));
+            if !has_samples.load(Ordering::Relaxed) {
+                return Err(anyhow!("Audio probe timed out (no samples)"));
+            }
+        }
+
         self.stream = Some(stream);
         self.sample_rate = device_sample_rate;
         self.device_channels = num_channels;
@@ -146,6 +162,7 @@ impl AudioRecorder {
                     .into_iter()
                     .next()
                     .expect("Candidates list should be non-empty"),
+                false,
             );
         }
 
@@ -156,7 +173,7 @@ impl AudioRecorder {
                 .name()
                 .unwrap_or_else(|_| "Unknown device".to_string());
 
-            match self.try_start_with_device(device) {
+            match self.try_start_with_device(device, true) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     tracing::warn!(
