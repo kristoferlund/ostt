@@ -8,7 +8,6 @@ use super::ffmpeg::find_ffmpeg;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -65,7 +64,7 @@ impl AudioRecorder {
         }
     }
 
-    fn try_start_with_device(&mut self, device: cpal::Device, probe: bool) -> Result<()> {
+    fn try_start_with_device(&mut self, device: cpal::Device) -> Result<()> {
         let device_name = device
             .name()
             .unwrap_or_else(|_| "Unknown device".to_string());
@@ -116,11 +115,10 @@ impl AudioRecorder {
         // Start playback and store stream
         stream.play()?;
 
-        if probe {
-            std::thread::sleep(Duration::from_millis(PROBE_DURATION_MS));
-            if !has_samples.load(Ordering::Relaxed) {
-                return Err(anyhow!("Audio probe timed out (no samples)"));
-            }
+        // Probe for a short duration to ensure the device is producing samples
+        std::thread::sleep(Duration::from_millis(PROBE_DURATION_MS));
+        if !has_samples.load(Ordering::Relaxed) {
+            return Err(anyhow!("Audio probe timed out (no samples)"));
         }
 
         self.stream = Some(stream);
@@ -155,25 +153,14 @@ impl AudioRecorder {
             return Err(anyhow!("No audio input device available"));
         }
 
-        // Explicit device selection: no fallback
-        if self.device_name != "default" {
-            return self.try_start_with_device(
-                candidates
-                    .into_iter()
-                    .next()
-                    .expect("Candidates list should be non-empty"),
-                false,
-            );
-        }
-
-        // Default device selection: fallback through all available inputs
+        // Attempt to start recording with the first suitable device
         let mut last_err: Option<anyhow::Error> = None;
         for device in candidates {
             let device_name = device
                 .name()
                 .unwrap_or_else(|_| "Unknown device".to_string());
 
-            match self.try_start_with_device(device, true) {
+            match self.try_start_with_device(device) {
                 Ok(()) => return Ok(()),
                 Err(e) => {
                     tracing::warn!(
@@ -429,10 +416,6 @@ impl AudioRecorder {
     }
 }
 
-fn device_name_key(device: &cpal::Device) -> String {
-    device.name().unwrap_or_else(|_| "Unknown".to_string())
-}
-
 fn collect_default_then_inputs(host: &cpal::Host) -> Result<Vec<cpal::Device>> {
     let mut devices = Vec::new();
 
@@ -447,17 +430,6 @@ fn collect_default_then_inputs(host: &cpal::Host) -> Result<Vec<cpal::Device>> {
     for dev in input_devices {
         devices.push(dev);
     }
-
-    let mut seen = HashSet::new();
-    devices.retain(|d| {
-        let name = device_name_key(d);
-        if seen.contains(&name) {
-            false
-        } else {
-            seen.insert(name);
-            true
-        }
-    });
 
     Ok(devices)
 }
