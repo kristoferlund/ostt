@@ -132,19 +132,15 @@ impl AudioRecorder {
 
     /// Starts recording from the configured input device.
     ///
-    /// # Errors
-    /// - If the specified device is not available
-    /// - If device configuration fails
-    /// - If audio stream creation fails
     pub fn start_recording(&mut self) -> Result<()> {
-        // Get devices while suppressing ALSA library warnings
+        // If device is set to "default", get a list of candidates
+        // If a device name is set, try to find it by name (one candidate)
         let candidates = suppress_alsa_warnings(|| {
             let host = cpal::default_host();
 
             if self.device_name == "default" {
                 collect_default_then_inputs(&host)
             } else {
-                // Try to find device by name or index
                 Ok(vec![find_device_by_name(&host, &self.device_name)?])
             }
         })?;
@@ -153,7 +149,7 @@ impl AudioRecorder {
             return Err(anyhow!("No audio input device available"));
         }
 
-        // Attempt to start recording with the first suitable device
+        // Attempt to record with candidate devices until one works
         let mut last_err: Option<anyhow::Error> = None;
         for device in candidates {
             let device_name = device
@@ -416,6 +412,7 @@ impl AudioRecorder {
     }
 }
 
+/// Collects the default input device followed by all other input devices.
 fn collect_default_then_inputs(host: &cpal::Host) -> Result<Vec<cpal::Device>> {
     let mut devices = Vec::new();
 
@@ -439,9 +436,6 @@ fn collect_default_then_inputs(host: &cpal::Host) -> Result<Vec<cpal::Device>> {
 /// # Arguments
 /// * `host` - The cpal audio host
 /// * `device_spec` - Either "default" for system default, a device name, or a numeric index (0, 1, 2, etc.)
-///
-/// # Errors
-/// - If no device with the specified name/index is found
 fn find_device_by_name(host: &cpal::Host, device_spec: &str) -> Result<cpal::Device> {
     // Try to parse as a numeric index first
     if let Ok(index) = device_spec.parse::<usize>() {
