@@ -8,6 +8,7 @@ use super::ffmpeg::find_ffmpeg;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
@@ -60,30 +61,11 @@ impl AudioRecorder {
         }
     }
 
-    /// Starts recording from the configured input device.
-    ///
-    /// # Errors
-    /// - If the specified device is not available
-    /// - If device configuration fails
-    /// - If audio stream creation fails
-    pub fn start_recording(&mut self) -> Result<()> {
-        // Get device while suppressing ALSA library warnings
-        let device = suppress_alsa_warnings(|| {
-            let host = cpal::default_host();
-
-            if self.device_name == "default" {
-                host.default_input_device()
-                    .ok_or_else(|| anyhow!("No audio input device available"))
-            } else {
-                // Try to find device by name or index
-                find_device_by_name(&host, &self.device_name)
-            }
-        })?;
-
+    fn try_start_with_device(&mut self, device: cpal::Device) -> Result<()> {
         let device_name = device
             .name()
             .unwrap_or_else(|_| "Unknown device".to_string());
-        tracing::info!("Recording device: {}", device_name);
+        tracing::debug!("Trying recording device: {}", device_name);
 
         let device_config = device.default_input_config()?;
         let device_sample_rate = device_config.sample_rate().0;
@@ -103,10 +85,6 @@ impl AudioRecorder {
             device_sample_rate,
             num_channels
         );
-
-        // Update to actual device parameters
-        self.sample_rate = device_sample_rate;
-        self.device_channels = num_channels;
 
         // Set up audio callback with cloned Arc references
         let samples_arc = Arc::clone(&self.samples);
@@ -130,9 +108,68 @@ impl AudioRecorder {
         // Start playback and store stream
         stream.play()?;
         self.stream = Some(stream);
+        self.sample_rate = device_sample_rate;
+        self.device_channels = num_channels;
 
+        tracing::info!("Recording device: {}", device_name);
         tracing::debug!("Audio stream started");
         Ok(())
+    }
+
+    /// Starts recording from the configured input device.
+    ///
+    /// # Errors
+    /// - If the specified device is not available
+    /// - If device configuration fails
+    /// - If audio stream creation fails
+    pub fn start_recording(&mut self) -> Result<()> {
+        // Get devices while suppressing ALSA library warnings
+        let candidates = suppress_alsa_warnings(|| {
+            let host = cpal::default_host();
+
+            if self.device_name == "default" {
+                collect_default_then_inputs(&host)
+            } else {
+                // Try to find device by name or index
+                Ok(vec![find_device_by_name(&host, &self.device_name)?])
+            }
+        })?;
+
+        if candidates.is_empty() {
+            return Err(anyhow!("No audio input device available"));
+        }
+
+        // Explicit device selection: no fallback
+        if self.device_name != "default" {
+            return self.try_start_with_device(
+                candidates
+                    .into_iter()
+                    .next()
+                    .expect("Candidates list should be non-empty"),
+            );
+        }
+
+        // Default device selection: fallback through all available inputs
+        let mut last_err: Option<anyhow::Error> = None;
+        for device in candidates {
+            let device_name = device
+                .name()
+                .unwrap_or_else(|_| "Unknown device".to_string());
+
+            match self.try_start_with_device(device) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to start recording on device {}: {}",
+                        device_name,
+                        e
+                    );
+                    last_err = Some(e);
+                }
+            }
+        }
+
+        Err(last_err.unwrap_or_else(|| anyhow!("No usable audio input device found")))
     }
 
     /// Stops recording and saves audio to the specified output file.
@@ -373,6 +410,39 @@ impl AudioRecorder {
     pub fn get_sample_rate(&self) -> u32 {
         self.sample_rate()
     }
+}
+
+fn device_name_key(device: &cpal::Device) -> String {
+    device.name().unwrap_or_else(|_| "Unknown".to_string())
+}
+
+fn collect_default_then_inputs(host: &cpal::Host) -> Result<Vec<cpal::Device>> {
+    let mut devices = Vec::new();
+
+    if let Some(default_dev) = host.default_input_device() {
+        devices.push(default_dev);
+    }
+
+    let input_devices = host
+        .input_devices()
+        .map_err(|e| anyhow!("Failed to enumerate devices: {e}"))?;
+
+    for dev in input_devices {
+        devices.push(dev);
+    }
+
+    let mut seen = HashSet::new();
+    devices.retain(|d| {
+        let name = device_name_key(d);
+        if seen.contains(&name) {
+            false
+        } else {
+            seen.insert(name);
+            true
+        }
+    });
+
+    Ok(devices)
 }
 
 /// Finds an audio input device by name or numeric index.
