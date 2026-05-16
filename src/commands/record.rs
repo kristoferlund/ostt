@@ -101,7 +101,7 @@ pub async fn handle_record(
         match tui.handle_input() {
             Ok(RecordingCommand::Continue) => {
                 frame_count += 1;
-                if frame_count.is_multiple_of(60) {
+                if frame_count % 60 == 0 {
                     let sample_count = audio_recorder.sample_count();
                     let duration_secs = sample_count as f32 / actual_sample_rate as f32;
                     tracing::debug!("Recording: {:.1}s recorded", duration_secs);
