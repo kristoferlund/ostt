@@ -32,13 +32,13 @@ Recommended execution order:
 ### Spec 1.1 — Local Provider Variant + Standard Build
 
 - [x] **1.1.1** Add `whisper-rs = "0.14"` to `/Users/kristoferlund/gh/ostt/Cargo.toml` standard dependencies.
-- [ ] **1.1.2** Add `TranscriptionProvider::Local` in `/Users/kristoferlund/gh/ostt/src/transcription/provider.rs`.
-- [ ] **1.1.3** Update `TranscriptionProvider::id()`, `name()`, `from_id()`, and `all()` for `local` / `Local (whisper.cpp)`.
-- [ ] **1.1.4** Add a local model ID string escape hatch to transcription request configuration so `provider = local` is not blocked by `TranscriptionModel::from_id()`.
-- [ ] **1.1.5** Create `/Users/kristoferlund/gh/ostt/src/transcription/api/local.rs` with the stub `transcribe(config, audio_path)` signature matching existing providers.
-- [ ] **1.1.6** Declare `mod local;` and route `TranscriptionProvider::Local` to `local::transcribe(config, audio_path).await` in `/Users/kristoferlund/gh/ostt/src/transcription/api/mod.rs`.
-- [ ] **1.1.7** Verify no static `TranscriptionModel` variants were added for individual local models.
-- [ ] **1.1.8** Verify: run `cargo check`.
+- [x] **1.1.2** Add `TranscriptionProvider::Local` in `/Users/kristoferlund/gh/ostt/src/transcription/provider.rs`.
+- [x] **1.1.3** Update `TranscriptionProvider::id()`, `name()`, `from_id()`, and `all()` for `local` / `Local (whisper.cpp)`.
+- [x] **1.1.4** Add a local model ID string escape hatch to transcription request configuration so `provider = local` is not blocked by `TranscriptionModel::from_id()`.
+- [x] **1.1.5** Create `/Users/kristoferlund/gh/ostt/src/transcription/api/local.rs` with the stub `transcribe(config, audio_path)` signature matching existing providers.
+- [x] **1.1.6** Declare `mod local;` and route `TranscriptionProvider::Local` to `local::transcribe(config, audio_path).await` in `/Users/kristoferlund/gh/ostt/src/transcription/api/mod.rs`.
+- [x] **1.1.7** Verify no static `TranscriptionModel` variants were added for individual local models.
+- [!] **1.1.8** Verify: run `cargo check`.
 - [ ] **1.1.9** Verify: run `cargo clippy -- -D warnings`.
 - [ ] **1.1.10** Verify: run `cargo test`.
 

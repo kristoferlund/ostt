@@ -10,6 +10,7 @@ mod deepgram;
 mod deepinfra;
 mod elevenlabs;
 mod groq;
+mod local;
 mod openai;
 
 use serde::Deserialize;
@@ -22,6 +23,10 @@ use crate::config::file::ProvidersConfig;
 /// Configuration for transcription requests
 #[derive(Debug, Clone)]
 pub struct TranscriptionConfig {
+    /// The provider to use
+    pub provider: TranscriptionProvider,
+    /// The selected model ID, including data-driven local model IDs
+    pub model_id: String,
     /// The model to use
     pub model: TranscriptionModel,
     /// The API key for authentication
@@ -40,9 +45,30 @@ impl TranscriptionConfig {
         keywords: Vec<String>,
         providers: ProvidersConfig,
     ) -> Self {
+        let provider = model.provider();
+        let model_id = model.id().to_string();
+
         Self {
+            provider,
+            model_id,
             model,
             api_key,
+            keywords,
+            providers,
+        }
+    }
+
+    /// Creates a local transcription configuration with a registry-backed model ID.
+    pub fn new_local(
+        model_id: String,
+        keywords: Vec<String>,
+        providers: ProvidersConfig,
+    ) -> Self {
+        Self {
+            provider: TranscriptionProvider::Local,
+            model_id,
+            model: TranscriptionModel::Whisper,
+            api_key: String::new(),
             keywords,
             providers,
         }
@@ -69,11 +95,11 @@ pub struct TranscriptionResponse {
 pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
     tracing::info!(
         "Transcribing with {} ({})",
-        config.model.provider().name(),
-        config.model.id()
+        config.provider.name(),
+        config.model_id
     );
 
-    let result = match config.model.provider() {
+    let result = match config.provider {
         TranscriptionProvider::OpenAI => openai::transcribe(config, audio_path).await,
         TranscriptionProvider::Deepgram => deepgram::transcribe(config, audio_path).await,
         TranscriptionProvider::DeepInfra => deepinfra::transcribe(config, audio_path).await,
@@ -81,6 +107,7 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::AssemblyAI => assemblyai::transcribe(config, audio_path).await,
         TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
         TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
+        TranscriptionProvider::Local => local::transcribe(config, audio_path).await,
     }?;
 
     Ok(result)
