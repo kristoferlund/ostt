@@ -39,7 +39,7 @@ Recommended execution order:
 - [x] **1.1.6** Declare `mod local;` and route `TranscriptionProvider::Local` to `local::transcribe(config, audio_path).await` in `/Users/kristoferlund/gh/ostt/src/transcription/api/mod.rs`.
 - [x] **1.1.7** Verify no static `TranscriptionModel` variants were added for individual local models.
 - [!] **1.1.8** Verify: run `cargo check`.
-- [ ] **1.1.9** Verify: run `cargo clippy -- -D warnings`.
+- [!] **1.1.9** Verify: run `cargo clippy -- -D warnings`.
 - [ ] **1.1.10** Verify: run `cargo test`.
 
 ### Spec 1.2.A — Local Model Resolution
