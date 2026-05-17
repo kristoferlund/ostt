@@ -5,6 +5,7 @@
 
 pub mod animation;
 pub mod api;
+pub mod local_models;
 pub mod model;
 pub mod provider;
 

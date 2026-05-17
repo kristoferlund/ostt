@@ -40,3 +40,17 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - `1.1.8` and `1.1.9` remain marked `[!]` from prior sessions due to earlier environment failures, so only the previously unchecked `cargo test` task was completed here.
+
+## Session 4: Spec 1.2.A — Local Model Resolution
+
+Accomplished:
+- Added `thiserror` and the `transcription::local_models` module export.
+- Added local model storage path resolution, model error types, registry/custom state types, model filename derivation, custom `models.json` loading, and installed model path resolution under `models/files/`.
+- Kept registry lookup isolated and returned a clear unavailable-registry error because no registry source exists in the current codebase.
+- Ran `cargo check` and `cargo clippy -- -D warnings` successfully, and marked all Spec 1.2.A tasks complete in `PLAN.md`.
+
+Obstacles encountered:
+- No GitHub registry source is currently present in the codebase, so registry loading cannot fetch canonical entries yet.
+
+Out-of-scope observations:
+- `cargo fmt --check` reports a formatting diff in `src/transcription/api/mod.rs` from existing code; it was not changed because formatting is outside this section's required verification.

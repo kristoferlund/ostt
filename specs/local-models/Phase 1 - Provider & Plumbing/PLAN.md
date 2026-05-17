@@ -46,16 +46,16 @@ Recommended execution order:
 
 Depends on: 1.1
 
-- [ ] **1.2.1** Add `thiserror` to `/Users/kristoferlund/gh/ostt/Cargo.toml` if it is still absent.
-- [ ] **1.2.2** Create `/Users/kristoferlund/gh/ostt/src/transcription/local_models.rs` with `models_dir()` and `ModelError` variants from the spec.
-- [ ] **1.2.3** Export `local_models` from `/Users/kristoferlund/gh/ostt/src/transcription/mod.rs`.
-- [ ] **1.2.4** Add minimal registry/custom model state types needed to deserialize registry entries and `models.json.custom_models`.
-- [ ] **1.2.5** Implement `model_filename(id, url)` for deriving installed whisper.cpp-compatible filenames.
-- [ ] **1.2.6** Implement registry loading from the GitHub registry source already used or specified by the codebase; if no source exists, keep the lookup helper isolated and return clear errors.
-- [ ] **1.2.7** Implement custom model entry loading from `models.json` under the OSTT models directory.
-- [ ] **1.2.8** Implement installed model path resolution under `models/files/`, returning `ModelError::NotDownloaded` when the expected file is absent.
-- [ ] **1.2.9** Verify: run `cargo check`.
-- [ ] **1.2.10** Verify: run `cargo clippy -- -D warnings`.
+- [x] **1.2.1** Add `thiserror` to `/Users/kristoferlund/gh/ostt/Cargo.toml` if it is still absent.
+- [x] **1.2.2** Create `/Users/kristoferlund/gh/ostt/src/transcription/local_models.rs` with `models_dir()` and `ModelError` variants from the spec.
+- [x] **1.2.3** Export `local_models` from `/Users/kristoferlund/gh/ostt/src/transcription/mod.rs`.
+- [x] **1.2.4** Add minimal registry/custom model state types needed to deserialize registry entries and `models.json.custom_models`.
+- [x] **1.2.5** Implement `model_filename(id, url)` for deriving installed whisper.cpp-compatible filenames.
+- [x] **1.2.6** Implement registry loading from the GitHub registry source already used or specified by the codebase; if no source exists, keep the lookup helper isolated and return clear errors.
+- [x] **1.2.7** Implement custom model entry loading from `models.json` under the OSTT models directory.
+- [x] **1.2.8** Implement installed model path resolution under `models/files/`, returning `ModelError::NotDownloaded` when the expected file is absent.
+- [x] **1.2.9** Verify: run `cargo check`.
+- [x] **1.2.10** Verify: run `cargo clippy -- -D warnings`.
 
 ### Spec 1.2.B — whisper-rs Transcription Runtime
 
