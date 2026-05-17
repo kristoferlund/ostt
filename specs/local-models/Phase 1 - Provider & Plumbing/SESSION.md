@@ -54,3 +54,20 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - `cargo fmt --check` reports a formatting diff in `src/transcription/api/mod.rs` from existing code; it was not changed because formatting is outside this section's required verification.
+
+## Session 5: Spec 1.2 — whisper-rs Transcription Runtime
+
+Accomplished:
+- Replaced the local provider stub with installed model path lookup using the local `model_id` escape hatch.
+- Added WAV validation for signed 16-bit PCM, 16 kHz, mono input with local audio config guidance on mismatch.
+- Added compatible WAV sample loading into normalized `Vec<f32>` without conversion or resampling.
+- Added blocking whisper-rs model loading and inference through `tokio::task::spawn_blocking` with the hardcoded MVP parameters.
+- Collected trimmed segment text and added anti-hallucination filtering for empty, silence/blank/music token, and low-alphanumeric output.
+- Mapped missing models through `ModelError::NotDownloaded`, model load failures through `ModelError::LoadFailed`, audio incompatibility to actionable errors, and task failures to clear runtime errors.
+- Ran `cargo clippy -- -D warnings` and `cargo test` successfully, then marked Spec 1.2.B complete in `PLAN.md`.
+
+Obstacles encountered:
+- None in this session.
+
+Out-of-scope observations:
+- The existing auth/record/transcribe selection paths still primarily infer provider from enum-backed model IDs; full user-facing local model selection appears to remain outside this runtime-only section.

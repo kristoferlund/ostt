@@ -61,16 +61,16 @@ Depends on: 1.1
 
 Depends on: 1.2.A
 
-- [ ] **1.2.11** Replace the local provider stub with model ID lookup from the local string escape hatch or selected-model state.
-- [ ] **1.2.12** Validate local input audio is WAV, signed 16-bit PCM, 16 kHz, mono before transcription and return actionable config guidance on mismatch.
-- [ ] **1.2.13** Load compatible WAV samples into normalized `Vec<f32>` without conversion or resampling.
-- [ ] **1.2.14** Run whisper-rs model loading and inference inside `tokio::task::spawn_blocking`.
-- [ ] **1.2.15** Apply hardcoded MVP whisper parameters: no timestamps, no context, temperature `0.0`, entropy threshold `2.4`, no-speech threshold `0.6`.
-- [ ] **1.2.16** Collect segment text into a trimmed transcription string.
-- [ ] **1.2.17** Add anti-hallucination filtering for empty text, blank/silence tokens, music tokens, and low-alphanumeric output; return empty string when filtered.
-- [ ] **1.2.18** Map missing model, invalid model, incompatible audio, and whisper-rs runtime failures to clear errors.
-- [ ] **1.2.19** Verify: run `cargo clippy -- -D warnings`.
-- [ ] **1.2.20** Verify: run `cargo test`.
+- [x] **1.2.11** Replace the local provider stub with model ID lookup from the local string escape hatch or selected-model state.
+- [x] **1.2.12** Validate local input audio is WAV, signed 16-bit PCM, 16 kHz, mono before transcription and return actionable config guidance on mismatch.
+- [x] **1.2.13** Load compatible WAV samples into normalized `Vec<f32>` without conversion or resampling.
+- [x] **1.2.14** Run whisper-rs model loading and inference inside `tokio::task::spawn_blocking`.
+- [x] **1.2.15** Apply hardcoded MVP whisper parameters: no timestamps, no context, temperature `0.0`, entropy threshold `2.4`, no-speech threshold `0.6`.
+- [x] **1.2.16** Collect segment text into a trimmed transcription string.
+- [x] **1.2.17** Add anti-hallucination filtering for empty text, blank/silence tokens, music tokens, and low-alphanumeric output; return empty string when filtered.
+- [x] **1.2.18** Map missing model, invalid model, incompatible audio, and whisper-rs runtime failures to clear errors.
+- [x] **1.2.19** Verify: run `cargo clippy -- -D warnings`.
+- [x] **1.2.20** Verify: run `cargo test`.
 
 ## Verification Protocol
 
