@@ -27,3 +27,16 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - The blocker appears environmental rather than caused by the Spec 1.1 provider plumbing, but build verification cannot proceed until the native toolchain/sysroot issue is resolved.
+
+## Session 3: Spec 1.1 — Local Provider Variant + Standard Build
+
+Accomplished:
+- Resumed the remaining Spec 1.1 verification task at `1.1.10`.
+- Ran `cargo test` successfully: 64 unit tests passed, plus main and doc test targets.
+- Marked `1.1.10` complete in `PLAN.md`.
+
+Obstacles encountered:
+- None in this session. The native build tooling issue from prior sessions did not reproduce for `cargo test`.
+
+Out-of-scope observations:
+- `1.1.8` and `1.1.9` remain marked `[!]` from prior sessions due to earlier environment failures, so only the previously unchecked `cargo test` task was completed here.
