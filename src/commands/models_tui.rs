@@ -1,6 +1,8 @@
 use crate::config::{self, SelectedModel};
 use crate::transcription::local_models::{
-    delete_model, fetch_registry, load_state, model_destination, LocalModelState, RegistryEntry,
+    delete_model, download_model_with_handle, fetch_registry, load_state,
+    mark_downloaded_registry_model, model_destination, register_custom_model, resolve_custom_model,
+    validate_downloaded_model, DownloadHandle, LocalModelState, RegistryEntry,
 };
 use crossterm::event::{self, Event, KeyCode};
 use crossterm::execute;
@@ -11,11 +13,14 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::fs;
 use std::io::{self, Stdout};
-use std::time::SystemTime;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime};
+use tui_input::backend::crossterm::EventHandler;
+use tui_input::Input;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TuiModelEntry {
@@ -35,15 +40,19 @@ pub struct TuiModelEntry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadState {
     pub model_id: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: u64,
     pub progress: f64,
     pub speed_mbps: f64,
     pub status: String,
+    pub is_complete: bool,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum TuiMode {
     Browse,
-    CustomModelInput { input: String },
+    CustomModelInput { input: Input },
+    CustomModelConfirm { entry: TuiModelEntry },
     Downloading(DownloadState),
     Info { entry: TuiModelEntry },
     ConfirmDelete { entry: TuiModelEntry },
@@ -56,6 +65,13 @@ pub struct ModelTui {
     pub mode: TuiMode,
     pub disk_usage_bytes: u64,
     pub status_message: Option<String>,
+}
+
+struct RunningDownload {
+    entry: RegistryEntry,
+    state: Arc<Mutex<DownloadState>>,
+    handle: DownloadHandle,
+    task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
 impl ModelTui {
@@ -103,6 +119,12 @@ impl ModelTui {
 
     pub fn back_to_browse(&mut self) {
         self.mode = TuiMode::Browse;
+    }
+
+    pub fn show_custom_input(&mut self) {
+        self.mode = TuiMode::CustomModelInput {
+            input: Input::default(),
+        };
     }
 
     pub fn refresh(
@@ -259,12 +281,96 @@ fn delete_entry(entry: &TuiModelEntry) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn tui_entry_from_registry(entry: &RegistryEntry, is_available_in_registry: bool) -> TuiModelEntry {
+    TuiModelEntry {
+        id: entry.id.clone(),
+        name: entry.name.clone(),
+        description: entry.description.clone(),
+        size_mb: entry.size_mb,
+        is_downloaded: model_destination(entry).exists(),
+        is_active: false,
+        is_available_in_registry,
+        languages: entry.languages.clone(),
+        url: entry.url.clone(),
+        recommended_hardware: entry.recommended_hardware.clone(),
+        category: entry.category.clone(),
+    }
+}
+
+fn initial_download_state(entry: &RegistryEntry) -> DownloadState {
+    DownloadState {
+        model_id: entry.id.clone(),
+        downloaded_bytes: 0,
+        total_bytes: u64::from(entry.size_mb) * 1024 * 1024,
+        progress: 0.0,
+        speed_mbps: 0.0,
+        status: "Starting download".to_string(),
+        is_complete: false,
+    }
+}
+
+fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
+    let state = Arc::new(Mutex::new(initial_download_state(&entry)));
+    let progress_state = state.clone();
+    let handle = DownloadHandle::new();
+    let task_handle = handle.clone();
+    let task_entry = entry.clone();
+    let task = tokio::spawn(async move {
+        let destination = model_destination(&task_entry);
+        download_model_with_handle(
+            &task_entry.url,
+            &destination,
+            Some(Box::new(
+                move |downloaded_bytes, total_bytes, speed_mbps| {
+                    if let Ok(mut state) = progress_state.lock() {
+                        state.downloaded_bytes = downloaded_bytes;
+                        state.total_bytes = total_bytes;
+                        state.speed_mbps = speed_mbps;
+                        state.progress = if total_bytes > 0 {
+                            downloaded_bytes as f64 / total_bytes as f64
+                        } else {
+                            0.0
+                        };
+                        state.status = "Downloading".to_string();
+                    }
+                },
+            )),
+            Some(task_handle),
+        )
+        .await?;
+        validate_downloaded_model(&task_entry)?;
+        if is_custom {
+            register_custom_model(task_entry)?;
+        } else {
+            mark_downloaded_registry_model(&task_entry)?;
+        }
+        Ok(())
+    });
+
+    RunningDownload {
+        entry,
+        state,
+        handle,
+        task,
+    }
+}
+
+fn sync_download_mode(tui: &mut ModelTui, running: &RunningDownload) {
+    if let Ok(state) = running.state.lock() {
+        tui.mode = TuiMode::Downloading(state.clone());
+    }
+}
+
 fn render_tui(frame: &mut Frame<'_>, tui: &ModelTui) {
     match &tui.mode {
         TuiMode::Browse => render_browse(frame, tui),
         TuiMode::Info { entry } => render_info(frame, entry),
         TuiMode::ConfirmDelete { entry } => render_confirm_delete(frame, entry),
-        TuiMode::CustomModelInput { .. } | TuiMode::Downloading(_) => render_browse(frame, tui),
+        TuiMode::CustomModelInput { input } => {
+            render_custom_input(frame, input, tui.status_message.as_deref())
+        }
+        TuiMode::CustomModelConfirm { entry } => render_custom_confirm(frame, entry),
+        TuiMode::Downloading(state) => render_download(frame, state),
     }
 }
 
@@ -324,10 +430,9 @@ fn render_browse(frame: &mut Frame<'_>, tui: &ModelTui) {
         &mut state,
     );
 
-    let status = tui
-        .status_message
-        .as_deref()
-        .unwrap_or("[↑↓] Nav  [Enter] Activate  [r] Remove  [i] Info  [Esc/q] Quit");
+    let status = tui.status_message.as_deref().unwrap_or(
+        "[↑↓] Nav  [Enter] Activate  [d] Download  [r] Remove  [i] Info  [c] Custom  [Esc/q] Quit",
+    );
     frame.render_widget(
         Paragraph::new(status).block(Block::default().borders(Borders::ALL)),
         chunks[2],
@@ -430,6 +535,105 @@ fn render_confirm_delete(frame: &mut Frame<'_>, entry: &TuiModelEntry) {
     );
 }
 
+fn render_custom_input(frame: &mut Frame<'_>, input: &Input, status: Option<&str>) {
+    let area = centered_rect(80, 35, frame.area());
+    let lines = vec![
+        Line::from("Enter model page or file URL:"),
+        Line::from(input.value()),
+        Line::from(""),
+        Line::from(status.unwrap_or("[Enter] Resolve  [Esc] Cancel")),
+    ];
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title("Download Custom Model")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn render_custom_confirm(frame: &mut Frame<'_>, entry: &TuiModelEntry) {
+    let area = centered_rect(80, 45, frame.area());
+    let lines = vec![
+        Line::from(format!("Name: {}", entry.name)),
+        Line::from(format!("Model ID: {}", entry.id)),
+        Line::from(format!(
+            "Size: {}",
+            format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
+        )),
+        Line::from(format!("URL: {}", entry.url)),
+        Line::from(""),
+        Line::from("[Enter] Download  [Esc] Cancel"),
+    ];
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title("Confirm Custom Model")
+                    .borders(Borders::ALL),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
+    let area = centered_rect(80, 40, frame.area());
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Length(3),
+            Constraint::Min(1),
+        ])
+        .split(area);
+    let eta = if state.speed_mbps > 0.0 && state.total_bytes > state.downloaded_bytes {
+        let remaining_mb = (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
+        format!("ETA: {:.0}s", remaining_mb / state.speed_mbps)
+    } else {
+        "ETA: unknown".to_string()
+    };
+    frame.render_widget(Clear, area);
+    frame.render_widget(
+        Block::default().title("Downloading").borders(Borders::ALL),
+        area,
+    );
+    frame.render_widget(
+        Paragraph::new(format!("Model: {}", state.model_id)),
+        chunks[0],
+    );
+    frame.render_widget(
+        Gauge::default()
+            .gauge_style(Style::default().fg(Color::Green))
+            .ratio(state.progress.clamp(0.0, 1.0)),
+        chunks[1],
+    );
+    frame.render_widget(
+        Paragraph::new(format!(
+            "{} / {}  •  {:.1} MB/s  •  {}",
+            format_bytes(state.downloaded_bytes),
+            if state.total_bytes == 0 {
+                "unknown".to_string()
+            } else {
+                format_bytes(state.total_bytes)
+            },
+            state.speed_mbps,
+            eta
+        )),
+        chunks[2],
+    );
+    frame.render_widget(
+        Paragraph::new(format!("{}  [Tab] Cancel", state.status)),
+        chunks[3],
+    );
+}
+
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -455,13 +659,42 @@ pub async fn handle_models_tui() -> anyhow::Result<()> {
     let selected_model = config::get_selected_model_entry()?;
     let entries = build_model_list(&local_state, &registry, selected_model.as_ref());
     let mut tui = ModelTui::new(entries.clone(), disk_usage_bytes(&entries));
+    if registry.is_empty() {
+        tui.status_message = Some(
+            "Could not load remote registry; custom URL entry is still available with [c]"
+                .to_string(),
+        );
+    }
     let mut terminal = TerminalGuard::new()?;
+    let mut running_download: Option<RunningDownload> = None;
 
     loop {
+        if let Some(running) = running_download.as_ref() {
+            sync_download_mode(&mut tui, running);
+            if running.task.is_finished() {
+                let running = running_download.take().expect("running download");
+                match running.task.await? {
+                    Ok(()) => {
+                        tui.status_message = Some(format!("Downloaded {}", running.entry.name));
+                        tui.back_to_browse();
+                        tui.refresh(&load_state(), &registry)?;
+                    }
+                    Err(error) => {
+                        tui.status_message = Some(error.to_string());
+                        tui.back_to_browse();
+                    }
+                }
+            }
+        }
         terminal.terminal.draw(|frame| render_tui(frame, &tui))?;
 
+        if !event::poll(Duration::from_millis(100))? {
+            continue;
+        }
+
         if let Event::Key(key) = event::read()? {
-            match (&tui.mode, key.code) {
+            let mode = tui.mode.clone();
+            match (mode, key.code) {
                 (TuiMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => break,
                 (TuiMode::Browse, KeyCode::Down) => tui.move_selection_down(),
                 (TuiMode::Browse, KeyCode::Up) => tui.move_selection_up(),
@@ -476,9 +709,60 @@ pub async fn handle_models_tui() -> anyhow::Result<()> {
                         }
                     }
                 }
+                (TuiMode::Browse, KeyCode::Char('d')) => {
+                    if let Some(entry) = tui.selected_entry().cloned() {
+                        if entry.is_downloaded {
+                            tui.status_message =
+                                Some(format!("{} is already downloaded", entry.name));
+                        } else if !entry.is_available_in_registry {
+                            tui.status_message =
+                                Some("Custom models must be downloaded through [c]".to_string());
+                        } else {
+                            let registry_entry = registry_entry_from_tui(&entry);
+                            let running = start_download(registry_entry, false);
+                            sync_download_mode(&mut tui, &running);
+                            running_download = Some(running);
+                        }
+                    }
+                }
                 (TuiMode::Browse, KeyCode::Char('i')) => tui.show_info(),
+                (TuiMode::Browse, KeyCode::Char('c')) => {
+                    tui.status_message = None;
+                    tui.show_custom_input();
+                }
                 (TuiMode::Browse, KeyCode::Char('r')) => tui.confirm_delete(),
                 (TuiMode::Info { .. }, KeyCode::Esc) => tui.back_to_browse(),
+                (TuiMode::Downloading(_), KeyCode::Tab) => {
+                    if let Some(running) = running_download.as_ref() {
+                        running.handle.cancel();
+                        if let Ok(mut state) = running.state.lock() {
+                            state.status = "Cancelling download".to_string();
+                        }
+                    }
+                }
+                (TuiMode::CustomModelInput { input }, KeyCode::Enter) => {
+                    let value = input.value().to_string();
+                    match resolve_custom_model(&value).await {
+                        Ok(entry) => {
+                            tui.status_message = None;
+                            tui.mode = TuiMode::CustomModelConfirm {
+                                entry: tui_entry_from_registry(&entry, false),
+                            };
+                        }
+                        Err(error) => tui.status_message = Some(error.to_string()),
+                    }
+                }
+                (TuiMode::CustomModelInput { input }, _) => {
+                    let mut input = input.clone();
+                    input.handle_event(&Event::Key(key));
+                    tui.mode = TuiMode::CustomModelInput { input };
+                }
+                (TuiMode::CustomModelConfirm { entry }, KeyCode::Enter) => {
+                    let registry_entry = registry_entry_from_tui(&entry);
+                    let running = start_download(registry_entry, true);
+                    sync_download_mode(&mut tui, &running);
+                    running_download = Some(running);
+                }
                 (
                     TuiMode::ConfirmDelete { .. },
                     KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
@@ -508,16 +792,13 @@ pub async fn handle_models_tui() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription::local_models::model_files_dir;
+    use crate::transcription::local_models::{model_files_dir, TEST_ENV_LOCK};
     use std::fs;
     use std::path::PathBuf;
-    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     fn with_isolated_models_dir(test: impl FnOnce(PathBuf)) {
-        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let previous = std::env::var_os("OSTT_MODELS_DIR");
         let previous_home = std::env::var_os("HOME");
         let unique = SystemTime::now()
@@ -674,7 +955,7 @@ mod tests {
         tui.show_info();
         assert!(matches!(tui.mode, TuiMode::Info { .. }));
         tui.back_to_browse();
-        assert_eq!(tui.mode, TuiMode::Browse);
+        assert!(matches!(tui.mode, TuiMode::Browse));
     }
 
     #[test]

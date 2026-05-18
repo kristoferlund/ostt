@@ -121,3 +121,23 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - Download action, progress rendering, cancellation, custom URL input, and final integration remain scoped to `2.3.C`.
+
+## Session 9: Spec 2.3.C — Download Progress, Custom Flow, and Final Integration
+
+Accomplished:
+- Added `[d]` download handling for selected registry models using the download engine.
+- Added download progress rendering with a ratatui `Gauge`, bytes, speed, ETA, and status text.
+- Added `Tab` cancellation signaling for in-progress downloads.
+- Refreshes the model list after successful downloads so completed models move into the downloaded section.
+- Added `[c]` custom URL input using `tui-input`, URL resolution through `resolve_custom_model()`, custom confirmation metadata, and custom download/registration.
+- Shows a registry/network fallback message when the remote registry cannot be loaded while keeping custom URL entry available.
+- Verified `cargo check` passed after adding a `Sync` bound to the download progress callback.
+- Verified `cargo clippy -- -D warnings` passed after applying minimal clippy fixes in custom URL helpers.
+
+Obstacles encountered:
+- `cargo test` failed twice. The first run exposed parallel test environment races between model TUI tests and local model tests, plus direct URL size resolution returning `0` instead of `1`.
+- A shared test env lock and direct `Content-Length` header parsing were added, but the second full `cargo test` still failed because `direct_model_file_url_resolves_to_custom_entry` continued to report size `0`, poisoning the shared test env lock and cascading into dependent local model tests.
+- Per the crash-recovery rule, `2.3.30` was marked `[!]` and work stopped after committing partial changes.
+
+Out-of-scope observations:
+- The remaining failure appears isolated to test HTTP `HEAD`/`Content-Length` behavior in direct custom URL resolution and resulting lock poisoning, not to `cargo check`, clippy, or the TUI compile path.

@@ -6,6 +6,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
+#[cfg(test)]
+pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 use futures_util::StreamExt;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -87,7 +90,7 @@ pub struct InstalledModelView {
     pub is_active: bool,
 }
 
-pub type DownloadProgressCallback = Box<dyn Fn(u64, u64, f64) + Send + 'static>;
+pub type DownloadProgressCallback = Box<dyn Fn(u64, u64, f64) + Send + Sync + 'static>;
 
 #[derive(Debug, Clone, Default)]
 pub struct DownloadHandle {
@@ -346,7 +349,7 @@ fn is_hugging_face_model_page_url(url: &Url) -> bool {
 
 fn is_direct_model_file_url(url: &Url) -> bool {
     url.path_segments()
-        .and_then(|segments| segments.last())
+        .and_then(|mut segments| segments.next_back())
         .is_some_and(is_compatible_model_filename)
 }
 
@@ -365,7 +368,7 @@ pub fn load_state() -> LocalModelState {
 async fn resolve_direct_model_file_url(url: Url) -> anyhow::Result<RegistryEntry> {
     let filename = url
         .path_segments()
-        .and_then(|segments| segments.last())
+        .and_then(|mut segments| segments.next_back())
         .ok_or_else(|| anyhow::anyhow!("direct model URL must include a filename"))?
         .to_string();
     let id = safe_id_from_filename(&filename)?;
@@ -513,13 +516,18 @@ fn safe_id_from_filename(filename: &str) -> anyhow::Result<String> {
 
 async fn remote_size_mb(url: &str) -> anyhow::Result<u32> {
     let response = reqwest::Client::new().head(url).send().await?;
-    Ok(response.content_length().map(bytes_to_mb).unwrap_or(0))
+    let bytes = response.content_length().or_else(|| {
+        response
+            .headers()
+            .get(reqwest::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse().ok())
+    });
+    Ok(bytes.map(bytes_to_mb).unwrap_or(0))
 }
 
 fn bytes_to_mb(bytes: u64) -> u32 {
-    ((bytes + 1024 * 1024 - 1) / (1024 * 1024))
-        .try_into()
-        .unwrap_or(u32::MAX)
+    bytes.div_ceil(1024 * 1024).try_into().unwrap_or(u32::MAX)
 }
 
 pub fn save_state(state: &LocalModelState) -> anyhow::Result<()> {
@@ -610,10 +618,8 @@ mod tests {
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
     fn with_isolated_data_dir(test: impl FnOnce(PathBuf)) {
-        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let previous = env::var_os("OSTT_MODELS_DIR");
         let previous_home = env::var_os("HOME");
         let unique = SystemTime::now()
@@ -1137,7 +1143,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_model_replaces_existing_file_without_activating() {
-        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let previous = env::var_os("OSTT_MODELS_DIR");
         let previous_home = env::var_os("HOME");
 
@@ -1204,7 +1210,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn direct_model_file_url_resolves_to_custom_entry() {
-        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let previous = env::var_os("OSTT_MODELS_DIR");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1240,7 +1246,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn hugging_face_page_resolution_selects_compatible_file() {
-        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
         let previous = env::var_os("OSTT_MODELS_DIR");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)

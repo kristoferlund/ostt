@@ -159,16 +159,16 @@ Depends on: `2.3.B`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.3 - Model Management TUI.md`
 
-- [ ] **2.3.21** Implement `d` download action for selected available models using the download engine.
-- [ ] **2.3.22** Render download progress with a ratatui `Gauge`, bytes, speed, ETA, and completion status.
-- [ ] **2.3.23** Implement `Tab` cancellation for in-progress downloads and return to browse with a clear status message.
-- [ ] **2.3.24** Refresh the model list after successful download so the model moves to the downloaded section.
-- [ ] **2.3.25** Implement `c` custom URL input using the existing `tui-input` dependency.
-- [ ] **2.3.26** Resolve custom URLs through `resolve_custom_model()`, show confirmation metadata, then download/register confirmed custom models.
-- [ ] **2.3.27** Show clear errors for registry/network failures while still allowing custom model entry where possible.
-- [ ] **2.3.28** Verify: run `cargo check`.
-- [ ] **2.3.29** Verify: run `cargo clippy -- -D warnings`.
-- [ ] **2.3.30** Verify: run `cargo test`.
+- [x] **2.3.21** Implement `d` download action for selected available models using the download engine.
+- [x] **2.3.22** Render download progress with a ratatui `Gauge`, bytes, speed, ETA, and completion status.
+- [x] **2.3.23** Implement `Tab` cancellation for in-progress downloads and return to browse with a clear status message.
+- [x] **2.3.24** Refresh the model list after successful download so the model moves to the downloaded section.
+- [x] **2.3.25** Implement `c` custom URL input using the existing `tui-input` dependency.
+- [x] **2.3.26** Resolve custom URLs through `resolve_custom_model()`, show confirmation metadata, then download/register confirmed custom models.
+- [x] **2.3.27** Show clear errors for registry/network failures while still allowing custom model entry where possible.
+- [x] **2.3.28** Verify: run `cargo check`.
+- [x] **2.3.29** Verify: run `cargo clippy -- -D warnings`.
+- [!] **2.3.30** Verify: run `cargo test`.
 
 ## Verification Protocol
 
