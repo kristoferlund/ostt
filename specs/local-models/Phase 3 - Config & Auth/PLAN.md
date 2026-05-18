@@ -29,15 +29,15 @@ Deferred:
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/3.1 - Local Provider Config Types.md`
 
-- [ ] **3.1.1** Add `LocalTranscriptionConfig`, `LocalModelOverride`, and `EffectiveLocalConfig` types to `src/config/file.rs`.
-- [ ] **3.1.2** Implement `Default` for `LocalTranscriptionConfig` with language `auto`, whisper defaults, `models_path = None`, daemon enabled, and 300 second timeout.
-- [ ] **3.1.3** Add `#[serde(default)]` behavior for local config and per-model override maps.
-- [ ] **3.1.4** Extend `ProvidersConfig` with `local: LocalTranscriptionConfig`.
-- [ ] **3.1.5** Implement `effective_for_model(model_id)` merging global local config with per-model overrides.
-- [ ] **3.1.6** Add config parsing tests for missing `[providers.local]`, full `[providers.local]`, optional `models_path`, and default daemon/language values.
-- [ ] **3.1.7** Add tests for per-model override deserialization and effective config merging.
-- [ ] **3.1.8** Verify: run `cargo check`.
-- [ ] **3.1.9** Verify: run focused `cargo test config::file`.
+- [x] **3.1.1** Add `LocalTranscriptionConfig`, `LocalModelOverride`, and `EffectiveLocalConfig` types to `src/config/file.rs`.
+- [x] **3.1.2** Implement `Default` for `LocalTranscriptionConfig` with language `auto`, whisper defaults, `models_path = None`, daemon enabled, and 300 second timeout.
+- [x] **3.1.3** Add `#[serde(default)]` behavior for local config and per-model override maps.
+- [x] **3.1.4** Extend `ProvidersConfig` with `local: LocalTranscriptionConfig`.
+- [x] **3.1.5** Implement `effective_for_model(model_id)` merging global local config with per-model overrides.
+- [x] **3.1.6** Add config parsing tests for missing `[providers.local]`, full `[providers.local]`, optional `models_path`, and default daemon/language values.
+- [x] **3.1.7** Add tests for per-model override deserialization and effective config merging.
+- [x] **3.1.8** Verify: run `cargo check`.
+- [x] **3.1.9** Verify: run focused `cargo test config::file`.
 
 ### 3.1.B - Local Config Validation and Integration
 
