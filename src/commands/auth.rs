@@ -83,7 +83,7 @@ pub async fn handle_logout() -> Result<(), anyhow::Error> {
     }
 
     let selected_provider = select_provider("Select provider to log out:", &providers)?;
-    let confirmed = confirm(&format!(
+    let confirmed = confirm(format!(
         "Remove stored credential for {}?",
         selected_provider.name()
     ))

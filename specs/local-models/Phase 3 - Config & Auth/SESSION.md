@@ -75,3 +75,27 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - The full Ratatui `ostt model` UI, selection persistence behavior, download flow, and routing into local model management remain scoped to `3.2.C`.
+
+## Session 5: Spec 3.2.C - Ratatui Model Wizard and Local Management Integration
+
+Accomplished:
+- Implemented the canonical `ostt model` Ratatui wizard with grouped cloud and Local sections.
+- Added navigation/back/quit handling for arrow keys, Enter, `m`, `Esc`, `q`, and Ctrl+C download cancellation.
+- Saved cloud and downloaded local selections through provider-aware selected-model state.
+- Routed `Manage local models...` and `[m]` to the existing local model management TUI.
+- Added confirmation/progress behavior for missing local model downloads; activation remains a separate explicit Enter after download.
+- Added a local audio compatibility warning for non-PCM/16 kHz configuration.
+- Added focused tests for selection persistence, management routing, missing-local confirmation state, and navigation/back behavior.
+- Updated `PLAN.md` after each completed task.
+
+Verification:
+- `cargo check` failed once due to error conversion from `OsttConfig::load`, then passed after mapping the error locally.
+- `cargo clippy -- -D warnings` failed once due to a new large enum variant and an existing auth needless-borrow lint, then passed after minimal fixes.
+- `cargo test` failed twice. The first failure was a wrong test enum variant name and was fixed. The second failure had four failures involving env-dependent tests under the full parallel suite: two auth selected-model/credential tests, one new model selection persistence test, and one process input tilde expansion test.
+- Per protocol, `3.2.30` is marked `[!]` and work stopped after committing partial work.
+
+Obstacles encountered:
+- Full `cargo test` runs env-mutating tests in parallel; the second run showed cross-test interference through `HOME`/model directory state.
+
+Out-of-scope observations:
+- Existing env-mutating tests should be isolated consistently or run serially to make full-suite verification reliable.

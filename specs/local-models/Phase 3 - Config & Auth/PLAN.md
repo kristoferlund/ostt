@@ -95,17 +95,17 @@ Depends on: `3.2.B`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/3.2 - Auth Flow & First-Time Setup.md`
 
-- [ ] **3.2.20** Implement Ratatui rendering for grouped cloud and Local model selection following existing OSTT TUI style.
-- [ ] **3.2.21** Implement navigation, quit, and back behavior: arrow keys, Enter, `m`, `Esc`, and `q`.
-- [ ] **3.2.22** Save selected downloaded local models through provider-aware selected-model state as `provider = local` and string model ID.
-- [ ] **3.2.23** Save selected cloud models through provider-aware selected-model state with the selected cloud provider/model.
-- [ ] **3.2.24** Route `Manage local models...` and `[m]` into `src/commands/models_tui.rs` without adding `ostt local` or `ostt models`.
-- [ ] **3.2.25** For missing local models, show download confirmation/progress and require explicit activation after download.
-- [ ] **3.2.26** Add Ctrl+C cancellation behavior for local downloads in the model-selection flow.
-- [ ] **3.2.27** Add the local audio compatibility warning or offer when current audio output is incompatible with local transcription.
-- [ ] **3.2.28** Add focused tests for selection save behavior, local management routing, missing-local download flow state, and quit/back behavior where practical.
-- [ ] **3.2.29** Verify: run `cargo check` and `cargo clippy -- -D warnings`.
-- [ ] **3.2.30** Verify: run `cargo test`.
+- [x] **3.2.20** Implement Ratatui rendering for grouped cloud and Local model selection following existing OSTT TUI style.
+- [x] **3.2.21** Implement navigation, quit, and back behavior: arrow keys, Enter, `m`, `Esc`, and `q`.
+- [x] **3.2.22** Save selected downloaded local models through provider-aware selected-model state as `provider = local` and string model ID.
+- [x] **3.2.23** Save selected cloud models through provider-aware selected-model state with the selected cloud provider/model.
+- [x] **3.2.24** Route `Manage local models...` and `[m]` into `src/commands/models_tui.rs` without adding `ostt local` or `ostt models`.
+- [x] **3.2.25** For missing local models, show download confirmation/progress and require explicit activation after download.
+- [x] **3.2.26** Add Ctrl+C cancellation behavior for local downloads in the model-selection flow.
+- [x] **3.2.27** Add the local audio compatibility warning or offer when current audio output is incompatible with local transcription.
+- [x] **3.2.28** Add focused tests for selection save behavior, local management routing, missing-local download flow state, and quit/back behavior where practical.
+- [x] **3.2.29** Verify: run `cargo check` and `cargo clippy -- -D warnings`.
+- [!] **3.2.30** Verify: run `cargo test`.
 
 ## Verification Protocol
 
