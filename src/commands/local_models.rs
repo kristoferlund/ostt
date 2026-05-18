@@ -5,7 +5,7 @@ use crate::transcription::local_models::{
     mark_downloaded_registry_model, model_destination, register_custom_model, resolve_custom_model,
     validate_downloaded_model, DownloadHandle, LocalModelState, RegistryEntry,
 };
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -29,9 +29,11 @@ const BG: Color = Color::Rgb(0, 0, 0);
 const FG: Color = Color::Rgb(255, 255, 255);
 const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
 const HELP_FG: Color = Color::Rgb(100, 100, 100);
+const SECTION_FG: Color = Color::Rgb(120, 120, 120);
+const LOGO: &str = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct TuiModelEntry {
+pub struct LocalModelEntry {
     pub id: String,
     pub name: String,
     pub description: String,
@@ -57,21 +59,21 @@ pub struct DownloadState {
 }
 
 #[derive(Clone, Debug)]
-pub enum TuiMode {
+pub enum LocalModelsMode {
     Browse,
     CustomModelInput { input: Input },
-    CustomModelConfirm { entry: TuiModelEntry },
+    CustomModelConfirm { entry: LocalModelEntry },
     Downloading(DownloadState),
-    Info { entry: TuiModelEntry },
-    ConfirmDelete { entry: TuiModelEntry },
+    Info { entry: LocalModelEntry },
+    ConfirmDelete { entry: LocalModelEntry },
 }
 
 #[derive(Clone, Debug)]
-pub struct ModelTui {
-    pub entries: Vec<TuiModelEntry>,
+pub struct LocalModelsTui {
+    pub entries: Vec<LocalModelEntry>,
     pub selected: usize,
-    pub mode: TuiMode,
-    pub disk_usage_bytes: u64,
+    pub mode: LocalModelsMode,
+    pub downloaded_model_disk_usage_bytes: u64,
     pub status_message: Option<String>,
 }
 
@@ -82,22 +84,22 @@ struct RunningDownload {
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
-impl ModelTui {
-    pub fn new(entries: Vec<TuiModelEntry>, disk_usage_bytes: u64) -> Self {
+impl LocalModelsTui {
+    pub fn new(entries: Vec<LocalModelEntry>, downloaded_model_disk_usage_bytes: u64) -> Self {
         Self {
             entries,
             selected: 0,
-            mode: TuiMode::Browse,
-            disk_usage_bytes,
+            mode: LocalModelsMode::Browse,
+            downloaded_model_disk_usage_bytes,
             status_message: None,
         }
     }
 
-    pub fn selected_entry(&self) -> Option<&TuiModelEntry> {
+    pub fn selected_entry(&self) -> Option<&LocalModelEntry> {
         self.display_entries().get(self.selected).copied()
     }
 
-    pub fn display_entries(&self) -> Vec<&TuiModelEntry> {
+    pub fn display_entries(&self) -> Vec<&LocalModelEntry> {
         self.entries
             .iter()
             .filter(|entry| entry.is_downloaded)
@@ -119,7 +121,7 @@ impl ModelTui {
 
     pub fn show_info(&mut self) {
         if let Some(entry) = self.selected_entry().cloned() {
-            self.mode = TuiMode::Info { entry };
+            self.mode = LocalModelsMode::Info { entry };
         }
     }
 
@@ -129,16 +131,16 @@ impl ModelTui {
             .filter(|entry| entry.is_downloaded)
             .cloned()
         {
-            self.mode = TuiMode::ConfirmDelete { entry };
+            self.mode = LocalModelsMode::ConfirmDelete { entry };
         }
     }
 
     pub fn back_to_browse(&mut self) {
-        self.mode = TuiMode::Browse;
+        self.mode = LocalModelsMode::Browse;
     }
 
     pub fn show_custom_input(&mut self) {
-        self.mode = TuiMode::CustomModelInput {
+        self.mode = LocalModelsMode::CustomModelInput {
             input: Input::default(),
         };
     }
@@ -149,8 +151,8 @@ impl ModelTui {
         registry: &[RegistryEntry],
     ) -> anyhow::Result<()> {
         let selected_model = config::get_selected_model_entry()?;
-        self.entries = build_model_list(local_state, registry, selected_model.as_ref());
-        self.disk_usage_bytes = disk_usage_bytes(&self.entries);
+        self.entries = build_local_model_entries(local_state, registry, selected_model.as_ref());
+        self.downloaded_model_disk_usage_bytes = downloaded_model_disk_usage_bytes(&self.entries);
         let display_len = self.display_entries().len();
         if self.selected >= display_len {
             self.selected = display_len.saturating_sub(1);
@@ -182,11 +184,11 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn build_model_list(
+pub fn build_local_model_entries(
     local_state: &LocalModelState,
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
-) -> Vec<TuiModelEntry> {
+) -> Vec<LocalModelEntry> {
     registry
         .iter()
         .chain(local_state.custom_models.iter())
@@ -196,7 +198,7 @@ pub fn build_model_list(
                 .map(|selected| selected.provider_id == "local" && selected.model_id == entry.id)
                 .unwrap_or(false);
 
-            TuiModelEntry {
+            LocalModelEntry {
                 id: entry.id.clone(),
                 name: entry.name.clone(),
                 description: entry.description.clone(),
@@ -215,7 +217,7 @@ pub fn build_model_list(
         .collect()
 }
 
-pub fn disk_usage_bytes(entries: &[TuiModelEntry]) -> u64 {
+pub fn downloaded_model_disk_usage_bytes(entries: &[LocalModelEntry]) -> u64 {
     entries
         .iter()
         .filter(|entry| entry.is_downloaded)
@@ -246,7 +248,7 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn registry_entry_from_tui(entry: &TuiModelEntry) -> RegistryEntry {
+fn registry_entry_from_model(entry: &LocalModelEntry) -> RegistryEntry {
     RegistryEntry {
         id: entry.id.clone(),
         name: entry.name.clone(),
@@ -260,8 +262,8 @@ fn registry_entry_from_tui(entry: &TuiModelEntry) -> RegistryEntry {
     }
 }
 
-fn downloaded_details(entry: &TuiModelEntry) -> (String, String) {
-    let path = model_destination(&registry_entry_from_tui(entry));
+fn downloaded_details(entry: &LocalModelEntry) -> (String, String) {
+    let path = model_destination(&registry_entry_from_model(entry));
     let downloaded = fs::metadata(&path)
         .ok()
         .and_then(|metadata| metadata.modified().ok())
@@ -272,23 +274,23 @@ fn downloaded_details(entry: &TuiModelEntry) -> (String, String) {
     (downloaded, path.display().to_string())
 }
 
-fn activate_entry(entry: &TuiModelEntry) -> anyhow::Result<()> {
+fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     if !entry.is_downloaded {
         anyhow::bail!("Download first with [d]");
     }
-    let path = model_destination(&registry_entry_from_tui(entry));
+    let path = model_destination(&registry_entry_from_model(entry));
     if !path.exists() {
         anyhow::bail!("Download first with [d]");
     }
     config::save_selected_model("local", &entry.id)
 }
 
-fn delete_entry(entry: &TuiModelEntry) -> anyhow::Result<()> {
+fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     if delete_model(&entry.id).is_ok() {
         return Ok(());
     }
 
-    let path = model_destination(&registry_entry_from_tui(entry));
+    let path = model_destination(&registry_entry_from_model(entry));
     fs::remove_file(&path)?;
     if config::get_selected_model_entry()?
         .is_some_and(|selected| selected.provider_id == "local" && selected.model_id == entry.id)
@@ -298,8 +300,11 @@ fn delete_entry(entry: &TuiModelEntry) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn tui_entry_from_registry(entry: &RegistryEntry, is_available_in_registry: bool) -> TuiModelEntry {
-    TuiModelEntry {
+fn local_model_entry_from_registry(
+    entry: &RegistryEntry,
+    is_available_in_registry: bool,
+) -> LocalModelEntry {
+    LocalModelEntry {
         id: entry.id.clone(),
         name: entry.name.clone(),
         description: entry.description.clone(),
@@ -372,13 +377,13 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
     }
 }
 
-fn sync_download_mode(tui: &mut ModelTui, running: &RunningDownload) {
+fn sync_download_progress(tui: &mut LocalModelsTui, running: &RunningDownload) {
     if let Ok(state) = running.state.lock() {
-        tui.mode = TuiMode::Downloading(state.clone());
+        tui.mode = LocalModelsMode::Downloading(state.clone());
     }
 }
 
-fn render_tui(frame: &mut Frame<'_>, tui: &ModelTui) {
+fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
     let area = frame.area();
 
     let padding_block = Block::default()
@@ -392,40 +397,51 @@ fn render_tui(frame: &mut Frame<'_>, tui: &ModelTui) {
     let inner_area = main_block.inner(padded_area);
 
     match &tui.mode {
-        TuiMode::Browse => render_browse(frame, inner_area, tui),
-        TuiMode::Info { entry } => {
+        LocalModelsMode::Browse => render_browse(frame, inner_area, tui),
+        LocalModelsMode::Info { entry } => {
             render_logo(frame, inner_area);
             render_info(frame, entry);
         }
-        TuiMode::ConfirmDelete { entry } => {
+        LocalModelsMode::ConfirmDelete { entry } => {
             render_logo(frame, inner_area);
             render_confirm_delete(frame, entry);
         }
-        TuiMode::CustomModelInput { input } => {
+        LocalModelsMode::CustomModelInput { input } => {
             render_logo(frame, inner_area);
             render_custom_input(frame, input, tui.status_message.as_deref());
         }
-        TuiMode::CustomModelConfirm { entry } => {
+        LocalModelsMode::CustomModelConfirm { entry } => {
             render_logo(frame, inner_area);
             render_custom_confirm(frame, entry);
         }
-        TuiMode::Downloading(state) => {
+        LocalModelsMode::Downloading(state) => {
             render_logo(frame, inner_area);
             render_download(frame, state);
         }
     }
 }
 
+fn is_ctrl_c(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+fn section_header(label: &'static str) -> ListItem<'static> {
+    ListItem::new(Line::from(Span::styled(
+        label,
+        Style::default().fg(SECTION_FG),
+    )))
+}
+
 fn render_logo(frame: &mut Frame<'_>, area: Rect) {
     let [header_area, _] =
         Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
-    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+    let header = Paragraph::new(LOGO)
         .style(Style::default().fg(FG))
         .alignment(Alignment::Left);
     frame.render_widget(header, header_area);
 }
 
-fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &ModelTui) {
+fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) {
     let [header_area, list_area, footer_area] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Min(5),
@@ -433,29 +449,23 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &ModelTui) {
     ])
     .areas(inner_area);
 
-    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+    let header = Paragraph::new(LOGO)
         .style(Style::default().fg(FG))
         .alignment(Alignment::Left);
     frame.render_widget(header, header_area);
 
     let mut items = Vec::new();
-    items.push(ListItem::new(Line::from(Span::styled(
-        "Downloaded",
-        Style::default().fg(Color::Rgb(120, 120, 120)),
-    ))));
+    items.push(section_header("Downloaded"));
     for entry in tui.entries.iter().filter(|entry| entry.is_downloaded) {
-        items.push(model_list_item(entry));
+        items.push(local_model_list_item(entry));
     }
     items.push(ListItem::new(Line::from("")));
-    items.push(ListItem::new(Line::from(Span::styled(
-        "Available to download",
-        Style::default().fg(Color::Rgb(120, 120, 120)),
-    ))));
+    items.push(section_header("Available to download"));
     for entry in tui.entries.iter().filter(|entry| !entry.is_downloaded) {
-        items.push(model_list_item(entry));
+        items.push(local_model_list_item(entry));
     }
 
-    let selected_display_index = display_index_for_selection(tui);
+    let selected_display_index = display_index_for_selected_model(tui);
     let mut state = ListState::default().with_selected(selected_display_index);
     frame.render_stateful_widget(
         List::new(items)
@@ -480,7 +490,7 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &ModelTui) {
     );
 }
 
-fn model_list_item(entry: &TuiModelEntry) -> ListItem<'static> {
+fn local_model_list_item(entry: &LocalModelEntry) -> ListItem<'static> {
     let marker = if entry.is_active { "◉" } else { "○" };
     let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
     let description = entry.description.trim();
@@ -491,7 +501,7 @@ fn model_list_item(entry: &TuiModelEntry) -> ListItem<'static> {
     )))
 }
 
-fn display_index_for_selection(tui: &ModelTui) -> Option<usize> {
+fn display_index_for_selected_model(tui: &LocalModelsTui) -> Option<usize> {
     let selected_entry = tui.selected_entry()?;
     let mut index = 1;
     for entry in tui.entries.iter().filter(|entry| entry.is_downloaded) {
@@ -510,7 +520,7 @@ fn display_index_for_selection(tui: &ModelTui) -> Option<usize> {
     None
 }
 
-fn render_info(frame: &mut Frame<'_>, entry: &TuiModelEntry) {
+fn render_info(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
     let area = centered_rect(80, 70, frame.area());
     let (downloaded, path) = downloaded_details(entry);
     let lines = vec![
@@ -554,7 +564,7 @@ fn render_info(frame: &mut Frame<'_>, entry: &TuiModelEntry) {
     );
 }
 
-fn render_confirm_delete(frame: &mut Frame<'_>, entry: &TuiModelEntry) {
+fn render_confirm_delete(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
     let area = centered_rect(60, 25, frame.area());
     frame.render_widget(Clear, area);
     frame.render_widget(
@@ -593,7 +603,7 @@ fn render_custom_input(frame: &mut Frame<'_>, input: &Input, status: Option<&str
     );
 }
 
-fn render_custom_confirm(frame: &mut Frame<'_>, entry: &TuiModelEntry) {
+fn render_custom_confirm(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
     let area = centered_rect(80, 45, frame.area());
     let lines = vec![
         Line::from(format!("Name: {}", entry.name)),
@@ -690,14 +700,174 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
-pub async fn handle_models_tui_with(
+async fn finish_completed_download(
+    tui: &mut LocalModelsTui,
+    registry: &[RegistryEntry],
+    running_download: &mut Option<RunningDownload>,
+) -> anyhow::Result<()> {
+    let Some(running) = running_download.as_ref() else {
+        return Ok(());
+    };
+
+    sync_download_progress(tui, running);
+    if !running.task.is_finished() {
+        return Ok(());
+    }
+
+    let running = running_download.take().expect("running download");
+    match running.task.await? {
+        Ok(()) => {
+            tui.status_message = Some(format!("Downloaded {}", running.entry.name));
+            tui.back_to_browse();
+            tui.refresh(&load_state(), registry)?;
+        }
+        Err(error) => {
+            tui.status_message = Some(error.to_string());
+            tui.back_to_browse();
+        }
+    }
+    Ok(())
+}
+
+async fn handle_key(
+    tui: &mut LocalModelsTui,
+    registry: &[RegistryEntry],
+    running_download: &mut Option<RunningDownload>,
+    key: KeyEvent,
+) -> anyhow::Result<bool> {
+    if is_ctrl_c(&key) {
+        return Err(UserQuit.into());
+    }
+
+    let mode = tui.mode.clone();
+    match (mode, key.code) {
+        (LocalModelsMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => return Ok(true),
+        (LocalModelsMode::Browse, KeyCode::Down) => tui.move_selection_down(),
+        (LocalModelsMode::Browse, KeyCode::Up) => tui.move_selection_up(),
+        (LocalModelsMode::Browse, KeyCode::Enter) => activate_selected_entry(tui, registry)?,
+        (LocalModelsMode::Browse, KeyCode::Char('d')) => {
+            start_selected_download(tui, running_download)
+        }
+        (LocalModelsMode::Browse, KeyCode::Char('i')) => tui.show_info(),
+        (LocalModelsMode::Browse, KeyCode::Char('c')) => {
+            tui.status_message = None;
+            tui.show_custom_input();
+        }
+        (LocalModelsMode::Browse, KeyCode::Char('r')) => tui.confirm_delete(),
+        (LocalModelsMode::Info { .. }, KeyCode::Esc) => tui.back_to_browse(),
+        (LocalModelsMode::Downloading(_), KeyCode::Tab) => cancel_download(running_download),
+        (LocalModelsMode::CustomModelInput { input }, KeyCode::Enter) => {
+            resolve_custom_input(tui, input.value()).await;
+        }
+        (LocalModelsMode::CustomModelInput { input }, _) => {
+            let mut input = input.clone();
+            input.handle_event(&Event::Key(key));
+            tui.mode = LocalModelsMode::CustomModelInput { input };
+        }
+        (LocalModelsMode::CustomModelConfirm { entry }, KeyCode::Enter) => {
+            let running = start_download(registry_entry_from_model(&entry), true);
+            sync_download_progress(tui, &running);
+            *running_download = Some(running);
+        }
+        (
+            LocalModelsMode::ConfirmDelete { .. },
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
+        ) => tui.back_to_browse(),
+        (LocalModelsMode::ConfirmDelete { entry }, KeyCode::Char('y') | KeyCode::Char('Y')) => {
+            delete_confirmed_entry(tui, registry, &entry)?;
+        }
+        (_, KeyCode::Esc) => tui.back_to_browse(),
+        _ => {}
+    }
+
+    Ok(false)
+}
+
+fn activate_selected_entry(
+    tui: &mut LocalModelsTui,
+    registry: &[RegistryEntry],
+) -> anyhow::Result<()> {
+    let Some(entry) = tui.selected_entry().cloned() else {
+        return Ok(());
+    };
+
+    match activate_entry(&entry) {
+        Ok(()) => {
+            tui.status_message = Some(format!("Activated {}", entry.name));
+            tui.refresh(&load_state(), registry)?;
+        }
+        Err(error) => tui.status_message = Some(error.to_string()),
+    }
+    Ok(())
+}
+
+fn start_selected_download(
+    tui: &mut LocalModelsTui,
+    running_download: &mut Option<RunningDownload>,
+) {
+    let Some(entry) = tui.selected_entry().cloned() else {
+        return;
+    };
+
+    if entry.is_downloaded {
+        tui.status_message = Some(format!("{} is already downloaded", entry.name));
+    } else if !entry.is_available_in_registry {
+        tui.status_message = Some("Custom models must be downloaded through [c]".to_string());
+    } else {
+        let running = start_download(registry_entry_from_model(&entry), false);
+        sync_download_progress(tui, &running);
+        *running_download = Some(running);
+    }
+}
+
+fn cancel_download(running_download: &mut Option<RunningDownload>) {
+    if let Some(running) = running_download.as_ref() {
+        running.handle.cancel();
+        if let Ok(mut state) = running.state.lock() {
+            state.status = "Cancelling download".to_string();
+        }
+    }
+}
+
+async fn resolve_custom_input(tui: &mut LocalModelsTui, value: &str) {
+    match resolve_custom_model(value).await {
+        Ok(entry) => {
+            tui.status_message = None;
+            tui.mode = LocalModelsMode::CustomModelConfirm {
+                entry: local_model_entry_from_registry(&entry, false),
+            };
+        }
+        Err(error) => tui.status_message = Some(error.to_string()),
+    }
+}
+
+fn delete_confirmed_entry(
+    tui: &mut LocalModelsTui,
+    registry: &[RegistryEntry],
+    entry: &LocalModelEntry,
+) -> anyhow::Result<()> {
+    match delete_entry(entry) {
+        Ok(()) => {
+            tui.status_message = Some(format!("Deleted {}", entry.name));
+            tui.back_to_browse();
+            tui.refresh(&load_state(), registry)?;
+        }
+        Err(error) => {
+            tui.status_message = Some(error.to_string());
+            tui.back_to_browse();
+        }
+    }
+    Ok(())
+}
+
+pub async fn handle_local_models_with_terminal(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<()> {
     let local_state = load_state();
     let registry = fetch_registry().await.unwrap_or_default();
     let selected_model = config::get_selected_model_entry()?;
-    let entries = build_model_list(&local_state, &registry, selected_model.as_ref());
-    let mut tui = ModelTui::new(entries.clone(), disk_usage_bytes(&entries));
+    let entries = build_local_model_entries(&local_state, &registry, selected_model.as_ref());
+    let mut tui = LocalModelsTui::new(entries.clone(), downloaded_model_disk_usage_bytes(&entries));
     if registry.is_empty() {
         tui.status_message = Some(
             "Could not load remote registry; custom URL entry is still available with [c]"
@@ -707,132 +877,25 @@ pub async fn handle_models_tui_with(
     let mut running_download: Option<RunningDownload> = None;
 
     loop {
-        if let Some(running) = running_download.as_ref() {
-            sync_download_mode(&mut tui, running);
-            if running.task.is_finished() {
-                let running = running_download.take().expect("running download");
-                match running.task.await? {
-                    Ok(()) => {
-                        tui.status_message = Some(format!("Downloaded {}", running.entry.name));
-                        tui.back_to_browse();
-                        tui.refresh(&load_state(), &registry)?;
-                    }
-                    Err(error) => {
-                        tui.status_message = Some(error.to_string());
-                        tui.back_to_browse();
-                    }
-                }
-            }
-        }
-        terminal.draw(|frame| render_tui(frame, &tui))?;
+        finish_completed_download(&mut tui, &registry, &mut running_download).await?;
+        terminal.draw(|frame| render_local_models(frame, &tui))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
         }
 
         if let Event::Key(key) = event::read()? {
-            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                return Err(UserQuit.into());
-            }
-            let mode = tui.mode.clone();
-            match (mode, key.code) {
-                (TuiMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => break,
-                (TuiMode::Browse, KeyCode::Down) => tui.move_selection_down(),
-                (TuiMode::Browse, KeyCode::Up) => tui.move_selection_up(),
-                (TuiMode::Browse, KeyCode::Enter) => {
-                    if let Some(entry) = tui.selected_entry().cloned() {
-                        match activate_entry(&entry) {
-                            Ok(()) => {
-                                tui.status_message = Some(format!("Activated {}", entry.name));
-                                tui.refresh(&load_state(), &registry)?;
-                            }
-                            Err(error) => tui.status_message = Some(error.to_string()),
-                        }
-                    }
-                }
-                (TuiMode::Browse, KeyCode::Char('d')) => {
-                    if let Some(entry) = tui.selected_entry().cloned() {
-                        if entry.is_downloaded {
-                            tui.status_message =
-                                Some(format!("{} is already downloaded", entry.name));
-                        } else if !entry.is_available_in_registry {
-                            tui.status_message =
-                                Some("Custom models must be downloaded through [c]".to_string());
-                        } else {
-                            let registry_entry = registry_entry_from_tui(&entry);
-                            let running = start_download(registry_entry, false);
-                            sync_download_mode(&mut tui, &running);
-                            running_download = Some(running);
-                        }
-                    }
-                }
-                (TuiMode::Browse, KeyCode::Char('i')) => tui.show_info(),
-                (TuiMode::Browse, KeyCode::Char('c')) => {
-                    tui.status_message = None;
-                    tui.show_custom_input();
-                }
-                (TuiMode::Browse, KeyCode::Char('r')) => tui.confirm_delete(),
-                (TuiMode::Info { .. }, KeyCode::Esc) => tui.back_to_browse(),
-                (TuiMode::Downloading(_), KeyCode::Tab) => {
-                    if let Some(running) = running_download.as_ref() {
-                        running.handle.cancel();
-                        if let Ok(mut state) = running.state.lock() {
-                            state.status = "Cancelling download".to_string();
-                        }
-                    }
-                }
-                (TuiMode::CustomModelInput { input }, KeyCode::Enter) => {
-                    let value = input.value().to_string();
-                    match resolve_custom_model(&value).await {
-                        Ok(entry) => {
-                            tui.status_message = None;
-                            tui.mode = TuiMode::CustomModelConfirm {
-                                entry: tui_entry_from_registry(&entry, false),
-                            };
-                        }
-                        Err(error) => tui.status_message = Some(error.to_string()),
-                    }
-                }
-                (TuiMode::CustomModelInput { input }, _) => {
-                    let mut input = input.clone();
-                    input.handle_event(&Event::Key(key));
-                    tui.mode = TuiMode::CustomModelInput { input };
-                }
-                (TuiMode::CustomModelConfirm { entry }, KeyCode::Enter) => {
-                    let registry_entry = registry_entry_from_tui(&entry);
-                    let running = start_download(registry_entry, true);
-                    sync_download_mode(&mut tui, &running);
-                    running_download = Some(running);
-                }
-                (
-                    TuiMode::ConfirmDelete { .. },
-                    KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
-                ) => tui.back_to_browse(),
-                (TuiMode::ConfirmDelete { entry }, KeyCode::Char('y') | KeyCode::Char('Y')) => {
-                    let entry = entry.clone();
-                    match delete_entry(&entry) {
-                        Ok(()) => {
-                            tui.status_message = Some(format!("Deleted {}", entry.name));
-                            tui.back_to_browse();
-                            tui.refresh(&load_state(), &registry)?;
-                        }
-                        Err(error) => {
-                            tui.status_message = Some(error.to_string());
-                            tui.back_to_browse();
-                        }
-                    }
-                }
-                (_, KeyCode::Esc) => tui.back_to_browse(),
-                _ => {}
+            if handle_key(&mut tui, &registry, &mut running_download, key).await? {
+                break;
             }
         }
     }
     Ok(())
 }
 
-pub async fn handle_models_tui() -> anyhow::Result<()> {
+pub async fn handle_local_models() -> anyhow::Result<()> {
     let mut terminal = TerminalGuard::new()?;
-    handle_models_tui_with(&mut terminal.terminal).await
+    handle_local_models_with_terminal(&mut terminal.terminal).await
 }
 
 #[cfg(test)]
@@ -887,7 +950,7 @@ mod tests {
     }
 
     #[test]
-    fn build_model_list_merges_registry_and_custom_entries() {
+    fn build_local_model_entries_merges_registry_and_custom_entries() {
         with_isolated_models_dir(|_| {
             let registry = vec![registry_entry("turbo")];
             let state = LocalModelState {
@@ -898,7 +961,7 @@ mod tests {
                 }],
             };
 
-            let entries = build_model_list(&state, &registry, None);
+            let entries = build_local_model_entries(&state, &registry, None);
 
             assert_eq!(entries.len(), 2);
             assert!(entries.iter().any(|entry| {
@@ -913,7 +976,7 @@ mod tests {
     }
 
     #[test]
-    fn build_model_list_marks_downloaded_and_active_from_filesystem_and_selection() {
+    fn build_local_model_entries_marks_downloaded_and_active_from_filesystem_and_selection() {
         with_isolated_models_dir(|_| {
             let registry = vec![registry_entry("turbo")];
             fs::create_dir_all(model_files_dir()).expect("create files dir");
@@ -923,7 +986,8 @@ mod tests {
                 model_id: "turbo".to_string(),
             };
 
-            let entries = build_model_list(&LocalModelState::default(), &registry, Some(&selected));
+            let entries =
+                build_local_model_entries(&LocalModelState::default(), &registry, Some(&selected));
 
             assert_eq!(entries.len(), 1);
             assert!(entries[0].is_downloaded);
@@ -937,16 +1001,16 @@ mod tests {
             let registry = vec![registry_entry("turbo"), registry_entry("base")];
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             fs::write(model_files_dir().join("turbo.bin"), [1, 2, 3]).expect("write model");
-            let entries = build_model_list(&LocalModelState::default(), &registry, None);
+            let entries = build_local_model_entries(&LocalModelState::default(), &registry, None);
 
-            assert_eq!(disk_usage_bytes(&entries), 3);
+            assert_eq!(downloaded_model_disk_usage_bytes(&entries), 3);
         });
     }
 
     #[test]
     fn selection_navigation_stays_in_bounds() {
         let entries = vec![
-            TuiModelEntry {
+            LocalModelEntry {
                 id: "a".to_string(),
                 name: "A".to_string(),
                 description: String::new(),
@@ -959,7 +1023,7 @@ mod tests {
                 recommended_hardware: None,
                 category: None,
             },
-            TuiModelEntry {
+            LocalModelEntry {
                 id: "b".to_string(),
                 name: "B".to_string(),
                 description: String::new(),
@@ -973,7 +1037,7 @@ mod tests {
                 category: None,
             },
         ];
-        let mut tui = ModelTui::new(entries, 0);
+        let mut tui = LocalModelsTui::new(entries, 0);
 
         tui.move_selection_up();
         assert_eq!(tui.selected, 0);
@@ -985,7 +1049,7 @@ mod tests {
     #[test]
     fn selection_navigation_uses_rendered_group_order() {
         let entries = vec![
-            TuiModelEntry {
+            LocalModelEntry {
                 id: "tiny".to_string(),
                 name: "Tiny".to_string(),
                 description: String::new(),
@@ -998,7 +1062,7 @@ mod tests {
                 recommended_hardware: None,
                 category: None,
             },
-            TuiModelEntry {
+            LocalModelEntry {
                 id: "turbo".to_string(),
                 name: "Turbo".to_string(),
                 description: String::new(),
@@ -1011,7 +1075,7 @@ mod tests {
                 recommended_hardware: None,
                 category: None,
             },
-            TuiModelEntry {
+            LocalModelEntry {
                 id: "large-v3".to_string(),
                 name: "Large".to_string(),
                 description: String::new(),
@@ -1025,23 +1089,23 @@ mod tests {
                 category: None,
             },
         ];
-        let mut tui = ModelTui::new(entries, 0);
+        let mut tui = LocalModelsTui::new(entries, 0);
 
         assert_eq!(tui.selected_entry().expect("selected").id, "turbo");
-        assert_eq!(display_index_for_selection(&tui), Some(2));
+        assert_eq!(display_index_for_selected_model(&tui), Some(1));
 
         tui.move_selection_down();
         assert_eq!(tui.selected_entry().expect("selected").id, "tiny");
-        assert_eq!(display_index_for_selection(&tui), Some(5));
+        assert_eq!(display_index_for_selected_model(&tui), Some(4));
 
         tui.move_selection_down();
         assert_eq!(tui.selected_entry().expect("selected").id, "large-v3");
-        assert_eq!(display_index_for_selection(&tui), Some(6));
+        assert_eq!(display_index_for_selected_model(&tui), Some(5));
     }
 
     #[test]
     fn info_and_escape_return_to_browse() {
-        let entries = vec![TuiModelEntry {
+        let entries = vec![LocalModelEntry {
             id: "a".to_string(),
             name: "A".to_string(),
             description: String::new(),
@@ -1054,18 +1118,18 @@ mod tests {
             recommended_hardware: None,
             category: None,
         }];
-        let mut tui = ModelTui::new(entries, 0);
+        let mut tui = LocalModelsTui::new(entries, 0);
 
         tui.show_info();
-        assert!(matches!(tui.mode, TuiMode::Info { .. }));
+        assert!(matches!(tui.mode, LocalModelsMode::Info { .. }));
         tui.back_to_browse();
-        assert!(matches!(tui.mode, TuiMode::Browse));
+        assert!(matches!(tui.mode, LocalModelsMode::Browse));
     }
 
     #[test]
     fn activation_requires_downloaded_file_and_saves_local_selection() {
         with_isolated_models_dir(|_| {
-            let mut entry = TuiModelEntry {
+            let mut entry = LocalModelEntry {
                 id: "turbo".to_string(),
                 name: "Turbo".to_string(),
                 description: String::new(),
@@ -1098,7 +1162,7 @@ mod tests {
     #[test]
     fn confirmed_delete_removes_file_and_clears_active_selection() {
         with_isolated_models_dir(|_| {
-            let entry = TuiModelEntry {
+            let entry = LocalModelEntry {
                 id: "turbo".to_string(),
                 name: "Turbo".to_string(),
                 description: String::new(),

@@ -1,10 +1,8 @@
-use crate::commands::models_tui;
+use crate::commands::local_models;
 use crate::config::{self, SelectedModel};
-use crate::transcription::local_models::{
-    load_state, model_destination, LocalModelState, RegistryEntry,
-};
+use crate::transcription::local_models::{load_state, model_destination};
 use crate::transcription::{TranscriptionModel, TranscriptionProvider};
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -23,75 +21,31 @@ const BG: Color = Color::Rgb(0, 0, 0);
 const FG: Color = Color::Rgb(255, 255, 255);
 const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
 const HELP_FG: Color = Color::Rgb(100, 100, 100);
+const SECTION_FG: Color = Color::Rgb(120, 120, 120);
+const LOGO: &str = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
 
 #[derive(Debug, Clone)]
-pub enum ModelSelectionEntryKind {
-    Cloud {
-        model: TranscriptionModel,
-    },
-    Local {
-        entry: RegistryEntry,
-        is_downloaded: bool,
-    },
-    LocalManagement,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModelSelectionEntry {
+pub struct CloudModelEntry {
     pub provider_id: String,
     pub model_id: String,
     pub name: String,
     pub description: String,
     pub is_active: bool,
-    pub kind: ModelSelectionEntryKind,
+    pub model: TranscriptionModel,
 }
 
 #[derive(Debug, Clone)]
-pub struct ModelSelectionSection {
+pub struct CloudProviderSection {
     pub provider_id: String,
     pub title: String,
-    pub entries: Vec<ModelSelectionEntry>,
-}
-
-#[derive(Debug, Clone)]
-pub enum ModelWizardMode {
-    Browse,
-    ConfirmDownload { entry: Box<ModelSelectionEntry> },
-    Downloading(DownloadState),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct DownloadState {
-    pub model_id: String,
-    pub downloaded_bytes: u64,
-    pub total_bytes: u64,
-    pub progress: f64,
-    pub speed_mbps: f64,
-    pub status: String,
+    pub models: Vec<CloudModelEntry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ModelWizardAction {
-    Continue,
-    Quit,
-    ManageLocalModels,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ProviderChoice {
+pub enum ModelProviderChoice {
     Local,
     Cloud,
     Quit,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModelWizard {
-    pub sections: Vec<ModelSelectionSection>,
-    pub selected: usize,
-    pub mode: ModelWizardMode,
-    pub status_message: Option<String>,
-    pub local_audio_warning: Option<String>,
-    pub notification: Option<(String, Instant)>,
 }
 
 #[derive(Debug)]
@@ -109,11 +63,13 @@ pub async fn handle_model() -> anyhow::Result<()> {
     let mut guard = TerminalGuard::new()?;
 
     loop {
-        let choice = show_provider_picker(&mut guard.terminal).await?;
+        let choice = choose_model_provider(&mut guard.terminal).await?;
         let result = match choice {
-            ProviderChoice::Quit => break,
-            ProviderChoice::Local => models_tui::handle_models_tui_with(&mut guard.terminal).await,
-            ProviderChoice::Cloud => run_cloud_selector(&mut guard.terminal).await,
+            ModelProviderChoice::Quit => break,
+            ModelProviderChoice::Local => {
+                local_models::handle_local_models_with_terminal(&mut guard.terminal).await
+            }
+            ModelProviderChoice::Cloud => run_cloud_model_selector(&mut guard.terminal).await,
         };
         if let Err(e) = result {
             if e.downcast_ref::<UserQuit>().is_some() {
@@ -125,37 +81,58 @@ pub async fn handle_model() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn show_provider_picker(
+fn is_ctrl_c(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+fn render_shell(frame: &mut Frame<'_>) -> [Rect; 3] {
+    let area = frame.area();
+
+    let padding_block = Block::default()
+        .padding(Padding::uniform(1))
+        .style(Style::default().bg(BG));
+    frame.render_widget(&padding_block, area);
+    let padded_area = padding_block.inner(area);
+
+    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+    frame.render_widget(&main_block, padded_area);
+    let inner_area = main_block.inner(padded_area);
+
+    let [header_area, body_area, footer_area] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(5),
+        Constraint::Length(1),
+    ])
+    .areas(inner_area);
+
+    frame.render_widget(
+        Paragraph::new(LOGO)
+            .style(Style::default().fg(FG))
+            .alignment(Alignment::Left),
+        header_area,
+    );
+
+    [body_area, footer_area, area]
+}
+
+fn render_footer(frame: &mut Frame<'_>, area: Rect, text: &'static str) {
+    frame.render_widget(
+        Paragraph::new(text)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(HELP_FG)),
+        area,
+    );
+}
+
+async fn choose_model_provider(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-) -> anyhow::Result<ProviderChoice> {
+) -> anyhow::Result<ModelProviderChoice> {
     let choices = ["Local provider", "Cloud provider"];
     let mut selected = 0_usize;
 
     loop {
         terminal.draw(|frame| {
-            let area = frame.area();
-
-            let padding_block = Block::default()
-                .padding(Padding::uniform(1))
-                .style(Style::default().bg(BG));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            let [header_area, list_area, footer_area] = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Min(5),
-                Constraint::Length(1),
-            ])
-            .areas(inner_area);
-
-            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-                .style(Style::default().fg(FG))
-                .alignment(Alignment::Left);
-            frame.render_widget(header, header_area);
+            let [list_area, footer_area, _] = render_shell(frame);
 
             let items: Vec<ListItem> = choices
                 .iter()
@@ -172,12 +149,7 @@ async fn show_provider_picker(
                 &mut state,
             );
 
-            frame.render_widget(
-                Paragraph::new("↑↓ select, ↵ confirm, esc/q quit")
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(HELP_FG)),
-                footer_area,
-            );
+            render_footer(frame, footer_area, "↑↓ select, ↵ confirm, esc/q quit");
         })?;
 
         if event::poll(Duration::from_millis(100))? {
@@ -187,14 +159,12 @@ async fn show_provider_picker(
                     KeyCode::Down => selected = (selected + 1).min(1),
                     KeyCode::Enter => {
                         return Ok(match selected {
-                            0 => ProviderChoice::Local,
-                            _ => ProviderChoice::Cloud,
+                            0 => ModelProviderChoice::Local,
+                            _ => ModelProviderChoice::Cloud,
                         })
                     }
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(ProviderChoice::Quit),
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Ok(ProviderChoice::Quit)
-                    }
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(ModelProviderChoice::Quit),
+                    _ if is_ctrl_c(&key) => return Ok(ModelProviderChoice::Quit),
                     _ => {}
                 }
             }
@@ -202,23 +172,22 @@ async fn show_provider_picker(
     }
 }
 
-async fn run_cloud_selector(
+async fn run_cloud_model_selector(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<()> {
     let authorized_provider_ids = config::get_authorized_providers()?;
 
     if authorized_provider_ids.is_empty() {
-        show_no_providers_screen(terminal).await?;
+        show_no_cloud_providers_screen(terminal).await?;
         return Ok(());
     }
 
     let selected_model = config::get_selected_model_entry()?;
-    let sections = build_cloud_sections(&authorized_provider_ids, selected_model.as_ref());
-    let entries: Vec<&ModelSelectionEntry> =
-        sections.iter().flat_map(|s| s.entries.iter()).collect();
+    let sections = build_cloud_provider_sections(&authorized_provider_ids, selected_model.as_ref());
+    let models: Vec<&CloudModelEntry> = sections.iter().flat_map(|s| s.models.iter()).collect();
 
-    if entries.is_empty() {
-        show_no_providers_screen(terminal).await?;
+    if models.is_empty() {
+        show_no_cloud_providers_screen(terminal).await?;
         return Ok(());
     }
 
@@ -233,52 +202,8 @@ async fn run_cloud_selector(
         }
 
         terminal.draw(|frame| {
-            let area = frame.area();
-
-            let padding_block = Block::default()
-                .padding(Padding::uniform(1))
-                .style(Style::default().bg(BG));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            let [header_area, list_area, footer_area] = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Min(5),
-                Constraint::Length(1),
-            ])
-            .areas(inner_area);
-
-            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-                .style(Style::default().fg(FG))
-                .alignment(Alignment::Left);
-            frame.render_widget(header, header_area);
-
-            let mut items = Vec::new();
-            let mut display_index = 0_usize;
-            let mut model_index = 0_usize;
-            let mut selected_display_index = None;
-            for section in &sections {
-                items.push(ListItem::new(Line::from(Span::styled(
-                    section.title.to_string(),
-                    Style::default().fg(Color::Rgb(120, 120, 120)),
-                ))));
-                display_index += 1;
-                for entry in &section.entries {
-                    if model_index == selected {
-                        selected_display_index = Some(display_index);
-                    }
-                    items.push(cloud_list_item(entry));
-                    display_index += 1;
-                    model_index += 1;
-                }
-                items.push(ListItem::new(Line::from("")));
-                display_index += 1;
-            }
-
+            let [list_area, footer_area, screen_area] = render_shell(frame);
+            let (items, selected_display_index) = cloud_model_list_items(&sections, selected);
             let mut state = ListState::default().with_selected(selected_display_index);
             frame.render_stateful_widget(
                 List::new(items)
@@ -293,15 +218,10 @@ async fn run_cloud_selector(
                 &mut state,
             );
 
-            frame.render_widget(
-                Paragraph::new("↑↓ select, ↵ activate, esc/q back")
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(HELP_FG)),
-                footer_area,
-            );
+            render_footer(frame, footer_area, "↑↓ select, ↵ activate, esc/q back");
 
             if let Some((message, _)) = &notification {
-                render_notification(frame, area, message);
+                render_notification(frame, screen_area, message);
             }
         })?;
 
@@ -309,20 +229,16 @@ async fn run_cloud_selector(
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Up => selected = selected.saturating_sub(1),
-                    KeyCode::Down => selected = (selected + 1).min(entries.len().saturating_sub(1)),
+                    KeyCode::Down => selected = (selected + 1).min(models.len().saturating_sub(1)),
                     KeyCode::Enter => {
-                        if let Some(entry) = entries.get(selected) {
-                            if let ModelSelectionEntryKind::Cloud { model } = &entry.kind {
-                                save_cloud_selection(&entry.provider_id, model)?;
-                                notification =
-                                    Some((format!("Activated {}", entry.name), Instant::now()));
-                            }
+                        if let Some(entry) = models.get(selected) {
+                            save_cloud_selection(&entry.provider_id, &entry.model)?;
+                            notification =
+                                Some((format!("Activated {}", entry.name), Instant::now()));
                         }
                     }
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Err(UserQuit.into())
-                    }
+                    _ if is_ctrl_c(&key) => return Err(UserQuit.into()),
                     _ => {}
                 }
             }
@@ -330,39 +246,49 @@ async fn run_cloud_selector(
     }
 }
 
-fn cloud_list_item(entry: &ModelSelectionEntry) -> ListItem<'static> {
+fn cloud_model_list_item(entry: &CloudModelEntry) -> ListItem<'static> {
     let marker = if entry.is_active { "◉" } else { "○" };
     ListItem::new(Line::from(format!("{marker} {}", entry.name)))
 }
 
-async fn show_no_providers_screen(
+fn cloud_model_list_items(
+    sections: &[CloudProviderSection],
+    selected: usize,
+) -> (Vec<ListItem<'static>>, Option<usize>) {
+    let mut items = Vec::new();
+    let mut display_index = 0_usize;
+    let mut model_index = 0_usize;
+    let mut selected_display_index = None;
+
+    for section in sections {
+        items.push(ListItem::new(Line::from(Span::styled(
+            section.title.to_string(),
+            Style::default().fg(SECTION_FG),
+        ))));
+        display_index += 1;
+
+        for entry in &section.models {
+            if model_index == selected {
+                selected_display_index = Some(display_index);
+            }
+            items.push(cloud_model_list_item(entry));
+            display_index += 1;
+            model_index += 1;
+        }
+
+        items.push(ListItem::new(Line::from("")));
+        display_index += 1;
+    }
+
+    (items, selected_display_index)
+}
+
+async fn show_no_cloud_providers_screen(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| {
-            let area = frame.area();
-
-            let padding_block = Block::default()
-                .padding(Padding::uniform(1))
-                .style(Style::default().bg(BG));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            let [header_area, content_area, footer_area] = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Min(5),
-                Constraint::Length(1),
-            ])
-            .areas(inner_area);
-
-            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-                .style(Style::default().fg(FG))
-                .alignment(Alignment::Left);
-            frame.render_widget(header, header_area);
+            let [content_area, footer_area, _] = render_shell(frame);
 
             frame.render_widget(
                 Paragraph::new(vec![
@@ -386,100 +312,17 @@ async fn show_no_providers_screen(
                 content_area,
             );
 
-            frame.render_widget(
-                Paragraph::new("esc/q back")
-                    .alignment(Alignment::Center)
-                    .style(Style::default().fg(HELP_FG)),
-                footer_area,
-            );
+            render_footer(frame, footer_area, "esc/q back");
         })?;
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        return Err(UserQuit.into())
-                    }
+                    _ if is_ctrl_c(&key) => return Err(UserQuit.into()),
                     _ => {}
                 }
             }
-        }
-    }
-}
-
-impl ModelWizard {
-    pub fn new(sections: Vec<ModelSelectionSection>, local_audio_warning: Option<String>) -> Self {
-        Self {
-            sections,
-            selected: 0,
-            mode: ModelWizardMode::Browse,
-            status_message: None,
-            local_audio_warning,
-            notification: None,
-        }
-    }
-
-    pub fn selectable_entries(&self) -> Vec<&ModelSelectionEntry> {
-        self.sections
-            .iter()
-            .flat_map(|section| section.entries.iter())
-            .collect()
-    }
-
-    pub fn selected_entry(&self) -> Option<&ModelSelectionEntry> {
-        self.selectable_entries().get(self.selected).copied()
-    }
-
-    pub fn move_down(&mut self) {
-        let len = self.selectable_entries().len();
-        if self.selected + 1 < len {
-            self.selected += 1;
-        }
-    }
-
-    pub fn move_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
-        }
-    }
-
-    pub fn back(&mut self) -> ModelWizardAction {
-        match self.mode {
-            ModelWizardMode::Browse => ModelWizardAction::Quit,
-            _ => {
-                self.mode = ModelWizardMode::Browse;
-                ModelWizardAction::Continue
-            }
-        }
-    }
-
-    pub fn select_current(&mut self) -> anyhow::Result<ModelWizardAction> {
-        let entry = match self.selected_entry().cloned() {
-            Some(entry) => entry,
-            None => return Ok(ModelWizardAction::Continue),
-        };
-
-        match &entry.kind {
-            ModelSelectionEntryKind::Cloud { model } => {
-                save_cloud_selection(&entry.provider_id, model)?;
-                self.notification = Some((format!("Activated {}", entry.name), Instant::now()));
-                mark_active(&mut self.sections, &entry.provider_id, &entry.model_id);
-                Ok(ModelWizardAction::Continue)
-            }
-            ModelSelectionEntryKind::Local { is_downloaded, .. } if *is_downloaded => {
-                save_local_selection(&entry.model_id)?;
-                self.notification = Some((format!("Activated {}", entry.name), Instant::now()));
-                mark_active(&mut self.sections, "local", &entry.model_id);
-                Ok(ModelWizardAction::Continue)
-            }
-            ModelSelectionEntryKind::Local { .. } => {
-                self.mode = ModelWizardMode::ConfirmDownload {
-                    entry: Box::new(entry),
-                };
-                Ok(ModelWizardAction::Continue)
-            }
-            ModelSelectionEntryKind::LocalManagement => Ok(ModelWizardAction::ManageLocalModels),
         }
     }
 }
@@ -507,21 +350,10 @@ impl Drop for TerminalGuard {
     }
 }
 
-pub fn build_model_sections(
-    authorized_provider_ids: &[String],
-    local_state: &LocalModelState,
-    registry: &[RegistryEntry],
-    selected_model: Option<&SelectedModel>,
-) -> Vec<ModelSelectionSection> {
-    let mut sections = build_cloud_sections(authorized_provider_ids, selected_model);
-    sections.push(build_local_section(local_state, registry, selected_model));
-    sections
-}
-
-pub fn build_cloud_sections(
+pub fn build_cloud_provider_sections(
     authorized_provider_ids: &[String],
     selected_model: Option<&SelectedModel>,
-) -> Vec<ModelSelectionSection> {
+) -> Vec<CloudProviderSection> {
     let authorized: HashSet<&str> = authorized_provider_ids.iter().map(String::as_str).collect();
 
     TranscriptionProvider::all()
@@ -529,98 +361,33 @@ pub fn build_cloud_sections(
         .filter(|provider| **provider != TranscriptionProvider::Local)
         .filter(|provider| authorized.contains(provider.id()))
         .filter_map(|provider| {
-            let entries: Vec<ModelSelectionEntry> =
-                TranscriptionModel::models_for_provider(provider)
-                    .into_iter()
-                    .map(|model| ModelSelectionEntry {
-                        provider_id: provider.id().to_string(),
-                        model_id: model.id().to_string(),
-                        name: model.description().to_string(),
-                        description: String::new(),
-                        is_active: selected_model
-                            .map(|selected| {
-                                selected.provider_id == provider.id()
-                                    && selected.model_id == model.id()
-                            })
-                            .unwrap_or(false),
-                        kind: ModelSelectionEntryKind::Cloud { model },
-                    })
-                    .collect();
+            let models: Vec<CloudModelEntry> = TranscriptionModel::models_for_provider(provider)
+                .into_iter()
+                .map(|model| CloudModelEntry {
+                    provider_id: provider.id().to_string(),
+                    model_id: model.id().to_string(),
+                    name: model.description().to_string(),
+                    description: String::new(),
+                    is_active: selected_model
+                        .map(|selected| {
+                            selected.provider_id == provider.id() && selected.model_id == model.id()
+                        })
+                        .unwrap_or(false),
+                    model,
+                })
+                .collect();
 
-            (!entries.is_empty()).then(|| ModelSelectionSection {
+            (!models.is_empty()).then(|| CloudProviderSection {
                 provider_id: provider.id().to_string(),
                 title: provider.name().to_string(),
-                entries,
+                models,
             })
         })
         .collect()
 }
 
-pub fn build_local_section(
-    local_state: &LocalModelState,
-    registry: &[RegistryEntry],
-    selected_model: Option<&SelectedModel>,
-) -> ModelSelectionSection {
-    let mut seen = HashSet::new();
-    let mut entries: Vec<ModelSelectionEntry> = registry
-        .iter()
-        .chain(local_state.custom_models.iter())
-        .filter(|entry| seen.insert(entry.id.as_str()))
-        .map(|entry| {
-            let is_downloaded = model_destination(entry).exists();
-            ModelSelectionEntry {
-                provider_id: "local".to_string(),
-                model_id: entry.id.clone(),
-                name: entry.name.clone(),
-                description: entry.description.clone(),
-                is_active: selected_model
-                    .map(|selected| {
-                        selected.provider_id == "local" && selected.model_id == entry.id
-                    })
-                    .unwrap_or(false),
-                kind: ModelSelectionEntryKind::Local {
-                    entry: entry.clone(),
-                    is_downloaded,
-                },
-            }
-        })
-        .collect();
-
-    entries.push(ModelSelectionEntry {
-        provider_id: "local".to_string(),
-        model_id: "__manage_local_models__".to_string(),
-        name: "Manage local models...".to_string(),
-        description: "Download, inspect, or remove local models".to_string(),
-        is_active: false,
-        kind: ModelSelectionEntryKind::LocalManagement,
-    });
-
-    ModelSelectionSection {
-        provider_id: "local".to_string(),
-        title: "Local".to_string(),
-        entries,
-    }
-}
-
-pub fn load_local_selection_state() -> anyhow::Result<LocalModelState> {
-    Ok(load_state())
-}
-
-pub fn save_local_selection(model_id: &str) -> anyhow::Result<()> {
-    config::save_selected_model("local", model_id)
-}
-
 pub fn save_cloud_selection(provider_id: &str, model: &TranscriptionModel) -> anyhow::Result<()> {
     config::save_selected_model(provider_id, model.id())
-}
-
-fn mark_active(sections: &mut [ModelSelectionSection], provider_id: &str, model_id: &str) {
-    for entry in sections
-        .iter_mut()
-        .flat_map(|section| section.entries.iter_mut())
-    {
-        entry.is_active = entry.provider_id == provider_id && entry.model_id == model_id;
-    }
 }
 
 fn render_notification(frame: &mut Frame<'_>, screen_area: Rect, message: &str) {
@@ -745,104 +512,17 @@ mod tests {
         }
     }
 
-    fn registry_entry(id: &str) -> RegistryEntry {
-        RegistryEntry {
-            id: id.to_string(),
-            name: id.to_string(),
-            description: format!("{id} description"),
-            languages: vec!["en".to_string()],
-            size_mb: 1,
-            url: format!("https://example.com/{id}.bin"),
-            recommended_hardware: None,
-            sha256: None,
-            category: None,
-        }
-    }
-
     #[test]
     fn cloud_sections_include_only_authenticated_providers() {
-        let sections = build_cloud_sections(&["openai".to_string(), "local".to_string()], None);
+        let sections =
+            build_cloud_provider_sections(&["openai".to_string(), "local".to_string()], None);
 
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].provider_id, "openai");
         assert!(sections[0]
-            .entries
+            .models
             .iter()
             .all(|entry| entry.provider_id == "openai"));
-    }
-
-    #[test]
-    fn grouped_model_data_includes_cloud_and_local_sections() {
-        let registry = vec![registry_entry("turbo")];
-        let state = LocalModelState::default();
-
-        let sections = build_model_sections(&["groq".to_string()], &state, &registry, None);
-
-        assert_eq!(sections[0].provider_id, "groq");
-        assert_eq!(sections[1].provider_id, "local");
-        assert!(sections[1]
-            .entries
-            .iter()
-            .any(|entry| entry.model_id == "turbo"));
-    }
-
-    #[test]
-    fn local_section_marks_downloaded_status_and_management_row() {
-        let _guard = test_env_lock();
-        let _env = TestEnv::new();
-        let registry = vec![registry_entry("turbo"), registry_entry("small")];
-        fs::create_dir_all(crate::transcription::local_models::model_files_dir())
-            .expect("create model files dir");
-        fs::write(model_destination(&registry[0]), b"model").expect("write model file");
-
-        let section = build_local_section(&LocalModelState::default(), &registry, None);
-
-        assert!(matches!(
-            section.entries[0].kind,
-            ModelSelectionEntryKind::Local {
-                is_downloaded: true,
-                ..
-            }
-        ));
-        assert!(matches!(
-            section.entries[1].kind,
-            ModelSelectionEntryKind::Local {
-                is_downloaded: false,
-                ..
-            }
-        ));
-        assert!(matches!(
-            section.entries.last().expect("management row").kind,
-            ModelSelectionEntryKind::LocalManagement
-        ));
-    }
-
-    #[test]
-    fn active_selection_is_provider_aware() {
-        let selected = SelectedModel {
-            provider_id: "local".to_string(),
-            model_id: "whisper".to_string(),
-        };
-        let sections = build_model_sections(
-            &["openai".to_string()],
-            &LocalModelState::default(),
-            &[registry_entry("whisper")],
-            Some(&selected),
-        );
-
-        let openai_whisper = sections[0]
-            .entries
-            .iter()
-            .find(|entry| entry.model_id == "whisper")
-            .expect("openai whisper");
-        let local_whisper = sections[1]
-            .entries
-            .iter()
-            .find(|entry| entry.model_id == "whisper")
-            .expect("local whisper");
-
-        assert!(!openai_whisper.is_active);
-        assert!(local_whisper.is_active);
     }
 
     #[test]
@@ -859,90 +539,9 @@ mod tests {
     }
 
     #[test]
-    fn model_wizard_navigation_and_back_quit_are_bounded() {
-        let sections = vec![ModelSelectionSection {
-            provider_id: "local".to_string(),
-            title: "Local".to_string(),
-            entries: vec![
-                ModelSelectionEntry {
-                    provider_id: "local".to_string(),
-                    model_id: "turbo".to_string(),
-                    name: "Turbo".to_string(),
-                    description: String::new(),
-                    is_active: false,
-                    kind: ModelSelectionEntryKind::Local {
-                        entry: registry_entry("turbo"),
-                        is_downloaded: false,
-                    },
-                },
-                ModelSelectionEntry {
-                    provider_id: "local".to_string(),
-                    model_id: "__manage_local_models__".to_string(),
-                    name: "Manage local models...".to_string(),
-                    description: String::new(),
-                    is_active: false,
-                    kind: ModelSelectionEntryKind::LocalManagement,
-                },
-            ],
-        }];
-        let mut wizard = ModelWizard::new(sections, None);
-
-        wizard.move_up();
-        assert_eq!(wizard.selected, 0);
-        wizard.move_down();
-        wizard.move_down();
-        assert_eq!(wizard.selected, 1);
-        assert_eq!(wizard.back(), ModelWizardAction::Quit);
-    }
-
-    #[test]
-    fn selecting_management_row_routes_to_local_management() {
-        let mut wizard = ModelWizard::new(
-            vec![build_local_section(&LocalModelState::default(), &[], None)],
-            None,
-        );
-        wizard.selected = 0;
-
-        assert_eq!(
-            wizard.select_current().expect("select management"),
-            ModelWizardAction::ManageLocalModels
-        );
-    }
-
-    #[test]
-    fn missing_local_selection_enters_download_confirmation_without_activation() {
-        let _guard = test_env_lock();
-        let _env = TestEnv::new();
-        let mut wizard = ModelWizard::new(
-            vec![build_local_section(
-                &LocalModelState::default(),
-                &[registry_entry("turbo")],
-                None,
-            )],
-            None,
-        );
-
-        assert_eq!(
-            wizard.select_current().expect("select missing local"),
-            ModelWizardAction::Continue
-        );
-        assert!(matches!(
-            wizard.mode,
-            ModelWizardMode::ConfirmDownload { .. }
-        ));
-    }
-
-    #[test]
     fn selection_save_helpers_persist_provider_aware_state() {
         let _guard = test_env_lock();
         let _env = TestEnv::new();
-
-        save_local_selection("turbo").expect("save local selection");
-        let selected = config::get_selected_model_entry()
-            .expect("load selection")
-            .expect("selected local model");
-        assert_eq!(selected.provider_id, "local");
-        assert_eq!(selected.model_id, "turbo");
 
         save_cloud_selection("openai", &TranscriptionModel::Whisper).expect("save cloud selection");
         let config = config::OsttConfig::load().expect("load config");
@@ -956,35 +555,5 @@ mod tests {
             .expect("selected cloud model");
         assert_eq!(selected.provider_id, "openai");
         assert_eq!(selected.model_id, TranscriptionModel::Whisper.id());
-    }
-
-    #[test]
-    fn downloaded_local_selection_marks_active_after_save() {
-        let _guard = test_env_lock();
-        let _env = TestEnv::new();
-        let registry = vec![registry_entry("turbo")];
-        fs::create_dir_all(crate::transcription::local_models::model_files_dir())
-            .expect("create model files dir");
-        fs::write(model_destination(&registry[0]), b"model").expect("write model file");
-        let mut wizard = ModelWizard::new(
-            vec![build_local_section(
-                &LocalModelState::default(),
-                &registry,
-                None,
-            )],
-            None,
-        );
-
-        assert_eq!(
-            wizard.select_current().expect("select downloaded local"),
-            ModelWizardAction::Continue
-        );
-
-        let selected = config::get_selected_model_entry()
-            .expect("load selection")
-            .expect("selected model");
-        assert_eq!(selected.provider_id, "local");
-        assert_eq!(selected.model_id, "turbo");
-        assert!(wizard.sections[0].entries[0].is_active);
     }
 }

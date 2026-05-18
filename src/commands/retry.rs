@@ -69,7 +69,6 @@ pub async fn handle_retry(
     let selected_model = config::get_selected_model_entry().ok().flatten();
 
     if let Some(selected_model) = selected_model {
-
         // Load keywords
         let config_dir = dirs::config_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;

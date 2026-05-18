@@ -273,7 +273,10 @@ async fn fetch_registry_from_url(url: &str) -> anyhow::Result<Vec<RegistryEntry>
         .await
         .map_err(|error| anyhow::anyhow!("failed to parse remote model registry: {error}"))?;
     if document.version != 1 {
-        anyhow::bail!("unsupported remote model registry version: {}", document.version);
+        anyhow::bail!(
+            "unsupported remote model registry version: {}",
+            document.version
+        );
     }
     Ok(document.models)
 }
@@ -808,7 +811,10 @@ mod tests {
 
         assert_eq!(
             models_dir(),
-            home.join(".local").join("share").join("ostt").join("models")
+            home.join(".local")
+                .join("share")
+                .join("ostt")
+                .join("models")
         );
 
         if let Some(previous_home) = previous_home {
@@ -1111,7 +1117,9 @@ mod tests {
             .await
             .expect_err("legacy array shape should fail");
 
-        assert!(error.to_string().contains("failed to parse remote model registry"));
+        assert!(error
+            .to_string()
+            .contains("failed to parse remote model registry"));
     }
 
     #[tokio::test]
@@ -1127,7 +1135,9 @@ mod tests {
             .await
             .expect_err("unsupported version should fail");
 
-        assert!(error.to_string().contains("unsupported remote model registry version"));
+        assert!(error
+            .to_string()
+            .contains("unsupported remote model registry version"));
     }
 
     #[test]
@@ -1442,7 +1452,8 @@ mod tests {
             fs::write(model_files_dir().join("other.bin"), [1]).expect("write colliding model");
             let mut entry = registry_entry("other");
             entry.category = Some("custom".to_string());
-            let error = register_custom_model(entry).expect_err("unregistered collision should fail");
+            let error =
+                register_custom_model(entry).expect_err("unregistered collision should fail");
             assert!(error.to_string().contains("collision"));
 
             // Re-registering an already-registered ID (replacement) must succeed even

@@ -15,7 +15,9 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{
+        Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph,
+    },
 };
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};

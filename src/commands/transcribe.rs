@@ -66,7 +66,12 @@ pub async fn handle_transcribe(
         let api_key = config::get_api_key(provider.id())?.ok_or_else(|| {
             anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
         })?;
-        transcription::TranscriptionConfig::new(model, api_key, keywords, config_data.providers.clone())
+        transcription::TranscriptionConfig::new(
+            model,
+            api_key,
+            keywords,
+            config_data.providers.clone(),
+        )
     };
 
     // Transcribe

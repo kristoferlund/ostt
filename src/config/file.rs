@@ -291,7 +291,10 @@ impl LocalTranscriptionConfig {
 
         for (model_id, override_config) in &self.models {
             if !is_safe_local_model_id(model_id) {
-                anyhow::bail!("local model override key '{}' is not a safe model ID", model_id);
+                anyhow::bail!(
+                    "local model override key '{}' is not a safe model ID",
+                    model_id
+                );
             }
             override_config.validate()?;
         }
@@ -1189,10 +1192,7 @@ mod tests {
             ("temperature = -0.1", "temperature"),
             ("entropy_thold = -0.1", "entropy_thold"),
             ("no_speech_thold = 1.1", "no_speech_thold"),
-            (
-                "daemon_idle_timeout_secs = 29",
-                "daemon_idle_timeout_secs",
-            ),
+            ("daemon_idle_timeout_secs = 29", "daemon_idle_timeout_secs"),
         ];
 
         for (local_setting, expected_error) in cases {

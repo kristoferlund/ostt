@@ -520,33 +520,33 @@ async fn transcribe_recording_with_animation(
         )
     } else {
         let model = match transcription::TranscriptionModel::from_id(model_id) {
-        Some(m) => m,
-        None => {
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&format!("Error: Unknown model '{model_id}'"))?;
-            error_screen.cleanup()?;
-            return Err(anyhow::anyhow!("Unknown model: {model_id}"));
-        }
+            Some(m) => m,
+            None => {
+                tui.cleanup().ok();
+                let mut error_screen = ErrorScreen::new()?;
+                error_screen.show_error(&format!("Error: Unknown model '{model_id}'"))?;
+                error_screen.cleanup()?;
+                return Err(anyhow::anyhow!("Unknown model: {model_id}"));
+            }
         };
 
         let provider = model.provider();
 
         let api_key = match config::get_api_key(provider.id())? {
-        Some(key) => key,
-        None => {
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&format!(
-                "Error: No API key for {}. Please run 'ostt auth'",
-                provider.name()
-            ))?;
-            error_screen.cleanup()?;
-            return Err(anyhow::anyhow!(
+            Some(key) => key,
+            None => {
+                tui.cleanup().ok();
+                let mut error_screen = ErrorScreen::new()?;
+                error_screen.show_error(&format!(
+                    "Error: No API key for {}. Please run 'ostt auth'",
+                    provider.name()
+                ))?;
+                error_screen.cleanup()?;
+                return Err(anyhow::anyhow!(
                 "No API key found for provider '{}'. Please run 'ostt auth' to authorize this provider.",
                 provider.id()
             ));
-        }
+            }
         };
 
         let config_dir = dirs::config_dir()
@@ -555,7 +555,12 @@ async fn transcribe_recording_with_animation(
         let keywords_manager = KeywordsManager::new(&config_dir)?;
         let keywords = keywords_manager.load_keywords()?;
 
-        transcription::TranscriptionConfig::new(model, api_key, keywords, config_data.providers.clone())
+        transcription::TranscriptionConfig::new(
+            model,
+            api_key,
+            keywords,
+            config_data.providers.clone(),
+        )
     };
 
     tracing::debug!(

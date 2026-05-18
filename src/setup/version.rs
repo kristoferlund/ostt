@@ -291,10 +291,8 @@ type = "ai"
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let previous_home = std::env::var_os("HOME");
-        let dir = std::env::temp_dir().join(format!(
-            "ostt-config-migration-test-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("ostt-config-migration-test-{}", std::process::id()));
         let config_path = dir.join(".config").join("ostt").join("ostt.toml");
         let model_path = dir.join(".local").join("share").join("ostt").join("model");
         std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();

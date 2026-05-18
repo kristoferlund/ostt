@@ -198,7 +198,10 @@ pub(crate) fn legacy_selected_model_entry() -> anyhow::Result<Option<SelectedMod
     }))
 }
 
-fn save_transcription_selection(provider_id: Option<&str>, model_id: Option<&str>) -> anyhow::Result<()> {
+fn save_transcription_selection(
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+) -> anyhow::Result<()> {
     let config_path = get_config_path()?;
     if !config_path.exists() {
         let mut config = OsttConfig::default();
@@ -238,7 +241,7 @@ fn remove_toml_section(content: &str, section: &str) -> String {
         if skipping && trimmed.starts_with('[') && trimmed.ends_with(']') {
             // Stop skipping only at top-level sections, not subsections like
             // [transcription.local] which belong to the section being removed.
-            let is_subsection = trimmed.starts_with(&format!("[{section}.")); 
+            let is_subsection = trimmed.starts_with(&format!("[{section}."));
             if !is_subsection {
                 skipping = false;
             }
