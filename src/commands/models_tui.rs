@@ -10,10 +10,10 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Padding, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::fs;
 use std::io::{self, Stdout};
@@ -21,6 +21,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
+
+const BG: Color = Color::Rgb(0, 0, 0);
+const FG: Color = Color::Rgb(255, 255, 255);
+const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
+const HELP_FG: Color = Color::Rgb(100, 100, 100);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TuiModelEntry {
@@ -371,55 +376,85 @@ fn sync_download_mode(tui: &mut ModelTui, running: &RunningDownload) {
 }
 
 fn render_tui(frame: &mut Frame<'_>, tui: &ModelTui) {
+    let area = frame.area();
+
+    let padding_block = Block::default()
+        .padding(Padding::uniform(1))
+        .style(Style::default().bg(BG));
+    frame.render_widget(&padding_block, area);
+    let padded_area = padding_block.inner(area);
+
+    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+    frame.render_widget(&main_block, padded_area);
+    let inner_area = main_block.inner(padded_area);
+
     match &tui.mode {
-        TuiMode::Browse => render_browse(frame, tui),
-        TuiMode::Info { entry } => render_info(frame, entry),
-        TuiMode::ConfirmDelete { entry } => render_confirm_delete(frame, entry),
-        TuiMode::CustomModelInput { input } => {
-            render_custom_input(frame, input, tui.status_message.as_deref())
+        TuiMode::Browse => render_browse(frame, inner_area, tui),
+        TuiMode::Info { entry } => {
+            render_logo(frame, inner_area);
+            render_info(frame, entry);
         }
-        TuiMode::CustomModelConfirm { entry } => render_custom_confirm(frame, entry),
-        TuiMode::Downloading(state) => render_download(frame, state),
+        TuiMode::ConfirmDelete { entry } => {
+            render_logo(frame, inner_area);
+            render_confirm_delete(frame, entry);
+        }
+        TuiMode::CustomModelInput { input } => {
+            render_logo(frame, inner_area);
+            render_custom_input(frame, input, tui.status_message.as_deref());
+        }
+        TuiMode::CustomModelConfirm { entry } => {
+            render_logo(frame, inner_area);
+            render_custom_confirm(frame, entry);
+        }
+        TuiMode::Downloading(state) => {
+            render_logo(frame, inner_area);
+            render_download(frame, state);
+        }
     }
 }
 
-fn render_browse(frame: &mut Frame<'_>, tui: &ModelTui) {
-    let area = frame.area();
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(5),
-            Constraint::Length(3),
-        ])
-        .split(area);
-    let active = tui
-        .entries
-        .iter()
-        .find(|entry| entry.is_active)
-        .map(|entry| {
-            format!(
-                "Active model: {} ({})",
-                entry.name,
-                format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
-            )
-        })
-        .unwrap_or_else(|| "Active model: none".to_string());
-    frame.render_widget(
-        Paragraph::new(active).block(Block::default().title("OSTT Models").borders(Borders::ALL)),
-        chunks[0],
-    );
+fn render_logo(frame: &mut Frame<'_>, area: Rect) {
+    let [header_area, _] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+        .style(Style::default().fg(FG))
+        .alignment(Alignment::Left);
+    frame.render_widget(header, header_area);
+}
+
+fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &ModelTui) {
+    let [header_area, list_area, footer_area] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(5),
+        Constraint::Length(2),
+    ])
+    .areas(inner_area);
+
+    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+        .style(Style::default().fg(FG))
+        .alignment(Alignment::Left);
+    frame.render_widget(header, header_area);
 
     let mut items = Vec::new();
-    items.push(ListItem::new(Line::from(format!(
-        "Downloaded models: {} used",
+    let disk_line = format!(
+        "Downloaded: {} used",
         format_bytes(tui.disk_usage_bytes)
+    );
+    items.push(ListItem::new(Line::from(Span::styled(
+        disk_line,
+        Style::default().add_modifier(Modifier::BOLD),
     ))));
     for entry in tui.entries.iter().filter(|entry| entry.is_downloaded) {
         items.push(model_list_item(entry));
     }
     items.push(ListItem::new(Line::from("")));
-    items.push(ListItem::new(Line::from("Available to download:")));
+    items.push(ListItem::new(Line::from(Span::styled(
+        "Available to download:",
+        Style::default().add_modifier(Modifier::BOLD),
+    ))));
     for entry in tui.entries.iter().filter(|entry| !entry.is_downloaded) {
         items.push(model_list_item(entry));
     }
@@ -428,23 +463,29 @@ fn render_browse(frame: &mut Frame<'_>, tui: &ModelTui) {
     let mut state = ListState::default().with_selected(selected_display_index);
     frame.render_stateful_widget(
         List::new(items)
-            .block(Block::default().borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(" Local Models ")
+                    .borders(Borders::ALL),
+            )
             .highlight_style(
                 Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                    .bg(HIGHLIGHT_BG)
+                    .fg(FG),
             )
             .highlight_symbol("> "),
-        chunks[1],
+        list_area,
         &mut state,
     );
 
-    let status = tui.status_message.as_deref().unwrap_or(
-        "[↑↓] Nav  [Enter] Activate  [d] Download  [r] Remove  [i] Info  [c] Custom  [Esc/q] Quit",
-    );
+    let default_help =
+        "[↑↓] Nav  [Enter] Activate  [d] Download  [r] Remove  [i] Info  [c] Custom  [Esc/q] Quit";
+    let footer_text = tui.status_message.as_deref().unwrap_or(default_help);
     frame.render_widget(
-        Paragraph::new(status).block(Block::default().borders(Borders::ALL)),
-        chunks[2],
+        Paragraph::new(footer_text)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(HELP_FG)),
+        footer_area,
     );
 }
 
@@ -662,7 +703,9 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
-pub async fn handle_models_tui() -> anyhow::Result<()> {
+pub async fn handle_models_tui_with(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+) -> anyhow::Result<()> {
     let local_state = load_state();
     let registry = fetch_registry().await.unwrap_or_default();
     let selected_model = config::get_selected_model_entry()?;
@@ -674,7 +717,6 @@ pub async fn handle_models_tui() -> anyhow::Result<()> {
                 .to_string(),
         );
     }
-    let mut terminal = TerminalGuard::new()?;
     let mut running_download: Option<RunningDownload> = None;
 
     loop {
@@ -695,7 +737,7 @@ pub async fn handle_models_tui() -> anyhow::Result<()> {
                 }
             }
         }
-        terminal.terminal.draw(|frame| render_tui(frame, &tui))?;
+        terminal.draw(|frame| render_tui(frame, &tui))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
@@ -796,6 +838,11 @@ pub async fn handle_models_tui() -> anyhow::Result<()> {
         }
     }
     Ok(())
+}
+
+pub async fn handle_models_tui() -> anyhow::Result<()> {
+    let mut terminal = TerminalGuard::new()?;
+    handle_models_tui_with(&mut terminal.terminal).await
 }
 
 #[cfg(test)]

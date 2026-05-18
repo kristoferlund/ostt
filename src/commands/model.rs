@@ -11,15 +11,20 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::{Frame, Terminal};
 use std::collections::HashSet;
 use std::io::{self, Stdout};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+const BG: Color = Color::Rgb(0, 0, 0);
+const FG: Color = Color::Rgb(255, 255, 255);
+const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
+const HELP_FG: Color = Color::Rgb(100, 100, 100);
 
 #[derive(Debug, Clone)]
 pub enum ModelSelectionEntryKind {
@@ -76,9 +81,12 @@ pub struct ModelWizard {
     pub mode: ModelWizardMode,
     pub status_message: Option<String>,
     pub local_audio_warning: Option<String>,
+    pub notification: Option<(String, Instant)>,
 }
 
 pub async fn handle_model() -> anyhow::Result<()> {
+    let mut guard = TerminalGuard::new()?;
+
     loop {
         let authorized_provider_ids = config::get_authorized_providers()?;
         let local_state = load_local_selection_state()?;
@@ -95,9 +103,9 @@ pub async fn handle_model() -> anyhow::Result<()> {
             wizard.status_message = Some("Could not load remote Local registry".to_string());
         }
 
-        let action = run_model_wizard(&mut wizard).await?;
+        let action = run_model_wizard(&mut guard.terminal, &mut wizard).await?;
         if action == ModelWizardAction::ManageLocalModels {
-            models_tui::handle_models_tui().await?;
+            models_tui::handle_models_tui_with(&mut guard.terminal).await?;
             continue;
         }
         break;
@@ -113,6 +121,7 @@ impl ModelWizard {
             mode: ModelWizardMode::Browse,
             status_message: None,
             local_audio_warning,
+            notification: None,
         }
     }
 
@@ -159,13 +168,13 @@ impl ModelWizard {
         match &entry.kind {
             ModelSelectionEntryKind::Cloud { model } => {
                 save_cloud_selection(&entry.provider_id, model)?;
-                self.status_message = Some(format!("Activated {}", entry.name));
+                self.notification = Some((format!("Activated {}", entry.name), Instant::now()));
                 mark_active(&mut self.sections, &entry.provider_id, &entry.model_id);
                 Ok(ModelWizardAction::Continue)
             }
             ModelSelectionEntryKind::Local { is_downloaded, .. } if *is_downloaded => {
                 save_local_selection(&entry.model_id)?;
-                self.status_message = Some(format!("Activated {}", entry.name));
+                self.notification = Some((format!("Activated {}", entry.name), Instant::now()));
                 mark_active(&mut self.sections, "local", &entry.model_id);
                 Ok(ModelWizardAction::Continue)
             }
@@ -210,8 +219,10 @@ struct RunningDownload {
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
 }
 
-async fn run_model_wizard(wizard: &mut ModelWizard) -> anyhow::Result<ModelWizardAction> {
-    let mut terminal = TerminalGuard::new()?;
+async fn run_model_wizard(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    wizard: &mut ModelWizard,
+) -> anyhow::Result<ModelWizardAction> {
     let mut running_download: Option<RunningDownload> = None;
 
     loop {
@@ -233,7 +244,13 @@ async fn run_model_wizard(wizard: &mut ModelWizard) -> anyhow::Result<ModelWizar
             }
         }
 
-        terminal.terminal.draw(|frame| render_model_wizard(frame, wizard))?;
+        if let Some((_, start_time)) = &wizard.notification {
+            if start_time.elapsed() >= Duration::from_millis(750) {
+                wizard.notification = None;
+            }
+        }
+
+        terminal.draw(|frame| render_model_wizard(frame, wizard))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
@@ -495,28 +512,88 @@ fn format_bytes(bytes: u64) -> String {
 }
 
 fn render_model_wizard(frame: &mut Frame<'_>, wizard: &ModelWizard) {
+    let area = frame.area();
+
+    let padding_block = Block::default()
+        .padding(Padding::uniform(1))
+        .style(Style::default().bg(BG));
+    frame.render_widget(&padding_block, area);
+    let padded_area = padding_block.inner(area);
+
+    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+    frame.render_widget(&main_block, padded_area);
+    let inner_area = main_block.inner(padded_area);
+
     match &wizard.mode {
-        ModelWizardMode::Browse => render_browse(frame, wizard),
-        ModelWizardMode::ConfirmDownload { entry } => render_confirm_download(frame, entry),
-        ModelWizardMode::Downloading(state) => render_download(frame, state),
+        ModelWizardMode::Browse => render_browse(frame, inner_area, wizard),
+        ModelWizardMode::ConfirmDownload { entry } => {
+            render_logo(frame, inner_area);
+            render_confirm_download(frame, entry);
+        }
+        ModelWizardMode::Downloading(state) => {
+            render_logo(frame, inner_area);
+            render_download(frame, state);
+        }
+    }
+
+    if let Some((message, _)) = &wizard.notification {
+        render_notification(frame, area, message);
     }
 }
 
-fn render_browse(frame: &mut Frame<'_>, wizard: &ModelWizard) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Min(5),
-            Constraint::Length(4),
-        ])
-        .split(frame.area());
+fn render_notification(frame: &mut Frame<'_>, screen_area: Rect, message: &str) {
+    let modal_width = (message.len() as u16).saturating_add(4);
+    let modal_height = 3;
 
-    frame.render_widget(
-        Paragraph::new("Choose transcription model")
-            .block(Block::default().title("OSTT Model").borders(Borders::ALL)),
-        chunks[0],
-    );
+    let modal_x = screen_area.x + (screen_area.width.saturating_sub(modal_width)) / 2;
+    let modal_y = screen_area.y + (screen_area.height.saturating_sub(modal_height)) / 2;
+
+    let modal_area = Rect {
+        x: modal_x,
+        y: modal_y,
+        width: modal_width.min(screen_area.width),
+        height: modal_height,
+    };
+
+    let modal_block = Block::default()
+        .borders(Borders::ALL)
+        .style(Style::default().bg(Color::Green).fg(Color::Black));
+
+    frame.render_widget(Clear, modal_area);
+    frame.render_widget(&modal_block, modal_area);
+
+    let inner_area = modal_block.inner(modal_area);
+    let notification_text = Paragraph::new(message)
+        .style(Style::default().bg(Color::Green).fg(Color::Black))
+        .alignment(Alignment::Center);
+
+    frame.render_widget(notification_text, inner_area);
+}
+
+fn render_logo(frame: &mut Frame<'_>, area: Rect) {
+    let [header_area, _] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(0),
+    ])
+    .areas(area);
+    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+        .style(Style::default().fg(FG))
+        .alignment(Alignment::Left);
+    frame.render_widget(header, header_area);
+}
+
+fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, wizard: &ModelWizard) {
+    let [header_area, list_area, footer_area] = Layout::vertical([
+        Constraint::Length(3),
+        Constraint::Min(5),
+        Constraint::Length(2),
+    ])
+    .areas(inner_area);
+
+    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+        .style(Style::default().fg(FG))
+        .alignment(Alignment::Left);
+    frame.render_widget(header, header_area);
 
     let mut items = Vec::new();
     let mut display_index = 0_usize;
@@ -543,29 +620,33 @@ fn render_browse(frame: &mut Frame<'_>, wizard: &ModelWizard) {
     let mut state = ListState::default().with_selected(selected_display_index);
     frame.render_stateful_widget(
         List::new(items)
-            .block(Block::default().borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title(" Model ")
+                    .borders(Borders::ALL),
+            )
             .highlight_style(
                 Style::default()
-                    .fg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD),
+                    .bg(HIGHLIGHT_BG)
+                    .fg(FG),
             )
             .highlight_symbol("> "),
-        chunks[1],
+        list_area,
         &mut state,
     );
 
-    let mut footer = wizard.status_message.clone().unwrap_or_else(|| {
-        "[↑↓] Navigate  [Enter] Select  [m] Manage local  [Esc/q] Quit".to_string()
-    });
-    if let Some(warning) = &wizard.local_audio_warning {
-        footer.push('\n');
-        footer.push_str(warning);
-    }
+    let default_help = "[↑↓] Navigate  [Enter] Select  [m] Manage local  [Esc/q] Quit".to_string();
+    let help_text = wizard.status_message.clone().unwrap_or(default_help);
+    let footer_text = if let Some(warning) = &wizard.local_audio_warning {
+        format!("{}\n{}", help_text, warning)
+    } else {
+        help_text
+    };
     frame.render_widget(
-        Paragraph::new(footer)
-            .block(Block::default().borders(Borders::ALL))
-            .wrap(Wrap { trim: false }),
-        chunks[2],
+        Paragraph::new(footer_text)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(HELP_FG)),
+        footer_area,
     );
 }
 

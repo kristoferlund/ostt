@@ -14,7 +14,7 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, Borders, Clear, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
 };
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
@@ -81,7 +81,7 @@ impl HistoryViewer {
 
             // Check if notification has expired
             if let Some((_, start_time)) = self.notification {
-                if start_time.elapsed() >= Duration::from_millis(500) {
+                if start_time.elapsed() >= Duration::from_millis(750) {
                     self.notification = None;
                     if selected_text.is_some() {
                         break; // Exit after showing notification
@@ -291,6 +291,7 @@ impl HistoryViewer {
             .borders(Borders::ALL)
             .style(Style::default().bg(Color::Green).fg(Color::Black));
 
+        frame.render_widget(Clear, modal_area);
         frame.render_widget(&modal_block, modal_area);
 
         let inner_area = modal_block.inner(modal_area);
