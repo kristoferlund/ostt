@@ -9,6 +9,10 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+fn current_config_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Visualization type for recording display.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -774,10 +778,23 @@ impl ProcessConfig {
     }
 }
 
+/// Active transcription provider/model selection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptionSelectionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 /// Complete application configuration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OsttConfig {
+    #[serde(default = "current_config_version")]
+    pub config_version: String,
     pub audio: AudioConfig,
+    #[serde(default)]
+    pub transcription: TranscriptionSelectionConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
     #[serde(default)]
@@ -821,6 +838,7 @@ impl OsttConfig {
     #[allow(dead_code)]
     pub(crate) fn default() -> Self {
         OsttConfig {
+            config_version: current_config_version(),
             audio: AudioConfig {
                 device: "default".to_string(),
                 sample_rate: 16000,
@@ -829,6 +847,7 @@ impl OsttConfig {
                 output_format: default_output_format(),
                 visualization: VisualizationType::default(),
             },
+            transcription: TranscriptionSelectionConfig::default(),
             providers: ProvidersConfig::default(),
             process: ProcessConfig::default(),
             popup: PopupConfig::default(),
@@ -843,7 +862,7 @@ impl OsttConfig {
 /// # Errors
 /// - If the config directory cannot be determined
 /// - If the config directory cannot be created
-fn get_config_path() -> Result<PathBuf, std::io::Error> {
+pub(crate) fn get_config_path() -> Result<PathBuf, std::io::Error> {
     let config_dir = dirs::home_dir().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,

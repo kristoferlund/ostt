@@ -53,6 +53,11 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
                 })?;
             }
 
+            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
+                tracing::error!("Config migration failed: {e}");
+                anyhow!("Config migration failed: {e}")
+            })?;
+
             crate::setup::version::update_config_version(&config_path).map_err(|e| {
                 tracing::error!("Failed to update config version: {e}");
                 anyhow!("Failed to update config version: {e}")
@@ -64,6 +69,10 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
         }
         None => {
             // Config exists and version matches, no setup needed
+            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
+                tracing::error!("Config migration failed: {e}");
+                anyhow!("Config migration failed: {e}")
+            })?;
             tracing::debug!("Config version up to date ({})", env!("CARGO_PKG_VERSION"));
         }
     }

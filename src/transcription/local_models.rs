@@ -32,6 +32,12 @@ pub struct RegistryEntry {
     pub category: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct RegistryDocument {
+    version: u32,
+    models: Vec<RegistryEntry>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalModelState {
     pub version: u32,
@@ -171,12 +177,13 @@ pub fn validate_downloaded_model(entry: &RegistryEntry) -> anyhow::Result<()> {
     }
 
     if entry.size_mb > 0 {
-        let expected_bytes = u64::from(entry.size_mb) * 1024 * 1024;
-        if metadata.len() != expected_bytes {
+        let actual_size_mb = bytes_to_mb(metadata.len());
+        if actual_size_mb != entry.size_mb {
             anyhow::bail!(
-                "downloaded model size mismatch for {}: expected {} bytes, got {} bytes",
+                "downloaded model size mismatch for {}: expected approximately {} MB, got {} MB ({} bytes)",
                 entry.id,
-                expected_bytes,
+                entry.size_mb,
+                actual_size_mb,
                 metadata.len()
             );
         }
@@ -241,10 +248,14 @@ async fn fetch_registry_from_url(url: &str) -> anyhow::Result<Vec<RegistryEntry>
         anyhow::bail!("failed to fetch remote model registry: HTTP {status}");
     }
 
-    response
-        .json::<Vec<RegistryEntry>>()
+    let document = response
+        .json::<RegistryDocument>()
         .await
-        .map_err(|error| anyhow::anyhow!("failed to parse remote model registry: {error}"))
+        .map_err(|error| anyhow::anyhow!("failed to parse remote model registry: {error}"))?;
+    if document.version != 1 {
+        anyhow::bail!("unsupported remote model registry version: {}", document.version);
+    }
+    Ok(document.models)
 }
 
 pub async fn download_model(
@@ -359,10 +370,19 @@ pub fn load_state() -> LocalModelState {
         return LocalModelState::default();
     }
 
-    fs::read_to_string(&path)
+    let mut state: LocalModelState = fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    state.custom_models.retain(|entry| !is_test_placeholder_model(entry));
+    state
+}
+
+fn is_test_placeholder_model(entry: &RegistryEntry) -> bool {
+    entry.id == "custom"
+        && entry.name == "Test Model"
+        && entry.description == "Test model"
+        && entry.url == "https://example.com/custom.bin"
 }
 
 async fn resolve_direct_model_file_url(url: Url) -> anyhow::Result<RegistryEntry> {
@@ -549,7 +569,11 @@ pub fn load_custom_model_entries() -> Result<Vec<RegistryEntry>, ModelError> {
 }
 
 pub fn resolve_installed_model_path(model_id: &str) -> Result<PathBuf, ModelError> {
-    let entry = find_model_entry(model_id)?;
+    let entry = match find_model_entry(model_id) {
+        Ok(entry) => entry,
+        Err(ModelError::NotFound(_)) => return find_installed_file_by_id(model_id),
+        Err(error) => return Err(error),
+    };
     let path = model_files_dir().join(model_filename(&entry.id, &entry.url));
 
     if path.exists() {
@@ -557,6 +581,22 @@ pub fn resolve_installed_model_path(model_id: &str) -> Result<PathBuf, ModelErro
     } else {
         Err(ModelError::NotDownloaded(model_id.to_string()))
     }
+}
+
+fn find_installed_file_by_id(model_id: &str) -> Result<PathBuf, ModelError> {
+    if !is_safe_model_id(model_id) {
+        return Err(ModelError::NotFound(model_id.to_string()));
+    }
+
+    let files_dir = model_files_dir();
+    for extension in ["bin", "gguf"] {
+        let path = files_dir.join(format!("{model_id}.{extension}"));
+        if path.exists() {
+            return Ok(path);
+        }
+    }
+
+    Err(ModelError::NotDownloaded(model_id.to_string()))
 }
 
 pub fn activate_model(model_id: &str) -> anyhow::Result<()> {
@@ -659,8 +699,8 @@ mod tests {
     fn registry_entry(id: &str) -> RegistryEntry {
         RegistryEntry {
             id: id.to_string(),
-            name: "Test Model".to_string(),
-            description: "Test model".to_string(),
+            name: format!("{id} model"),
+            description: format!("{id} model description"),
             languages: vec!["en".to_string()],
             size_mb: 1,
             url: format!("https://example.com/{id}.bin"),
@@ -981,7 +1021,20 @@ mod tests {
         with_isolated_data_dir(|_| {
             let error = resolve_installed_model_path("missing").expect_err("missing model");
 
-            assert!(matches!(error, ModelError::NotFound(model) if model == "missing"));
+            assert!(matches!(error, ModelError::NotDownloaded(model) if model == "missing"));
+        });
+    }
+
+    #[test]
+    fn resolve_installed_model_path_falls_back_to_id_derived_file() {
+        with_isolated_data_dir(|_| {
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            let path = model_files_dir().join("tiny.bin");
+            fs::write(&path, [1]).expect("write model file");
+
+            let resolved = resolve_installed_model_path("tiny").expect("resolve installed file");
+
+            assert_eq!(resolved, path);
         });
     }
 
@@ -1001,13 +1054,70 @@ mod tests {
 
     #[tokio::test]
     async fn fetch_registry_from_url_parses_registry_entries() {
-        let body = serde_json::to_vec(&vec![registry_entry("turbo")]).expect("serialize registry");
+        let body = serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "models": [registry_entry("turbo")]
+        }))
+        .expect("serialize registry");
         let url = serve_once("200 OK", "application/json", body);
 
         let registry = fetch_registry_from_url(&url).await.expect("fetch registry");
 
         assert_eq!(registry.len(), 1);
         assert_eq!(registry[0].id, "turbo");
+    }
+
+    #[tokio::test]
+    async fn fetch_registry_from_url_rejects_legacy_array_shape() {
+        let body = serde_json::to_vec(&vec![registry_entry("turbo")]).expect("serialize registry");
+        let url = serve_once("200 OK", "application/json", body);
+
+        let error = fetch_registry_from_url(&url)
+            .await
+            .expect_err("legacy array shape should fail");
+
+        assert!(error.to_string().contains("failed to parse remote model registry"));
+    }
+
+    #[tokio::test]
+    async fn fetch_registry_from_url_rejects_unsupported_version() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "version": 2,
+            "models": [registry_entry("turbo")]
+        }))
+        .expect("serialize registry");
+        let url = serve_once("200 OK", "application/json", body);
+
+        let error = fetch_registry_from_url(&url)
+            .await
+            .expect_err("unsupported version should fail");
+
+        assert!(error.to_string().contains("unsupported remote model registry version"));
+    }
+
+    #[test]
+    fn load_state_filters_test_placeholder_model() {
+        with_isolated_data_dir(|_| {
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![RegistryEntry {
+                    id: "custom".to_string(),
+                    name: "Test Model".to_string(),
+                    description: "Test model".to_string(),
+                    languages: vec!["en".to_string()],
+                    size_mb: 1,
+                    url: "https://example.com/custom.bin".to_string(),
+                    recommended_hardware: None,
+                    sha256: None,
+                    category: None,
+                }],
+            };
+            save_state(&state).expect("save placeholder state");
+
+            let loaded = load_state();
+
+            assert!(loaded.custom_models.is_empty());
+        });
     }
 
     #[tokio::test]
@@ -1141,13 +1251,26 @@ mod tests {
     fn validate_downloaded_model_reports_size_mismatch() {
         with_isolated_data_dir(|_| {
             let mut entry = registry_entry("custom");
-            entry.size_mb = 1;
+            entry.size_mb = 2;
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             fs::write(model_destination(&entry), [1]).expect("write model file");
 
             let error = validate_downloaded_model(&entry).expect_err("size mismatch should fail");
 
             assert!(error.to_string().contains("size mismatch"));
+        });
+    }
+
+    #[test]
+    fn validate_downloaded_model_accepts_rounded_display_size() {
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("custom");
+            entry.size_mb = 75;
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), vec![0_u8; 77_691_713])
+                .expect("write rounded-size model file");
+
+            validate_downloaded_model(&entry).expect("validate rounded size");
         });
     }
 

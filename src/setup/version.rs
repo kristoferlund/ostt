@@ -8,6 +8,8 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::path::Path;
 
+use crate::transcription::TranscriptionModel;
+
 /// Current application version from Cargo.toml
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -164,9 +166,75 @@ pub fn update_config_version(config_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn run_config_migrations(config_path: &Path) -> anyhow::Result<()> {
+    if !config_path.exists() {
+        return Ok(());
+    }
+
+    migrate_selected_model_to_transcription_config(config_path)
+}
+
+fn migrate_selected_model_to_transcription_config(config_path: &Path) -> anyhow::Result<()> {
+    let content = std::fs::read_to_string(config_path)?;
+    let mut config: toml::Value = toml::from_str(&content)?;
+
+    let has_selection = config
+        .get("transcription")
+        .and_then(|section| section.as_table())
+        .is_some_and(|section| section.get("provider").is_some() && section.get("model").is_some());
+    if has_selection {
+        return Ok(());
+    }
+
+    let Some(selected) = read_legacy_selected_model()? else {
+        return Ok(());
+    };
+
+    let table = config
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("config root must be a TOML table"))?;
+    let transcription = table
+        .entry("transcription")
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()));
+    let transcription = transcription
+        .as_table_mut()
+        .ok_or_else(|| anyhow!("[transcription] must be a TOML table"))?;
+    transcription.insert("provider".to_string(), toml::Value::String(selected.0));
+    transcription.insert("model".to_string(), toml::Value::String(selected.1));
+
+    std::fs::write(config_path, toml::to_string_pretty(&config)?)?;
+    Ok(())
+}
+
+fn read_legacy_selected_model() -> anyhow::Result<Option<(String, String)>> {
+    let Some(home) = dirs::home_dir() else {
+        return Ok(None);
+    };
+    let model_file = home.join(".local").join("share").join("ostt").join("model");
+    if !model_file.exists() {
+        return Ok(None);
+    }
+
+    let content = std::fs::read_to_string(model_file)?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    if let Ok(selected) = serde_json::from_str::<crate::config::SelectedModel>(trimmed) {
+        return Ok(Some((selected.provider_id, selected.model_id)));
+    }
+
+    let provider_id = TranscriptionModel::from_id(trimmed)
+        .map(|model| model.provider().id().to_string())
+        .unwrap_or_else(|| "local".to_string());
+    Ok(Some((provider_id, trimmed.to_string())))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transcription::local_models::TEST_ENV_LOCK;
 
     #[test]
     fn test_semantic_version_parse() {
@@ -215,5 +283,47 @@ type = "ai"
         assert!(updated.starts_with(&format!(r#"config_version = "{}""#, CURRENT_VERSION)));
         assert!(updated.contains("[process.actions.caveman]"));
         assert!(updated.contains(r#"name = "Caveman speak""#));
+    }
+
+    #[test]
+    fn run_config_migrations_moves_legacy_model_file_to_transcription_section() {
+        let _guard = TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous_home = std::env::var_os("HOME");
+        let dir = std::env::temp_dir().join(format!(
+            "ostt-config-migration-test-{}",
+            std::process::id()
+        ));
+        let config_path = dir.join(".config").join("ostt").join("ostt.toml");
+        let model_path = dir.join(".local").join("share").join("ostt").join("model");
+        std::fs::create_dir_all(config_path.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(model_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config_path,
+            r#"config_version = "0.0.10"
+
+[audio]
+device = "default"
+sample_rate = 16000
+"#,
+        )
+        .unwrap();
+        std::fs::write(&model_path, "nova-3").unwrap();
+        std::env::set_var("HOME", &dir);
+
+        run_config_migrations(&config_path).unwrap();
+
+        let migrated = std::fs::read_to_string(&config_path).unwrap();
+        assert!(migrated.contains("[transcription]"));
+        assert!(migrated.contains(r#"provider = "deepgram""#));
+        assert!(migrated.contains(r#"model = "nova-3""#));
+
+        if let Some(previous_home) = previous_home {
+            std::env::set_var("HOME", previous_home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

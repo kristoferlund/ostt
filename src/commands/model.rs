@@ -970,6 +970,12 @@ mod tests {
 
         save_cloud_selection("openai", &TranscriptionModel::Whisper)
             .expect("save cloud selection");
+        let config = config::OsttConfig::load().expect("load config");
+        assert_eq!(config.transcription.provider.as_deref(), Some("openai"));
+        assert_eq!(
+            config.transcription.model.as_deref(),
+            Some(TranscriptionModel::Whisper.id())
+        );
         let selected = config::get_selected_model_entry()
             .expect("load selection")
             .expect("selected cloud model");

@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
+use crate::config::file::OsttConfig;
 use crate::transcription::model::TranscriptionModel;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -134,47 +135,48 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
 
 /// Saves the selected model globally (only ONE model is selected at a time).
 ///
-/// Stores the model selection in ~/.local/share/ostt/model with restricted permissions (0600).
-/// This keeps the user's ostt.toml config file unmodified.
-/// Only the model_id is stored (the provider can be inferred from the model_id).
+/// Stores provider/model selection in the main config file under `[transcription]`.
+/// The legacy `~/.local/share/ostt/model` file is still read as a fallback.
 ///
 /// # Errors
 /// - If the secrets directory cannot be determined or created
 /// - If the model file cannot be written
 pub fn save_selected_model(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
-    let secrets_dir = get_secrets_dir()?;
-    let model_file = secrets_dir.join("model");
-
-    let selected_model = SelectedModel {
-        provider_id: provider_id.to_string(),
-        model_id: model_id.to_string(),
-    };
-    let content = serde_json::to_string(&selected_model)?;
-    fs::write(&model_file, content)?;
-
-    #[cfg(unix)]
-    {
-        use std::fs::Permissions;
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&model_file, Permissions::from_mode(0o600))?;
-    }
+    let mut config = load_config_for_selection();
+    config.transcription.provider = Some(provider_id.to_string());
+    config.transcription.model = Some(model_id.to_string());
+    config.save()?;
 
     tracing::info!("Model selected: {}", model_id);
     Ok(())
 }
 
 pub fn clear_selected_model() -> anyhow::Result<()> {
-    let secrets_dir = get_secrets_dir()?;
-    let model_file = secrets_dir.join("model");
-
-    if model_file.exists() {
-        fs::remove_file(model_file)?;
-    }
+    let mut config = load_config_for_selection();
+    config.transcription.provider = None;
+    config.transcription.model = None;
+    config.save()?;
 
     Ok(())
 }
 
 pub fn get_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
+    if let Ok(config) = OsttConfig::load() {
+        if let (Some(provider_id), Some(model_id)) = (
+            config.transcription.provider.as_deref(),
+            config.transcription.model.as_deref(),
+        ) {
+            return Ok(Some(SelectedModel {
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+            }));
+        }
+    }
+
+    legacy_selected_model_entry()
+}
+
+pub(crate) fn legacy_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
     let secrets_dir = get_secrets_dir()?;
     let model_file = secrets_dir.join("model");
 
@@ -200,6 +202,10 @@ pub fn get_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
         provider_id,
         model_id: trimmed.to_string(),
     }))
+}
+
+fn load_config_for_selection() -> OsttConfig {
+    OsttConfig::load().unwrap_or_else(|_| OsttConfig::default())
 }
 
 /// Retrieves the currently selected model.
