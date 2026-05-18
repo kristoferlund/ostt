@@ -797,8 +797,14 @@ mod tests {
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn with_isolated_models_dir(test: impl FnOnce(PathBuf)) {
-        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = test_env_lock();
         let previous = std::env::var_os("OSTT_MODELS_DIR");
         let previous_home = std::env::var_os("HOME");
         let unique = SystemTime::now()

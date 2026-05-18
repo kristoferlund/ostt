@@ -516,13 +516,17 @@ fn safe_id_from_filename(filename: &str) -> anyhow::Result<String> {
 
 async fn remote_size_mb(url: &str) -> anyhow::Result<u32> {
     let response = reqwest::Client::new().head(url).send().await?;
-    let bytes = response.content_length().or_else(|| {
+    let header_bytes = || {
         response
             .headers()
             .get(reqwest::header::CONTENT_LENGTH)
             .and_then(|value| value.to_str().ok())
             .and_then(|value| value.parse().ok())
-    });
+    };
+    let bytes = response
+        .content_length()
+        .filter(|bytes| *bytes > 0)
+        .or_else(header_bytes);
     Ok(bytes.map(bytes_to_mb).unwrap_or(0))
 }
 
@@ -618,8 +622,14 @@ mod tests {
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     fn with_isolated_data_dir(test: impl FnOnce(PathBuf)) {
-        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = test_env_lock();
         let previous = env::var_os("OSTT_MODELS_DIR");
         let previous_home = env::var_os("HOME");
         let unique = SystemTime::now()
@@ -1143,7 +1153,7 @@ mod tests {
 
     #[tokio::test]
     async fn download_model_replaces_existing_file_without_activating() {
-        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = test_env_lock();
         let previous = env::var_os("OSTT_MODELS_DIR");
         let previous_home = env::var_os("HOME");
 
@@ -1210,7 +1220,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn direct_model_file_url_resolves_to_custom_entry() {
-        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = test_env_lock();
         let previous = env::var_os("OSTT_MODELS_DIR");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1246,7 +1256,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn hugging_face_page_resolution_selects_compatible_file() {
-        let _guard = TEST_ENV_LOCK.lock().expect("test env lock poisoned");
+        let _guard = test_env_lock();
         let previous = env::var_os("OSTT_MODELS_DIR");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
