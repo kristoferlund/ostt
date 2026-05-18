@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-use crate::config::file::OsttConfig;
+use crate::config::file::{get_config_path, OsttConfig};
 use crate::transcription::model::TranscriptionModel;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -142,20 +142,14 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
 /// - If the secrets directory cannot be determined or created
 /// - If the model file cannot be written
 pub fn save_selected_model(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
-    let mut config = load_config_for_selection();
-    config.transcription.provider = Some(provider_id.to_string());
-    config.transcription.model = Some(model_id.to_string());
-    config.save()?;
+    save_transcription_selection(Some(provider_id), Some(model_id))?;
 
     tracing::info!("Model selected: {}", model_id);
     Ok(())
 }
 
 pub fn clear_selected_model() -> anyhow::Result<()> {
-    let mut config = load_config_for_selection();
-    config.transcription.provider = None;
-    config.transcription.model = None;
-    config.save()?;
+    save_transcription_selection(None, None)?;
 
     Ok(())
 }
@@ -204,8 +198,82 @@ pub(crate) fn legacy_selected_model_entry() -> anyhow::Result<Option<SelectedMod
     }))
 }
 
-fn load_config_for_selection() -> OsttConfig {
-    OsttConfig::load().unwrap_or_else(|_| OsttConfig::default())
+fn save_transcription_selection(provider_id: Option<&str>, model_id: Option<&str>) -> anyhow::Result<()> {
+    let config_path = get_config_path()?;
+    if !config_path.exists() {
+        let mut config = OsttConfig::default();
+        config.transcription.provider = provider_id.map(ToString::to_string);
+        config.transcription.model = model_id.map(ToString::to_string);
+        return config.save();
+    }
+
+    let content = fs::read_to_string(&config_path)?;
+    let without_transcription = remove_toml_section(&content, "transcription");
+    let updated = match (provider_id, model_id) {
+        (Some(provider_id), Some(model_id)) => insert_transcription_section(
+            &without_transcription,
+            &format!(
+                "[transcription]\nprovider = {}\nmodel = {}\n",
+                toml_basic_string(provider_id),
+                toml_basic_string(model_id)
+            ),
+        ),
+        _ => without_transcription,
+    };
+    fs::write(config_path, updated)?;
+    Ok(())
+}
+
+fn remove_toml_section(content: &str, section: &str) -> String {
+    let header = format!("[{section}]");
+    let mut output = Vec::new();
+    let mut skipping = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == header {
+            skipping = true;
+            continue;
+        }
+        if skipping && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            skipping = false;
+        }
+        if !skipping {
+            output.push(line);
+        }
+    }
+
+    trim_extra_blank_lines(&output.join("\n"))
+}
+
+fn insert_transcription_section(content: &str, section: &str) -> String {
+    let mut lines: Vec<&str> = content.lines().collect();
+    let insert_at = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+    let mut section_lines: Vec<&str> = section.trim_end().lines().collect();
+    section_lines.push("");
+    lines.splice(insert_at..insert_at, section_lines);
+    format!("{}\n", trim_extra_blank_lines(&lines.join("\n")))
+}
+
+fn trim_extra_blank_lines(content: &str) -> String {
+    let mut output = Vec::new();
+    let mut previous_blank = false;
+    for line in content.lines() {
+        let blank = line.trim().is_empty();
+        if blank && previous_blank {
+            continue;
+        }
+        output.push(line);
+        previous_blank = blank;
+    }
+    output.join("\n").trim().to_string()
+}
+
+fn toml_basic_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// Retrieves the currently selected model.

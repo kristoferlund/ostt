@@ -86,11 +86,19 @@ impl ModelTui {
     }
 
     pub fn selected_entry(&self) -> Option<&TuiModelEntry> {
-        self.entries.get(self.selected)
+        self.display_entries().get(self.selected).copied()
+    }
+
+    pub fn display_entries(&self) -> Vec<&TuiModelEntry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.is_downloaded)
+            .chain(self.entries.iter().filter(|entry| !entry.is_downloaded))
+            .collect()
     }
 
     pub fn move_selection_down(&mut self) {
-        if self.selected + 1 < self.entries.len() {
+        if self.selected + 1 < self.display_entries().len() {
             self.selected += 1;
         }
     }
@@ -135,8 +143,9 @@ impl ModelTui {
         let selected_model = config::get_selected_model_entry()?;
         self.entries = build_model_list(local_state, registry, selected_model.as_ref());
         self.disk_usage_bytes = disk_usage_bytes(&self.entries);
-        if self.selected >= self.entries.len() {
-            self.selected = self.entries.len().saturating_sub(1);
+        let display_len = self.display_entries().len();
+        if self.selected >= display_len {
+            self.selected = display_len.saturating_sub(1);
         }
         Ok(())
     }
@@ -415,7 +424,7 @@ fn render_browse(frame: &mut Frame<'_>, tui: &ModelTui) {
         items.push(model_list_item(entry));
     }
 
-    let selected_display_index = display_index_for_selection(&tui.entries, tui.selected);
+    let selected_display_index = display_index_for_selection(tui);
     let mut state = ListState::default().with_selected(selected_display_index);
     frame.render_stateful_widget(
         List::new(items)
@@ -454,17 +463,17 @@ fn model_list_item(entry: &TuiModelEntry) -> ListItem<'_> {
     )))
 }
 
-fn display_index_for_selection(entries: &[TuiModelEntry], selected: usize) -> Option<usize> {
-    let selected_entry = entries.get(selected)?;
+fn display_index_for_selection(tui: &ModelTui) -> Option<usize> {
+    let selected_entry = tui.selected_entry()?;
     let mut index = 1;
-    for entry in entries.iter().filter(|entry| entry.is_downloaded) {
+    for entry in tui.entries.iter().filter(|entry| entry.is_downloaded) {
         if entry.id == selected_entry.id {
             return Some(index);
         }
         index += 1;
     }
     index += 2;
-    for entry in entries.iter().filter(|entry| !entry.is_downloaded) {
+    for entry in tui.entries.iter().filter(|entry| !entry.is_downloaded) {
         if entry.id == selected_entry.id {
             return Some(index);
         }
@@ -792,7 +801,7 @@ pub async fn handle_models_tui() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription::local_models::{model_files_dir, TEST_ENV_LOCK};
+    use crate::transcription::local_models::{model_files_dir, set_test_models_dir, TEST_ENV_LOCK};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -805,7 +814,6 @@ mod tests {
 
     fn with_isolated_models_dir(test: impl FnOnce(PathBuf)) {
         let _guard = test_env_lock();
-        let previous = std::env::var_os("OSTT_MODELS_DIR");
         let previous_home = std::env::var_os("HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -813,16 +821,12 @@ mod tests {
             .as_nanos();
         let dir = std::env::temp_dir().join(format!("ostt-models-tui-test-{unique}"));
         let models_dir = dir.join("models");
-        std::env::set_var("OSTT_MODELS_DIR", &models_dir);
+        set_test_models_dir(Some(models_dir.clone()));
         std::env::set_var("HOME", &dir);
 
         test(models_dir);
 
-        if let Some(previous) = previous {
-            std::env::set_var("OSTT_MODELS_DIR", previous);
-        } else {
-            std::env::remove_var("OSTT_MODELS_DIR");
-        }
+        set_test_models_dir(None);
         if let Some(previous_home) = previous_home {
             std::env::set_var("HOME", previous_home);
         } else {
@@ -939,6 +943,63 @@ mod tests {
         tui.move_selection_down();
         tui.move_selection_down();
         assert_eq!(tui.selected, 1);
+    }
+
+    #[test]
+    fn selection_navigation_uses_rendered_group_order() {
+        let entries = vec![
+            TuiModelEntry {
+                id: "tiny".to_string(),
+                name: "Tiny".to_string(),
+                description: String::new(),
+                size_mb: 1,
+                is_downloaded: false,
+                is_active: false,
+                is_available_in_registry: true,
+                languages: Vec::new(),
+                url: "https://example.com/tiny.bin".to_string(),
+                recommended_hardware: None,
+                category: None,
+            },
+            TuiModelEntry {
+                id: "turbo".to_string(),
+                name: "Turbo".to_string(),
+                description: String::new(),
+                size_mb: 1,
+                is_downloaded: true,
+                is_active: false,
+                is_available_in_registry: true,
+                languages: Vec::new(),
+                url: "https://example.com/turbo.bin".to_string(),
+                recommended_hardware: None,
+                category: None,
+            },
+            TuiModelEntry {
+                id: "large-v3".to_string(),
+                name: "Large".to_string(),
+                description: String::new(),
+                size_mb: 1,
+                is_downloaded: false,
+                is_active: false,
+                is_available_in_registry: true,
+                languages: Vec::new(),
+                url: "https://example.com/large-v3.bin".to_string(),
+                recommended_hardware: None,
+                category: None,
+            },
+        ];
+        let mut tui = ModelTui::new(entries, 0);
+
+        assert_eq!(tui.selected_entry().expect("selected").id, "turbo");
+        assert_eq!(display_index_for_selection(&tui), Some(1));
+
+        tui.move_selection_down();
+        assert_eq!(tui.selected_entry().expect("selected").id, "tiny");
+        assert_eq!(display_index_for_selection(&tui), Some(4));
+
+        tui.move_selection_down();
+        assert_eq!(tui.selected_entry().expect("selected").id, "large-v3");
+        assert_eq!(display_index_for_selection(&tui), Some(5));
     }
 
     #[test]

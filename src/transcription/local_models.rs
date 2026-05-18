@@ -9,6 +9,16 @@ use std::time::{Instant, SystemTime};
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+#[cfg(test)]
+static TEST_MODELS_DIR: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+#[cfg(test)]
+pub(crate) fn set_test_models_dir(path: Option<PathBuf>) {
+    *TEST_MODELS_DIR
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = path;
+}
+
 use futures_util::StreamExt;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -56,12 +66,21 @@ impl Default for LocalModelState {
 
 /// Returns the directory where local transcription models are stored.
 pub fn models_dir() -> PathBuf {
-    if let Some(path) = std::env::var_os("OSTT_MODELS_DIR") {
-        return PathBuf::from(path);
+    #[cfg(test)]
+    if let Some(path) = TEST_MODELS_DIR
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clone()
+    {
+        return path;
     }
 
-    let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share"));
-    base.join("ostt").join("models")
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".local")
+        .join("share")
+        .join("ostt")
+        .join("models")
 }
 
 fn state_path() -> PathBuf {
@@ -670,7 +689,6 @@ mod tests {
 
     fn with_isolated_data_dir(test: impl FnOnce(PathBuf)) {
         let _guard = test_env_lock();
-        let previous = env::var_os("OSTT_MODELS_DIR");
         let previous_home = env::var_os("HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -678,16 +696,12 @@ mod tests {
             .as_nanos();
         let dir = env::temp_dir().join(format!("ostt-local-models-test-{unique}"));
         let models_dir = dir.join("models");
-        env::set_var("OSTT_MODELS_DIR", &models_dir);
+        set_test_models_dir(Some(models_dir.clone()));
         env::set_var("HOME", &dir);
 
         test(models_dir);
 
-        if let Some(previous) = previous {
-            env::set_var("OSTT_MODELS_DIR", previous);
-        } else {
-            env::remove_var("OSTT_MODELS_DIR");
-        }
+        set_test_models_dir(None);
         if let Some(previous_home) = previous_home {
             env::set_var("HOME", previous_home);
         } else {
@@ -781,6 +795,30 @@ mod tests {
             assert_eq!(state.version, 1);
             assert!(state.custom_models.is_empty());
         });
+    }
+
+    #[test]
+    fn models_dir_defaults_to_home_local_share() {
+        let _guard = test_env_lock();
+        let previous_home = env::var_os("HOME");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let home = env::temp_dir().join(format!("ostt-models-home-test-{unique}"));
+        set_test_models_dir(None);
+        env::set_var("HOME", &home);
+
+        assert_eq!(
+            models_dir(),
+            home.join(".local").join("share").join("ostt").join("models")
+        );
+
+        if let Some(previous_home) = previous_home {
+            env::set_var("HOME", previous_home);
+        } else {
+            env::remove_var("HOME");
+        }
     }
 
     #[test]
@@ -1277,7 +1315,6 @@ mod tests {
     #[tokio::test]
     async fn download_model_replaces_existing_file_without_activating() {
         let _guard = test_env_lock();
-        let previous = env::var_os("OSTT_MODELS_DIR");
         let previous_home = env::var_os("HOME");
 
         let first_url = serve_once("200 OK", "application/octet-stream", b"first".to_vec());
@@ -1287,7 +1324,7 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         let dir = env::temp_dir().join(format!("ostt-redownload-test-{unique}"));
-        env::set_var("OSTT_MODELS_DIR", dir.join("models"));
+        set_test_models_dir(Some(dir.join("models")));
         env::set_var("HOME", &dir);
         config::save_selected_model("local", "active").expect("save selected model");
         let dest_path = model_files_dir().join("turbo.bin");
@@ -1305,11 +1342,7 @@ mod tests {
             .expect("load selected model")
             .expect("selected model");
         assert_eq!(selected.model_id, "active");
-        if let Some(previous) = previous {
-            env::set_var("OSTT_MODELS_DIR", previous);
-        } else {
-            env::remove_var("OSTT_MODELS_DIR");
-        }
+        set_test_models_dir(None);
         if let Some(previous_home) = previous_home {
             env::set_var("HOME", previous_home);
         } else {
@@ -1344,13 +1377,12 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn direct_model_file_url_resolves_to_custom_entry() {
         let _guard = test_env_lock();
-        let previous = env::var_os("OSTT_MODELS_DIR");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
         let dir = env::temp_dir().join(format!("ostt-direct-url-test-{unique}"));
-        env::set_var("OSTT_MODELS_DIR", dir.join("models"));
+        set_test_models_dir(Some(dir.join("models")));
         let url = format!(
             "{}/ggml-custom.bin",
             serve_once(
@@ -1369,24 +1401,19 @@ mod tests {
         assert_eq!(entry.size_mb, 1);
         assert_eq!(entry.url, url);
         assert_eq!(entry.category.as_deref(), Some("custom"));
-        if let Some(previous) = previous {
-            env::set_var("OSTT_MODELS_DIR", previous);
-        } else {
-            env::remove_var("OSTT_MODELS_DIR");
-        }
+        set_test_models_dir(None);
         let _ = fs::remove_dir_all(dir);
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn hugging_face_page_resolution_selects_compatible_file() {
         let _guard = test_env_lock();
-        let previous = env::var_os("OSTT_MODELS_DIR");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
         let dir = env::temp_dir().join(format!("ostt-hf-url-test-{unique}"));
-        env::set_var("OSTT_MODELS_DIR", dir.join("models"));
+        set_test_models_dir(Some(dir.join("models")));
         let body = br#"{
             "tags": ["language:sv", "whisper"],
             "siblings": [
@@ -1410,11 +1437,7 @@ mod tests {
             entry.url,
             "https://huggingface.co/KBLab/kb-whisper/resolve/main/model.gguf"
         );
-        if let Some(previous) = previous {
-            env::set_var("OSTT_MODELS_DIR", previous);
-        } else {
-            env::remove_var("OSTT_MODELS_DIR");
-        }
+        set_test_models_dir(None);
         let _ = fs::remove_dir_all(dir);
     }
 

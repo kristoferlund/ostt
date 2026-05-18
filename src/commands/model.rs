@@ -730,14 +730,12 @@ mod tests {
 
     struct TestEnv {
         previous_home: Option<std::ffi::OsString>,
-        previous_models_dir: Option<std::ffi::OsString>,
         dir: std::path::PathBuf,
     }
 
     impl TestEnv {
         fn new() -> Self {
             let previous_home = std::env::var_os("HOME");
-            let previous_models_dir = std::env::var_os("OSTT_MODELS_DIR");
             let unique = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("system time")
@@ -745,11 +743,10 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("ostt-model-command-test-{unique}"));
             fs::create_dir_all(&dir).expect("create temp dir");
             std::env::set_var("HOME", &dir);
-            std::env::set_var("OSTT_MODELS_DIR", dir.join("models"));
+            crate::transcription::local_models::set_test_models_dir(Some(dir.join("models")));
 
             Self {
                 previous_home,
-                previous_models_dir,
                 dir,
             }
         }
@@ -763,11 +760,7 @@ mod tests {
                 std::env::remove_var("HOME");
             }
 
-            if let Some(previous_models_dir) = self.previous_models_dir.take() {
-                std::env::set_var("OSTT_MODELS_DIR", previous_models_dir);
-            } else {
-                std::env::remove_var("OSTT_MODELS_DIR");
-            }
+            crate::transcription::local_models::set_test_models_dir(None);
 
             let _ = fs::remove_dir_all(&self.dir);
         }
