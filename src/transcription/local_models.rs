@@ -1,10 +1,16 @@
 use std::fs;
+use std::io::Write;
+use std::path::Path;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Instant, SystemTime};
 
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 
 use crate::config::{self, SelectedModel};
+
+pub const REMOTE_REGISTRY_URL: &str =
+    "https://raw.githubusercontent.com/kristoferlund/ostt-models/main/models.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {
@@ -77,6 +83,8 @@ pub struct InstalledModelView {
     pub is_active: bool,
 }
 
+pub type DownloadProgressCallback = Box<dyn Fn(u64, u64, f64) + Send + 'static>;
+
 pub fn model_filename(id: &str, url: &str) -> String {
     let extension = url
         .split(['?', '#'])
@@ -125,6 +133,77 @@ pub fn installed_models(
 
 pub fn load_registry_entries() -> Result<Vec<RegistryEntry>, ModelError> {
     Err(ModelError::RegistryUnavailable)
+}
+
+pub async fn fetch_registry() -> anyhow::Result<Vec<RegistryEntry>> {
+    fetch_remote_registry().await
+}
+
+async fn fetch_remote_registry() -> anyhow::Result<Vec<RegistryEntry>> {
+    fetch_registry_from_url(REMOTE_REGISTRY_URL).await
+}
+
+async fn fetch_registry_from_url(url: &str) -> anyhow::Result<Vec<RegistryEntry>> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to fetch remote model registry: {error}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("failed to fetch remote model registry: HTTP {status}");
+    }
+
+    response
+        .json::<Vec<RegistryEntry>>()
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to parse remote model registry: {error}"))
+}
+
+pub async fn download_model(
+    url: &str,
+    dest_path: &Path,
+    progress: Option<DownloadProgressCallback>,
+) -> anyhow::Result<()> {
+    let response = reqwest::get(url)
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to start model download: {error}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("failed to download model: HTTP {status}");
+    }
+
+    if let Some(parent) = dest_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    let total_bytes = response.content_length().unwrap_or(0);
+    let temp_path = dest_path.with_extension("tmp");
+    let mut file = fs::File::create(&temp_path)?;
+    let mut downloaded_bytes = 0_u64;
+    let started_at = Instant::now();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|error| anyhow::anyhow!("failed while downloading model: {error}"))?;
+        file.write_all(&chunk)?;
+        downloaded_bytes += chunk.len() as u64;
+
+        if let Some(callback) = progress.as_ref() {
+            let elapsed = started_at.elapsed().as_secs_f64();
+            let speed_mbps = if elapsed > 0.0 {
+                (downloaded_bytes as f64 / (1024.0 * 1024.0)) / elapsed
+            } else {
+                0.0
+            };
+            callback(downloaded_bytes, total_bytes, speed_mbps);
+        }
+    }
+
+    file.sync_all()?;
+    drop(file);
+    fs::rename(temp_path, dest_path)?;
+    Ok(())
 }
 
 pub fn load_state() -> LocalModelState {
@@ -222,6 +301,8 @@ fn find_model_entry(model_id: &str) -> Result<RegistryEntry, ModelError> {
 mod tests {
     use super::*;
     use std::env;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -274,6 +355,27 @@ mod tests {
             url: url.to_string(),
             ..registry_entry(id)
         }
+    }
+
+    fn serve_once(status: &str, content_type: &str, body: Vec<u8>) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let url = format!("http://{}", listener.local_addr().expect("server address"));
+        let status = status.to_string();
+        let content_type = content_type.to_string();
+
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(response.as_bytes()).expect("write headers");
+            stream.write_all(&body).expect("write body");
+        });
+
+        url
     }
 
     #[test]
@@ -540,5 +642,60 @@ mod tests {
             assert_eq!(installed.len(), 1);
             assert!(!state_path().exists());
         });
+    }
+
+    #[tokio::test]
+    async fn fetch_registry_from_url_parses_registry_entries() {
+        let body = serde_json::to_vec(&vec![registry_entry("turbo")]).expect("serialize registry");
+        let url = serve_once("200 OK", "application/json", body);
+
+        let registry = fetch_registry_from_url(&url).await.expect("fetch registry");
+
+        assert_eq!(registry.len(), 1);
+        assert_eq!(registry[0].id, "turbo");
+    }
+
+    #[tokio::test]
+    async fn fetch_registry_from_url_reports_http_errors() {
+        let url = serve_once("404 Not Found", "text/plain", b"missing".to_vec());
+
+        let error = fetch_registry_from_url(&url).await.expect_err("fetch should fail");
+
+        assert!(error.to_string().contains("HTTP 404"));
+    }
+
+    #[tokio::test]
+    async fn download_model_streams_to_temp_then_final_path_with_progress() {
+        let body = b"model-bytes".to_vec();
+        let url = serve_once("200 OK", "application/octet-stream", body.clone());
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("ostt-download-test-{unique}"));
+        let dest_path = dir.join("files").join("turbo.bin");
+        let progress_events = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let callback_events = progress_events.clone();
+
+        download_model(
+            &url,
+            &dest_path,
+            Some(Box::new(move |downloaded, total, speed| {
+                callback_events
+                    .lock()
+                    .expect("progress lock")
+                    .push((downloaded, total, speed));
+            })),
+        )
+        .await
+        .expect("download model");
+
+        assert_eq!(fs::read(&dest_path).expect("read final file"), body);
+        assert!(!dest_path.with_extension("tmp").exists());
+        let events = progress_events.lock().expect("progress lock");
+        assert!(events
+            .iter()
+            .any(|(downloaded, total, speed)| *downloaded == 11 && *total == 11 && *speed >= 0.0));
+        let _ = fs::remove_dir_all(dir);
     }
 }

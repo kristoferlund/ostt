@@ -75,16 +75,16 @@ Depends on: `2.1.C`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.2 - Model Download Engine.md`
 
-- [ ] **2.2.1** Add any required streaming dependency or `reqwest` feature in `Cargo.toml` using the smallest compatible change.
-- [ ] **2.2.2** Add `REMOTE_REGISTRY_URL` and `fetch_registry()` in `src/transcription/local_models.rs`.
-- [ ] **2.2.3** Implement remote registry fetch and parse into `Vec<RegistryEntry>` with clear network/registry errors.
-- [ ] **2.2.4** Add `DownloadProgressCallback` and download state primitives needed by the engine.
-- [ ] **2.2.5** Implement `download_model(url, dest_path, progress)` streaming to `dest_path` via a `.tmp` file.
-- [ ] **2.2.6** Report downloaded bytes, total bytes, and MB/s through the progress callback.
-- [ ] **2.2.7** Rename `.tmp` to final path only after a successful complete download.
-- [ ] **2.2.8** Add focused tests using mocked/local HTTP or isolated filesystem paths where practical.
-- [ ] **2.2.9** Verify: run `cargo check`.
-- [ ] **2.2.10** Verify: run focused `cargo test` for registry/download tests.
+- [x] **2.2.1** Add any required streaming dependency or `reqwest` feature in `Cargo.toml` using the smallest compatible change.
+- [x] **2.2.2** Add `REMOTE_REGISTRY_URL` and `fetch_registry()` in `src/transcription/local_models.rs`.
+- [x] **2.2.3** Implement remote registry fetch and parse into `Vec<RegistryEntry>` with clear network/registry errors.
+- [x] **2.2.4** Add `DownloadProgressCallback` and download state primitives needed by the engine.
+- [x] **2.2.5** Implement `download_model(url, dest_path, progress)` streaming to `dest_path` via a `.tmp` file.
+- [x] **2.2.6** Report downloaded bytes, total bytes, and MB/s through the progress callback.
+- [x] **2.2.7** Rename `.tmp` to final path only after a successful complete download.
+- [x] **2.2.8** Add focused tests using mocked/local HTTP or isolated filesystem paths where practical.
+- [x] **2.2.9** Verify: run `cargo check`.
+- [x] **2.2.10** Verify: run focused `cargo test` for registry/download tests.
 
 ### 2.2.B — Download Registration and Validation
 

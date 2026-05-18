@@ -44,3 +44,19 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - Official registry activation remains limited by the current placeholder registry loader; remote registry fetching is scoped to `2.2.A`.
+
+## Session 4: Spec 2.2.A — Registry Fetch and Download Streaming
+
+Accomplished:
+- Added minimal streaming support through `reqwest`'s `stream` feature and `futures-util`.
+- Added the remote registry URL, `fetch_registry()`, remote registry fetching, and clear network/HTTP/parse errors.
+- Added `DownloadProgressCallback` and `download_model()` streaming to a `.tmp` file, reporting bytes/total/MBps, syncing, and renaming only after completion.
+- Added focused local HTTP tests for registry parsing, HTTP errors, download progress, final file contents, and temp-file cleanup on success.
+- Verified with `cargo check` and `cargo test transcription::local_models`.
+
+Obstacles encountered:
+- The first focused test run failed because the local HTTP test helper moved borrowed `&str` values into a spawned thread. Converted them to owned strings and reran successfully.
+
+Out-of-scope observations:
+- Failed partial download cleanup and cancellation remain scoped to `2.2.C`.
+- Download registration, custom model registration, and validation remain scoped to `2.2.B`.
