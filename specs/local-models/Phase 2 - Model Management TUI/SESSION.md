@@ -60,3 +60,19 @@ Obstacles encountered:
 Out-of-scope observations:
 - Failed partial download cleanup and cancellation remain scoped to `2.2.C`.
 - Download registration, custom model registration, and validation remain scoped to `2.2.B`.
+
+## Session 5: Spec 2.2.B — Download Registration and Validation
+
+Accomplished:
+- Added deterministic `model_destination()`, registry download marking without state writes, and custom model registration with replace-by-ID semantics.
+- Added post-download validation using SHA-256 when available and size checks when checksum metadata is absent.
+- Kept download helpers install-only: re-download replaces the file via the temp-file path and does not change the selected local model.
+- Added focused tests for registry no-op registration, missing-file validation, custom duplicate replacement, checksum/size validation, replacement download behavior, and non-activation.
+- Verified with `cargo check` and `cargo test transcription::local_models`.
+
+Obstacles encountered:
+- SHA-256 validation required adding the minimal `sha2` dependency and updating `Cargo.lock`.
+- The replacement/non-activation async test initially did not keep isolated environment state through the full test; tightened it and reran focused tests successfully.
+
+Out-of-scope observations:
+- Custom URL resolution, collision detection, cancellation, and failed partial download cleanup remain scoped to `2.2.C`.

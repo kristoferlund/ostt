@@ -92,15 +92,15 @@ Depends on: `2.2.A`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.2 - Model Download Engine.md`
 
-- [ ] **2.2.11** Add `model_destination(entry)` using `model_files_dir()` and `model_filename()`.
-- [ ] **2.2.12** Implement `mark_downloaded_registry_model(entry)` that validates the downloaded file exists without writing registry metadata.
-- [ ] **2.2.13** Implement `register_custom_model(entry)` with replace-by-ID semantics and no duplicate custom state entries.
-- [ ] **2.2.14** Add post-download validation using SHA256 when available and size checks otherwise where metadata exists.
-- [ ] **2.2.15** Ensure re-downloading replaces the model file atomically through the temp-file path.
-- [ ] **2.2.16** Ensure download helpers do not activate models; leave activation to calling flows.
-- [ ] **2.2.17** Add focused tests for registry registration no-op, custom registration, duplicate replacement, and missing-file validation.
-- [ ] **2.2.18** Verify: run `cargo check`.
-- [ ] **2.2.19** Verify: run focused `cargo test` for registration/validation tests.
+- [x] **2.2.11** Add `model_destination(entry)` using `model_files_dir()` and `model_filename()`.
+- [x] **2.2.12** Implement `mark_downloaded_registry_model(entry)` that validates the downloaded file exists without writing registry metadata.
+- [x] **2.2.13** Implement `register_custom_model(entry)` with replace-by-ID semantics and no duplicate custom state entries.
+- [x] **2.2.14** Add post-download validation using SHA256 when available and size checks otherwise where metadata exists.
+- [x] **2.2.15** Ensure re-downloading replaces the model file atomically through the temp-file path.
+- [x] **2.2.16** Ensure download helpers do not activate models; leave activation to calling flows.
+- [x] **2.2.17** Add focused tests for registry registration no-op, custom registration, duplicate replacement, and missing-file validation.
+- [x] **2.2.18** Verify: run `cargo check`.
+- [x] **2.2.19** Verify: run focused `cargo test` for registration/validation tests.
 
 ### 2.2.C — Custom URL Resolution and Cancellation
 

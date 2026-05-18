@@ -38,6 +38,7 @@ dirs = "6.0.0"
 anyhow = "1.0.86"
 thiserror = "2.0.17"
 regex = "1.10"
+sha2 = "0.10.9"
 
 # Logging
 tracing = "0.1.40"

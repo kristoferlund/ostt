@@ -6,6 +6,7 @@ use std::time::{Instant, SystemTime};
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::config::{self, SelectedModel};
 
@@ -95,6 +96,67 @@ pub fn model_filename(id: &str, url: &str) -> String {
         .unwrap_or("bin");
 
     format!("{id}.{extension}")
+}
+
+pub fn model_destination(entry: &RegistryEntry) -> PathBuf {
+    model_files_dir().join(model_filename(&entry.id, &entry.url))
+}
+
+pub fn mark_downloaded_registry_model(entry: &RegistryEntry) -> anyhow::Result<()> {
+    let path = model_destination(entry);
+    if !path.exists() {
+        anyhow::bail!(
+            "download completed but model file is missing at {}",
+            path.display()
+        );
+    }
+
+    Ok(())
+}
+
+pub fn register_custom_model(entry: RegistryEntry) -> anyhow::Result<()> {
+    let mut state = load_state();
+    state.custom_models.retain(|model| model.id != entry.id);
+    state.custom_models.push(entry);
+    save_state(&state)
+}
+
+pub fn validate_downloaded_model(entry: &RegistryEntry) -> anyhow::Result<()> {
+    let path = model_destination(entry);
+    let metadata = fs::metadata(&path).map_err(|error| {
+        anyhow::anyhow!(
+            "download completed but model file is missing at {}: {error}",
+            path.display()
+        )
+    })?;
+
+    if let Some(expected_sha256) = entry.sha256.as_deref().filter(|sha| !sha.is_empty()) {
+        let bytes = fs::read(&path)?;
+        let actual_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        if !actual_sha256.eq_ignore_ascii_case(expected_sha256) {
+            anyhow::bail!(
+                "downloaded model checksum mismatch for {}: expected {}, got {}",
+                entry.id,
+                expected_sha256,
+                actual_sha256
+            );
+        }
+        return Ok(());
+    }
+
+    if entry.size_mb > 0 {
+        let expected_bytes = u64::from(entry.size_mb) * 1024 * 1024;
+        if metadata.len() != expected_bytes {
+            anyhow::bail!(
+                "downloaded model size mismatch for {}: expected {} bytes, got {} bytes",
+                entry.id,
+                expected_bytes,
+                metadata.len()
+            );
+        }
+    }
+
+    Ok(())
 }
 
 pub fn is_safe_model_id(id: &str) -> bool {
@@ -696,6 +758,141 @@ mod tests {
         assert!(events
             .iter()
             .any(|(downloaded, total, speed)| *downloaded == 11 && *total == 11 && *speed >= 0.0));
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn model_destination_uses_files_dir_and_derived_filename() {
+        with_isolated_data_dir(|_| {
+            let entry = registry_entry_with_url("turbo", "https://example.com/ggml-turbo.gguf");
+
+            assert_eq!(model_destination(&entry), model_files_dir().join("turbo.gguf"));
+        });
+    }
+
+    #[test]
+    fn mark_downloaded_registry_model_validates_file_without_state_write() {
+        with_isolated_data_dir(|_| {
+            let entry = registry_entry("turbo");
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), [1]).expect("write model file");
+
+            mark_downloaded_registry_model(&entry).expect("mark downloaded");
+
+            assert!(!state_path().exists());
+        });
+    }
+
+    #[test]
+    fn mark_downloaded_registry_model_reports_missing_file() {
+        with_isolated_data_dir(|_| {
+            let error = mark_downloaded_registry_model(&registry_entry("turbo"))
+                .expect_err("missing file should fail");
+
+            assert!(error.to_string().contains("model file is missing"));
+        });
+    }
+
+    #[test]
+    fn register_custom_model_replaces_duplicate_ids() {
+        with_isolated_data_dir(|_| {
+            register_custom_model(registry_entry_with_url(
+                "custom",
+                "https://example.com/old.bin",
+            ))
+            .expect("register old custom model");
+            register_custom_model(registry_entry_with_url(
+                "custom",
+                "https://example.com/new.gguf",
+            ))
+            .expect("register replacement custom model");
+
+            let state = load_state();
+            assert_eq!(state.custom_models.len(), 1);
+            assert_eq!(state.custom_models[0].id, "custom");
+            assert_eq!(state.custom_models[0].url, "https://example.com/new.gguf");
+        });
+    }
+
+    #[test]
+    fn validate_downloaded_model_uses_sha256_when_available() {
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("custom");
+            entry.sha256 = Some(format!("{:x}", Sha256::digest(b"model bytes")));
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), b"model bytes").expect("write model file");
+
+            validate_downloaded_model(&entry).expect("validate checksum");
+        });
+    }
+
+    #[test]
+    fn validate_downloaded_model_uses_size_when_checksum_missing() {
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("custom");
+            entry.size_mb = 1;
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), vec![0_u8; 1024 * 1024]).expect("write model file");
+
+            validate_downloaded_model(&entry).expect("validate size");
+        });
+    }
+
+    #[test]
+    fn validate_downloaded_model_reports_size_mismatch() {
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("custom");
+            entry.size_mb = 1;
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), [1]).expect("write model file");
+
+            let error = validate_downloaded_model(&entry).expect_err("size mismatch should fail");
+
+            assert!(error.to_string().contains("size mismatch"));
+        });
+    }
+
+    #[tokio::test]
+    async fn download_model_replaces_existing_file_without_activating() {
+        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let previous = env::var_os("OSTT_MODELS_DIR");
+        let previous_home = env::var_os("HOME");
+
+        let first_url = serve_once("200 OK", "application/octet-stream", b"first".to_vec());
+        let second_url = serve_once("200 OK", "application/octet-stream", b"second".to_vec());
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("ostt-redownload-test-{unique}"));
+        env::set_var("OSTT_MODELS_DIR", dir.join("models"));
+        env::set_var("HOME", &dir);
+        config::save_selected_model("local", "active").expect("save selected model");
+        let dest_path = model_files_dir().join("turbo.bin");
+
+        download_model(&first_url, &dest_path, None)
+            .await
+            .expect("download first model");
+        download_model(&second_url, &dest_path, None)
+            .await
+            .expect("replace model");
+
+        assert_eq!(fs::read(&dest_path).expect("read replaced file"), b"second");
+        assert!(!dest_path.with_extension("tmp").exists());
+        let selected = config::get_selected_model_entry()
+            .expect("load selected model")
+            .expect("selected model");
+        assert_eq!(selected.model_id, "active");
+        if let Some(previous) = previous {
+            env::set_var("OSTT_MODELS_DIR", previous);
+        } else {
+            env::remove_var("OSTT_MODELS_DIR");
+        }
+        if let Some(previous_home) = previous_home {
+            env::set_var("HOME", previous_home);
+        } else {
+            env::remove_var("HOME");
+        }
         let _ = fs::remove_dir_all(dir);
     }
 }
