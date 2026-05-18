@@ -59,11 +59,7 @@ impl TranscriptionConfig {
     }
 
     /// Creates a local transcription configuration with a registry-backed model ID.
-    pub fn new_local(
-        model_id: String,
-        keywords: Vec<String>,
-        providers: ProvidersConfig,
-    ) -> Self {
+    pub fn new_local(model_id: String, keywords: Vec<String>, providers: ProvidersConfig) -> Self {
         Self {
             provider: TranscriptionProvider::Local,
             model_id,

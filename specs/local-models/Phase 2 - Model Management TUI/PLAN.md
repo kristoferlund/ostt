@@ -58,16 +58,16 @@ Depends on: `2.1.B`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.1 - Model Registry & Storage.md`
 
-- [ ] **2.1.19** Add or adapt selected-model integration so local selections preserve provider ID `local` and arbitrary model IDs.
-- [ ] **2.1.20** Implement model lookup across registry and custom state with clear missing/not-downloaded errors.
-- [ ] **2.1.21** Implement `activate_model(model_id)` that verifies the derived file exists before saving provider/model selection.
-- [ ] **2.1.22** Implement `deactivate_model()` through the selected-model clearing mechanism.
-- [ ] **2.1.23** Implement `delete_model(model_id)` that removes the derived installed file.
-- [ ] **2.1.24** Make `delete_model(model_id)` clear active selection when the deleted model was active.
-- [ ] **2.1.25** Ensure deleting a custom model keeps custom metadata unless a separate explicit metadata removal flow is added later.
-- [ ] **2.1.26** Add focused tests for activate, deactivate, delete, active clearing, and not-installed errors.
-- [ ] **2.1.27** Verify: run `cargo check`.
-- [ ] **2.1.28** Verify: run focused `cargo test` for activation/deletion tests.
+- [x] **2.1.19** Add or adapt selected-model integration so local selections preserve provider ID `local` and arbitrary model IDs.
+- [x] **2.1.20** Implement model lookup across registry and custom state with clear missing/not-downloaded errors.
+- [x] **2.1.21** Implement `activate_model(model_id)` that verifies the derived file exists before saving provider/model selection.
+- [x] **2.1.22** Implement `deactivate_model()` through the selected-model clearing mechanism.
+- [x] **2.1.23** Implement `delete_model(model_id)` that removes the derived installed file.
+- [x] **2.1.24** Make `delete_model(model_id)` clear active selection when the deleted model was active.
+- [x] **2.1.25** Ensure deleting a custom model keeps custom metadata unless a separate explicit metadata removal flow is added later.
+- [x] **2.1.26** Add focused tests for activate, deactivate, delete, active clearing, and not-installed errors.
+- [x] **2.1.27** Verify: run `cargo check`.
+- [x] **2.1.28** Verify: run focused `cargo test` for activation/deletion tests.
 
 ### 2.2.A — Registry Fetch and Download Streaming
 

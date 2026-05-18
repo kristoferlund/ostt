@@ -4,9 +4,18 @@
 //! Credentials are stored in the user's local data directory (~/.local/share/ostt).
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+
+use crate::transcription::model::TranscriptionModel;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectedModel {
+    pub provider_id: String,
+    pub model_id: String,
+}
 
 /// Returns the path to the secrets directory (~/.local/share/ostt).
 ///
@@ -132,12 +141,16 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
 /// # Errors
 /// - If the secrets directory cannot be determined or created
 /// - If the model file cannot be written
-pub fn save_selected_model(_provider_id: &str, model_id: &str) -> anyhow::Result<()> {
+pub fn save_selected_model(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
     let secrets_dir = get_secrets_dir()?;
     let model_file = secrets_dir.join("model");
 
-    // Simply write the model ID as plain text (only one model selection at a time)
-    fs::write(&model_file, model_id)?;
+    let selected_model = SelectedModel {
+        provider_id: provider_id.to_string(),
+        model_id: model_id.to_string(),
+    };
+    let content = serde_json::to_string(&selected_model)?;
+    fs::write(&model_file, content)?;
 
     #[cfg(unix)]
     {
@@ -150,6 +163,45 @@ pub fn save_selected_model(_provider_id: &str, model_id: &str) -> anyhow::Result
     Ok(())
 }
 
+pub fn clear_selected_model() -> anyhow::Result<()> {
+    let secrets_dir = get_secrets_dir()?;
+    let model_file = secrets_dir.join("model");
+
+    if model_file.exists() {
+        fs::remove_file(model_file)?;
+    }
+
+    Ok(())
+}
+
+pub fn get_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
+    let secrets_dir = get_secrets_dir()?;
+    let model_file = secrets_dir.join("model");
+
+    if !model_file.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&model_file)?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    if let Ok(selected_model) = serde_json::from_str::<SelectedModel>(trimmed) {
+        return Ok(Some(selected_model));
+    }
+
+    let provider_id = TranscriptionModel::from_id(trimmed)
+        .map(|model| model.provider().id().to_string())
+        .unwrap_or_else(|| "local".to_string());
+
+    Ok(Some(SelectedModel {
+        provider_id,
+        model_id: trimmed.to_string(),
+    }))
+}
+
 /// Retrieves the currently selected model.
 ///
 /// Returns the model ID of the currently selected transcription model.
@@ -159,18 +211,5 @@ pub fn save_selected_model(_provider_id: &str, model_id: &str) -> anyhow::Result
 /// - If the secrets directory cannot be determined
 /// - If the model file cannot be read
 pub fn get_selected_model() -> anyhow::Result<Option<String>> {
-    let secrets_dir = get_secrets_dir()?;
-    let model_file = secrets_dir.join("model");
-
-    if !model_file.exists() {
-        return Ok(None);
-    }
-
-    let model_id = fs::read_to_string(&model_file)?.trim().to_string();
-
-    if model_id.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(model_id))
-    }
+    Ok(get_selected_model_entry()?.map(|selected| selected.model_id))
 }

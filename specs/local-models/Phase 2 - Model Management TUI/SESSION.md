@@ -28,3 +28,19 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - Active local model selection still only compares raw model IDs in this section. Provider-aware selected-model persistence remains scoped to `2.1.C`.
+
+## Session 3: Spec 2.1.C — Activation and Deletion
+
+Accomplished:
+- Added provider-aware selected-model persistence with `SelectedModel`, JSON storage for new selections, legacy plain model ID reading, and selected-model clearing.
+- Implemented local model lookup across custom state and available registry entries, with missing and not-downloaded errors separated.
+- Added `activate_model()`, `deactivate_model()`, and `delete_model()` with derived file existence checks, local provider selection, active selection clearing, and custom metadata preservation.
+- Updated installed-model active detection to require provider ID `local` and matching model ID.
+- Added focused activation/deletion tests covering activation, deactivation, delete, active clearing, custom metadata retention, missing models, and not-installed errors.
+- Verified with `cargo check` and `cargo test transcription::local_models`.
+
+Obstacles encountered:
+- No blocking obstacles. Tests needed isolated `HOME` handling because selected-model state is stored under the user data directory.
+
+Out-of-scope observations:
+- Official registry activation remains limited by the current placeholder registry loader; remote registry fetching is scoped to `2.2.A`.

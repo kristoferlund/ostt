@@ -4,6 +4,8 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::config::{self, SelectedModel};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {
     pub id: String,
@@ -54,6 +56,8 @@ pub fn model_files_dir() -> PathBuf {
 /// Error type for local model-related failures.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
+    #[error("Model '{0}' was not found in the local model registry or custom models.")]
+    NotFound(String),
     #[error("Model '{0}' is not downloaded. Run `ostt models download {0}` first.")]
     NotDownloaded(String),
     #[error("Model file not found at {0}")]
@@ -95,7 +99,7 @@ pub fn is_safe_model_id(id: &str) -> bool {
 pub fn installed_models(
     registry: &[RegistryEntry],
     state: &LocalModelState,
-    selected_model: Option<&str>,
+    selected_model: Option<&SelectedModel>,
 ) -> Vec<InstalledModelView> {
     registry
         .iter()
@@ -109,7 +113,11 @@ pub fn installed_models(
                 path,
                 size_bytes: metadata.len(),
                 modified_at: metadata.modified().ok(),
-                is_active: selected_model == Some(entry.id.as_str()),
+                is_active: selected_model
+                    .map(|selected| {
+                        selected.provider_id == "local" && selected.model_id == entry.id
+                    })
+                    .unwrap_or(false),
             })
         })
         .collect()
@@ -156,19 +164,58 @@ pub fn resolve_installed_model_path(model_id: &str) -> Result<PathBuf, ModelErro
     }
 }
 
-fn find_model_entry(model_id: &str) -> Result<RegistryEntry, ModelError> {
-    if let Some(entry) = load_custom_model_entries()?
-        .into_iter()
-        .find(|entry| entry.id == model_id)
-    {
-        return Ok(entry);
+pub fn activate_model(model_id: &str) -> anyhow::Result<()> {
+    let entry = find_model_entry(model_id)?;
+    let path = model_files_dir().join(model_filename(&entry.id, &entry.url));
+
+    if !path.exists() {
+        return Err(ModelError::NotDownloaded(model_id.to_string()).into());
     }
 
-    let registry_entries = load_registry_entries()?;
-    registry_entries
-        .into_iter()
+    config::save_selected_model("local", model_id)
+}
+
+pub fn deactivate_model() -> anyhow::Result<()> {
+    config::clear_selected_model()
+}
+
+pub fn delete_model(model_id: &str) -> anyhow::Result<()> {
+    let entry = find_model_entry(model_id)?;
+    let file_path = model_files_dir().join(model_filename(&entry.id, &entry.url));
+
+    if !file_path.exists() {
+        return Err(ModelError::NotDownloaded(model_id.to_string()).into());
+    }
+
+    fs::remove_file(file_path)?;
+
+    if config::get_selected_model_entry()?
+        .is_some_and(|selected| selected.provider_id == "local" && selected.model_id == model_id)
+    {
+        config::clear_selected_model()?;
+    }
+
+    Ok(())
+}
+
+fn find_model_entry_in(
+    model_id: &str,
+    registry: &[RegistryEntry],
+    state: &LocalModelState,
+) -> Result<RegistryEntry, ModelError> {
+    state
+        .custom_models
+        .iter()
+        .chain(registry.iter())
         .find(|entry| entry.id == model_id)
-        .ok_or_else(|| ModelError::NotDownloaded(model_id.to_string()))
+        .cloned()
+        .ok_or_else(|| ModelError::NotFound(model_id.to_string()))
+}
+
+fn find_model_entry(model_id: &str) -> Result<RegistryEntry, ModelError> {
+    let state = load_state();
+    let registry_entries = load_registry_entries().unwrap_or_default();
+    find_model_entry_in(model_id, &registry_entries, &state)
 }
 
 #[cfg(test)]
@@ -183,6 +230,7 @@ mod tests {
     fn with_isolated_data_dir(test: impl FnOnce(PathBuf)) {
         let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
         let previous = env::var_os("OSTT_MODELS_DIR");
+        let previous_home = env::var_os("HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
@@ -190,6 +238,7 @@ mod tests {
         let dir = env::temp_dir().join(format!("ostt-local-models-test-{unique}"));
         let models_dir = dir.join("models");
         env::set_var("OSTT_MODELS_DIR", &models_dir);
+        env::set_var("HOME", &dir);
 
         test(models_dir);
 
@@ -197,6 +246,11 @@ mod tests {
             env::set_var("OSTT_MODELS_DIR", previous);
         } else {
             env::remove_var("OSTT_MODELS_DIR");
+        }
+        if let Some(previous_home) = previous_home {
+            env::set_var("HOME", previous_home);
+        } else {
+            env::remove_var("HOME");
         }
         let _ = fs::remove_dir_all(dir);
     }
@@ -277,14 +331,20 @@ mod tests {
     #[test]
     fn model_filename_uses_id_with_url_extension() {
         assert_eq!(
-            model_filename("kb-whisper-large", "https://example.com/models/kb.bin?download=1"),
+            model_filename(
+                "kb-whisper-large",
+                "https://example.com/models/kb.bin?download=1"
+            ),
             "kb-whisper-large.bin"
         );
         assert_eq!(
             model_filename("turbo", "https://example.com/ggml-turbo.gguf#fragment"),
             "turbo.gguf"
         );
-        assert_eq!(model_filename("custom", "https://example.com/download"), "custom.bin");
+        assert_eq!(
+            model_filename("custom", "https://example.com/download"),
+            "custom.bin"
+        );
     }
 
     #[test]
@@ -308,7 +368,8 @@ mod tests {
                 custom_models: vec![registry_entry("custom")],
             };
             fs::create_dir_all(model_files_dir()).expect("create files dir");
-            fs::write(model_files_dir().join("turbo.gguf"), [1, 2, 3]).expect("write registry model");
+            fs::write(model_files_dir().join("turbo.gguf"), [1, 2, 3])
+                .expect("write registry model");
             fs::write(model_files_dir().join("custom.bin"), [4, 5]).expect("write custom model");
 
             let installed = installed_models(&registry, &state, None);
@@ -334,11 +395,136 @@ mod tests {
             let registry = vec![registry_entry("turbo")];
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             fs::write(model_files_dir().join("turbo.bin"), [1]).expect("write model");
+            let selected_model = SelectedModel {
+                provider_id: "local".to_string(),
+                model_id: "turbo".to_string(),
+            };
 
-            let installed = installed_models(&registry, &LocalModelState::default(), Some("turbo"));
+            let installed = installed_models(
+                &registry,
+                &LocalModelState::default(),
+                Some(&selected_model),
+            );
 
             assert_eq!(installed.len(), 1);
             assert!(installed[0].is_active);
+        });
+    }
+
+    #[test]
+    fn activate_model_saves_local_provider_and_model_id() {
+        with_isolated_data_dir(|_| {
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![registry_entry("custom")],
+            };
+            save_state(&state).expect("save state");
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_files_dir().join("custom.bin"), [1]).expect("write custom model");
+
+            activate_model("custom").expect("activate model");
+            let selected = config::get_selected_model_entry()
+                .expect("load selected model")
+                .expect("selected model");
+
+            assert_eq!(selected.provider_id, "local");
+            assert_eq!(selected.model_id, "custom");
+        });
+    }
+
+    #[test]
+    fn activate_model_requires_installed_file() {
+        with_isolated_data_dir(|_| {
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![registry_entry("custom")],
+            };
+            save_state(&state).expect("save state");
+
+            let error = activate_model("custom").expect_err("activation should fail");
+
+            assert!(error.to_string().contains("not downloaded"));
+            assert!(config::get_selected_model_entry()
+                .expect("load selected model")
+                .is_none());
+        });
+    }
+
+    #[test]
+    fn deactivate_model_clears_selected_model() {
+        with_isolated_data_dir(|_| {
+            config::save_selected_model("local", "custom").expect("save selected model");
+
+            deactivate_model().expect("deactivate model");
+
+            assert!(config::get_selected_model_entry()
+                .expect("load selected model")
+                .is_none());
+        });
+    }
+
+    #[test]
+    fn delete_model_removes_file_and_clears_active_selection() {
+        with_isolated_data_dir(|_| {
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![registry_entry("custom")],
+            };
+            save_state(&state).expect("save state");
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            let file_path = model_files_dir().join("custom.bin");
+            fs::write(&file_path, [1]).expect("write custom model");
+            config::save_selected_model("local", "custom").expect("save selected model");
+
+            delete_model("custom").expect("delete model");
+
+            assert!(!file_path.exists());
+            assert!(config::get_selected_model_entry()
+                .expect("load selected model")
+                .is_none());
+        });
+    }
+
+    #[test]
+    fn delete_model_requires_installed_file() {
+        with_isolated_data_dir(|_| {
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![registry_entry("custom")],
+            };
+            save_state(&state).expect("save state");
+
+            let error = delete_model("custom").expect_err("delete should fail");
+
+            assert!(error.to_string().contains("not downloaded"));
+        });
+    }
+
+    #[test]
+    fn delete_custom_model_keeps_metadata() {
+        with_isolated_data_dir(|_| {
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![registry_entry("custom")],
+            };
+            save_state(&state).expect("save state");
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_files_dir().join("custom.bin"), [1]).expect("write custom model");
+
+            delete_model("custom").expect("delete model");
+            let state = load_state();
+
+            assert_eq!(state.custom_models.len(), 1);
+            assert_eq!(state.custom_models[0].id, "custom");
+        });
+    }
+
+    #[test]
+    fn find_model_entry_reports_missing_model() {
+        with_isolated_data_dir(|_| {
+            let error = resolve_installed_model_path("missing").expect_err("missing model");
+
+            assert!(matches!(error, ModelError::NotFound(model) if model == "missing"));
         });
     }
 
