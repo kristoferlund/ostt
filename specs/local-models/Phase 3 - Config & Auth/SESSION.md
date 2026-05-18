@@ -36,3 +36,23 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - `src/transcription/local_models.rs` already has a separate safe model ID helper with the same rules; no refactor was made because this session scope is config validation only.
+
+## Session 3: Spec 3.2.A - Auth Login and Logout Credential Commands
+
+Accomplished:
+- Refactored `src/commands/auth.rs` so login manages cloud credentials only and no longer selects a model.
+- Added cloud-only provider filtering for login and authorized cloud-only provider filtering for logout.
+- Added `ostt auth login` and `ostt auth logout` routing while preserving `ostt auth` as login.
+- Added logout confirmation and selected-model clearing when the removed credential matches the active provider.
+- Added focused auth tests for Local exclusion, provider filtering, credential preservation, and active-selection clearing.
+- Updated `PLAN.md` after each completed task.
+
+Verification:
+- `cargo check` passed.
+- `cargo test commands::auth` passed.
+
+Obstacles encountered:
+- None.
+
+Out-of-scope observations:
+- Existing error strings in record/retry/transcribe still point users to `ostt auth`; recovery-message updates are scoped to later 3.2 sections.

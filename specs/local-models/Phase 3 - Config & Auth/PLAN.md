@@ -62,16 +62,16 @@ Depends on: `3.1.B`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/3.2 - Auth Flow & First-Time Setup.md`
 
-- [ ] **3.2.1** Refactor `src/commands/auth.rs` so `ostt auth login` manages credentials only and does not select a model.
-- [ ] **3.2.2** Ensure auth login lists only cloud providers and excludes Local.
-- [ ] **3.2.3** Preserve existing provider config and unrelated credentials when saving a selected provider API key.
-- [ ] **3.2.4** Add Cliclack completion guidance telling the user to run `ostt model` after login.
-- [ ] **3.2.5** Implement auth logout provider selection from currently authorized cloud providers only.
-- [ ] **3.2.6** Add logout confirmation before deleting a provider credential.
-- [ ] **3.2.7** Clear selected-model state when logout removes the provider used by the active model.
-- [ ] **3.2.8** Add focused tests for provider filtering, login credential preservation, logout clearing active selection, and Local exclusion where practical.
-- [ ] **3.2.9** Verify: run `cargo check`.
-- [ ] **3.2.10** Verify: run focused `cargo test commands::auth` or the nearest focused auth/config test target.
+- [x] **3.2.1** Refactor `src/commands/auth.rs` so `ostt auth login` manages credentials only and does not select a model.
+- [x] **3.2.2** Ensure auth login lists only cloud providers and excludes Local.
+- [x] **3.2.3** Preserve existing provider config and unrelated credentials when saving a selected provider API key.
+- [x] **3.2.4** Add Cliclack completion guidance telling the user to run `ostt model` after login.
+- [x] **3.2.5** Implement auth logout provider selection from currently authorized cloud providers only.
+- [x] **3.2.6** Add logout confirmation before deleting a provider credential.
+- [x] **3.2.7** Clear selected-model state when logout removes the provider used by the active model.
+- [x] **3.2.8** Add focused tests for provider filtering, login credential preservation, logout clearing active selection, and Local exclusion where practical.
+- [x] **3.2.9** Verify: run `cargo check`.
+- [x] **3.2.10** Verify: run focused `cargo test commands::auth` or the nearest focused auth/config test target.
 
 ### 3.2.B - Model Selection Data and Recovery Errors
 

@@ -182,12 +182,14 @@ enum Commands {
         index: Option<usize>,
     },
 
-    /// Authenticate with a transcription provider and select model
+    /// Manage cloud provider credentials
     ///
-    /// Configure your AI provider credentials and choose which model to use.
-    /// Handles both provider selection and API key management in one flow.
+    /// Configure or remove AI provider credentials.
     #[command(visible_alias = "a")]
-    Auth,
+    Auth {
+        #[command(subcommand)]
+        command: Option<AuthCommand>,
+    },
 
     /// Manage local transcription models
     #[command(name = "model")]
@@ -295,6 +297,14 @@ enum Commands {
         #[arg(long, short)]
         install: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AuthCommand {
+    /// Add or update a cloud provider credential
+    Login,
+    /// Remove a cloud provider credential
+    Logout,
 }
 
 fn resolve_process_args(
@@ -424,8 +434,13 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;
         }
-        Some(Commands::Auth) => {
-            if let Err(e) = commands::handle_auth().await {
+        Some(Commands::Auth { command }) => {
+            let result = match command.unwrap_or(AuthCommand::Login) {
+                AuthCommand::Login => commands::handle_auth().await,
+                AuthCommand::Logout => commands::auth::handle_logout().await,
+            };
+
+            if let Err(e) = result {
                 // Check if it's a cancellation error (cliclack already displayed the message)
                 let err_msg = e.to_string();
                 if err_msg.contains("cancelled") || err_msg.contains("interrupted") {
