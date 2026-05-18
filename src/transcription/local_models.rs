@@ -17,7 +17,7 @@ use sha2::{Digest, Sha256};
 use crate::config::{self, SelectedModel};
 
 pub const REMOTE_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/kristoferlund/ostt-models/main/models.json";
+    "https://raw.githubusercontent.com/ostt-ai/models/main/models.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {

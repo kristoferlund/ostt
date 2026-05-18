@@ -157,12 +157,12 @@ fn clear_selected_model_if_provider_matches(provider_id: &str) -> anyhow::Result
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     struct TestHome {
@@ -222,7 +222,7 @@ mod tests {
 
     #[test]
     fn saving_api_key_preserves_unrelated_credentials() {
-        let _guard = env_lock().lock().expect("lock env");
+        let _guard = test_env_lock();
         let _home = TestHome::new();
 
         config::save_api_key("openai", "old-openai").expect("save openai");
@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn logout_clears_selected_model_only_for_matching_provider() {
-        let _guard = env_lock().lock().expect("lock env");
+        let _guard = test_env_lock();
         let _home = TestHome::new();
 
         config::save_selected_model("openai", "whisper").expect("save selected model");

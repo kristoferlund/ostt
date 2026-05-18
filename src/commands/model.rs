@@ -720,12 +720,12 @@ pub fn validate_selected_model_is_usable(selected: &SelectedModel) -> anyhow::Re
 mod tests {
     use super::*;
     use std::fs;
-    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     struct TestEnv {
@@ -816,7 +816,7 @@ mod tests {
 
     #[test]
     fn local_section_marks_downloaded_status_and_management_row() {
-        let _guard = env_lock().lock().expect("lock env");
+        let _guard = test_env_lock();
         let _env = TestEnv::new();
         let registry = vec![registry_entry("turbo"), registry_entry("small")];
         fs::create_dir_all(crate::transcription::local_models::model_files_dir())
@@ -938,6 +938,8 @@ mod tests {
 
     #[test]
     fn missing_local_selection_enters_download_confirmation_without_activation() {
+        let _guard = test_env_lock();
+        let _env = TestEnv::new();
         let mut wizard = ModelWizard::new(vec![build_local_section(
             &LocalModelState::default(),
             &[registry_entry("turbo")],
@@ -956,7 +958,7 @@ mod tests {
 
     #[test]
     fn selection_save_helpers_persist_provider_aware_state() {
-        let _guard = env_lock().lock().expect("lock env");
+        let _guard = test_env_lock();
         let _env = TestEnv::new();
 
         save_local_selection("turbo").expect("save local selection");
@@ -977,7 +979,7 @@ mod tests {
 
     #[test]
     fn downloaded_local_selection_marks_active_after_save() {
-        let _guard = env_lock().lock().expect("lock env");
+        let _guard = test_env_lock();
         let _env = TestEnv::new();
         let registry = vec![registry_entry("turbo")];
         fs::create_dir_all(crate::transcription::local_models::model_files_dir())
