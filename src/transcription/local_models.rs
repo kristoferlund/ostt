@@ -2,9 +2,12 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
 use futures_util::StreamExt;
+use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -86,6 +89,25 @@ pub struct InstalledModelView {
 
 pub type DownloadProgressCallback = Box<dyn Fn(u64, u64, f64) + Send + 'static>;
 
+#[derive(Debug, Clone, Default)]
+pub struct DownloadHandle {
+    cancel_flag: Arc<AtomicBool>,
+}
+
+impl DownloadHandle {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn cancel(&self) {
+        self.cancel_flag.store(true, Ordering::SeqCst);
+    }
+
+    fn is_cancelled(&self) -> bool {
+        self.cancel_flag.load(Ordering::SeqCst)
+    }
+}
+
 pub fn model_filename(id: &str, url: &str) -> String {
     let extension = url
         .split(['?', '#'])
@@ -115,6 +137,7 @@ pub fn mark_downloaded_registry_model(entry: &RegistryEntry) -> anyhow::Result<(
 }
 
 pub fn register_custom_model(entry: RegistryEntry) -> anyhow::Result<()> {
+    validate_custom_model_entry(&entry)?;
     let mut state = load_state();
     state.custom_models.retain(|model| model.id != entry.id);
     state.custom_models.push(entry);
@@ -226,6 +249,15 @@ pub async fn download_model(
     dest_path: &Path,
     progress: Option<DownloadProgressCallback>,
 ) -> anyhow::Result<()> {
+    download_model_with_handle(url, dest_path, progress, None).await
+}
+
+pub async fn download_model_with_handle(
+    url: &str,
+    dest_path: &Path,
+    progress: Option<DownloadProgressCallback>,
+    handle: Option<DownloadHandle>,
+) -> anyhow::Result<()> {
     let response = reqwest::get(url)
         .await
         .map_err(|error| anyhow::anyhow!("failed to start model download: {error}"))?;
@@ -246,26 +278,76 @@ pub async fn download_model(
     let started_at = Instant::now();
     let mut stream = response.bytes_stream();
 
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|error| anyhow::anyhow!("failed while downloading model: {error}"))?;
-        file.write_all(&chunk)?;
-        downloaded_bytes += chunk.len() as u64;
+    let result = async {
+        while let Some(chunk) = stream.next().await {
+            if handle.as_ref().is_some_and(DownloadHandle::is_cancelled) {
+                anyhow::bail!("model download cancelled");
+            }
+            let chunk = chunk
+                .map_err(|error| anyhow::anyhow!("failed while downloading model: {error}"))?;
+            file.write_all(&chunk)?;
+            downloaded_bytes += chunk.len() as u64;
 
-        if let Some(callback) = progress.as_ref() {
-            let elapsed = started_at.elapsed().as_secs_f64();
-            let speed_mbps = if elapsed > 0.0 {
-                (downloaded_bytes as f64 / (1024.0 * 1024.0)) / elapsed
-            } else {
-                0.0
-            };
-            callback(downloaded_bytes, total_bytes, speed_mbps);
+            if let Some(callback) = progress.as_ref() {
+                let elapsed = started_at.elapsed().as_secs_f64();
+                let speed_mbps = if elapsed > 0.0 {
+                    (downloaded_bytes as f64 / (1024.0 * 1024.0)) / elapsed
+                } else {
+                    0.0
+                };
+                callback(downloaded_bytes, total_bytes, speed_mbps);
+            }
+
+            if handle.as_ref().is_some_and(DownloadHandle::is_cancelled) {
+                anyhow::bail!("model download cancelled");
+            }
         }
+
+        file.sync_all()?;
+        Ok(())
+    }
+    .await;
+
+    drop(file);
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error);
     }
 
-    file.sync_all()?;
-    drop(file);
-    fs::rename(temp_path, dest_path)?;
+    if let Err(error) = fs::rename(&temp_path, dest_path) {
+        let _ = fs::remove_file(&temp_path);
+        return Err(error.into());
+    }
+
     Ok(())
+}
+
+pub async fn resolve_custom_model(input: &str) -> anyhow::Result<RegistryEntry> {
+    let url = Url::parse(input).map_err(|_| anyhow::anyhow!("custom models require a URL"))?;
+
+    if is_hugging_face_model_page_url(&url) {
+        return resolve_hugging_face_model_page_url(url).await;
+    }
+
+    if is_direct_model_file_url(&url) {
+        return resolve_direct_model_file_url(url).await;
+    }
+
+    anyhow::bail!("custom model URL must be a Hugging Face model page or a direct model file URL")
+}
+
+fn is_hugging_face_model_page_url(url: &Url) -> bool {
+    url.host_str() == Some("huggingface.co")
+        && url.path_segments().is_some_and(|segments| {
+            let segments: Vec<_> = segments.collect();
+            segments.len() == 2 && !segments.iter().any(|segment| segment.is_empty())
+        })
+}
+
+fn is_direct_model_file_url(url: &Url) -> bool {
+    url.path_segments()
+        .and_then(|segments| segments.last())
+        .is_some_and(is_compatible_model_filename)
 }
 
 pub fn load_state() -> LocalModelState {
@@ -278,6 +360,166 @@ pub fn load_state() -> LocalModelState {
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
         .unwrap_or_default()
+}
+
+async fn resolve_direct_model_file_url(url: Url) -> anyhow::Result<RegistryEntry> {
+    let filename = url
+        .path_segments()
+        .and_then(|segments| segments.last())
+        .ok_or_else(|| anyhow::anyhow!("direct model URL must include a filename"))?
+        .to_string();
+    let id = safe_id_from_filename(&filename)?;
+    let size_mb = remote_size_mb(url.as_str()).await.unwrap_or(0);
+    let entry = RegistryEntry {
+        id,
+        name: filename.to_string(),
+        description: "Custom model file".to_string(),
+        languages: Vec::new(),
+        size_mb,
+        url: url.to_string(),
+        recommended_hardware: None,
+        sha256: None,
+        category: Some("custom".to_string()),
+    };
+    validate_custom_model_entry(&entry)?;
+    Ok(entry)
+}
+
+#[derive(Debug, Deserialize)]
+struct HuggingFaceModelInfo {
+    siblings: Vec<HuggingFaceSibling>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HuggingFaceSibling {
+    rfilename: String,
+    #[serde(default)]
+    size: Option<u64>,
+}
+
+async fn resolve_hugging_face_model_page_url(url: Url) -> anyhow::Result<RegistryEntry> {
+    let segments: Vec<_> = url.path_segments().unwrap().collect();
+    let repo = format!("{}/{}", segments[0], segments[1]);
+    let api_url = format!("https://huggingface.co/api/models/{repo}");
+    resolve_hugging_face_model_page_url_from_api(url, &api_url).await
+}
+
+async fn resolve_hugging_face_model_page_url_from_api(
+    url: Url,
+    api_url: &str,
+) -> anyhow::Result<RegistryEntry> {
+    let segments: Vec<_> = url.path_segments().unwrap().collect();
+    let repo = format!("{}/{}", segments[0], segments[1]);
+    let response = reqwest::get(api_url)
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to query Hugging Face model metadata: {error}"))?;
+    let status = response.status();
+    if !status.is_success() {
+        anyhow::bail!("failed to query Hugging Face model metadata: HTTP {status}");
+    }
+    let info = response
+        .json::<HuggingFaceModelInfo>()
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to parse Hugging Face model metadata: {error}"))?;
+    let file = info
+        .siblings
+        .iter()
+        .filter(|file| is_compatible_model_filename(&file.rfilename))
+        .min_by_key(|file| compatible_model_rank(&file.rfilename))
+        .ok_or_else(|| anyhow::anyhow!("Hugging Face model page does not expose a whisper.cpp-compatible .gguf or ggml .bin file"))?;
+    let id = safe_id_from_filename(&format!("{}-{}", repo.replace('/', "-"), file.rfilename))?;
+    let languages = info
+        .tags
+        .iter()
+        .filter_map(|tag| tag.strip_prefix("language:"))
+        .map(ToString::to_string)
+        .collect();
+    let entry = RegistryEntry {
+        id,
+        name: repo,
+        description: format!("Custom Hugging Face model file {}", file.rfilename),
+        languages,
+        size_mb: file.size.map(bytes_to_mb).unwrap_or(0),
+        url: format!(
+            "https://huggingface.co/{}/{}/resolve/main/{}",
+            segments[0], segments[1], file.rfilename
+        ),
+        recommended_hardware: None,
+        sha256: None,
+        category: Some("custom".to_string()),
+    };
+    validate_custom_model_entry(&entry)?;
+    Ok(entry)
+}
+
+fn validate_custom_model_entry(entry: &RegistryEntry) -> anyhow::Result<()> {
+    if !is_safe_model_id(&entry.id) {
+        anyhow::bail!("custom model ID '{}' is not filesystem-safe", entry.id);
+    }
+    let filename = model_filename(&entry.id, &entry.url);
+    if model_files_dir().join(&filename).exists() {
+        anyhow::bail!("custom model filename collision detected for {filename}");
+    }
+    Ok(())
+}
+
+fn is_compatible_model_filename(filename: &str) -> bool {
+    let name = filename
+        .rsplit('/')
+        .next()
+        .unwrap_or(filename)
+        .to_ascii_lowercase();
+    name.ends_with(".gguf") || (name.starts_with("ggml-") && name.ends_with(".bin"))
+}
+
+fn compatible_model_rank(filename: &str) -> u8 {
+    let name = filename.to_ascii_lowercase();
+    if name.ends_with(".gguf") {
+        0
+    } else if name.starts_with("ggml-") && name.ends_with(".bin") {
+        1
+    } else {
+        2
+    }
+}
+
+fn safe_id_from_filename(filename: &str) -> anyhow::Result<String> {
+    let stem = filename
+        .rsplit('/')
+        .next()
+        .and_then(|name| name.rsplit_once('.').map(|(stem, _)| stem).or(Some(name)))
+        .unwrap_or(filename)
+        .to_ascii_lowercase()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_lowercase() || ch.is_ascii_digit() || matches!(ch, '.' | '_' | '-') {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+
+    if is_safe_model_id(&stem) {
+        Ok(stem)
+    } else {
+        anyhow::bail!("custom model URL did not produce a filesystem-safe model ID")
+    }
+}
+
+async fn remote_size_mb(url: &str) -> anyhow::Result<u32> {
+    let response = reqwest::Client::new().head(url).send().await?;
+    Ok(response.content_length().map(bytes_to_mb).unwrap_or(0))
+}
+
+fn bytes_to_mb(bytes: u64) -> u32 {
+    ((bytes + 1024 * 1024 - 1) / (1024 * 1024))
+        .try_into()
+        .unwrap_or(u32::MAX)
 }
 
 pub fn save_state(state: &LocalModelState) -> anyhow::Result<()> {
@@ -428,13 +670,48 @@ mod tests {
         std::thread::spawn(move || {
             let (mut stream, _) = listener.accept().expect("accept request");
             let mut request = [0_u8; 1024];
-            let _ = stream.read(&mut request);
+            let read = stream.read(&mut request).unwrap_or(0);
+            let is_head = request[..read].starts_with(b"HEAD ");
             let response = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
             );
-            stream.write_all(response.as_bytes()).expect("write headers");
-            stream.write_all(&body).expect("write body");
+            stream
+                .write_all(response.as_bytes())
+                .expect("write headers");
+            if !is_head {
+                let _ = stream.write_all(&body);
+            }
+        });
+
+        url
+    }
+
+    fn serve_two_chunks(
+        status: &str,
+        content_type: &str,
+        first: Vec<u8>,
+        second: Vec<u8>,
+    ) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let url = format!("http://{}", listener.local_addr().expect("server address"));
+        let status = status.to_string();
+        let content_type = content_type.to_string();
+
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            let response = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                first.len() + second.len()
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write headers");
+            stream.write_all(&first).expect("write first chunk");
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            stream.write_all(&second).expect("write second chunk");
         });
 
         url
@@ -721,7 +998,9 @@ mod tests {
     async fn fetch_registry_from_url_reports_http_errors() {
         let url = serve_once("404 Not Found", "text/plain", b"missing".to_vec());
 
-        let error = fetch_registry_from_url(&url).await.expect_err("fetch should fail");
+        let error = fetch_registry_from_url(&url)
+            .await
+            .expect_err("fetch should fail");
 
         assert!(error.to_string().contains("HTTP 404"));
     }
@@ -766,7 +1045,10 @@ mod tests {
         with_isolated_data_dir(|_| {
             let entry = registry_entry_with_url("turbo", "https://example.com/ggml-turbo.gguf");
 
-            assert_eq!(model_destination(&entry), model_files_dir().join("turbo.gguf"));
+            assert_eq!(
+                model_destination(&entry),
+                model_files_dir().join("turbo.gguf")
+            );
         });
     }
 
@@ -832,7 +1114,8 @@ mod tests {
             let mut entry = registry_entry("custom");
             entry.size_mb = 1;
             fs::create_dir_all(model_files_dir()).expect("create files dir");
-            fs::write(model_destination(&entry), vec![0_u8; 1024 * 1024]).expect("write model file");
+            fs::write(model_destination(&entry), vec![0_u8; 1024 * 1024])
+                .expect("write model file");
 
             validate_downloaded_model(&entry).expect("validate size");
         });
@@ -893,6 +1176,155 @@ mod tests {
         } else {
             env::remove_var("HOME");
         }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn classifies_hugging_face_pages_and_direct_model_files() {
+        let hf_page = Url::parse("https://huggingface.co/Supertone/supertonic-3").unwrap();
+        let hf_file =
+            Url::parse("https://huggingface.co/Supertone/supertonic-3/resolve/main/model.gguf")
+                .unwrap();
+        let direct_file = Url::parse("https://example.com/models/ggml-custom.bin").unwrap();
+
+        assert!(is_hugging_face_model_page_url(&hf_page));
+        assert!(!is_hugging_face_model_page_url(&hf_file));
+        assert!(is_direct_model_file_url(&hf_file));
+        assert!(is_direct_model_file_url(&direct_file));
+    }
+
+    #[tokio::test]
+    async fn resolve_custom_model_rejects_non_url_inputs() {
+        let error = resolve_custom_model("not a url")
+            .await
+            .expect_err("non-url input should fail");
+
+        assert!(error.to_string().contains("require a URL"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn direct_model_file_url_resolves_to_custom_entry() {
+        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let previous = env::var_os("OSTT_MODELS_DIR");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("ostt-direct-url-test-{unique}"));
+        env::set_var("OSTT_MODELS_DIR", dir.join("models"));
+        let url = format!(
+            "{}/ggml-custom.bin",
+            serve_once(
+                "200 OK",
+                "application/octet-stream",
+                vec![0_u8; 1024 * 1024]
+            )
+        );
+
+        let entry = resolve_custom_model(&url)
+            .await
+            .expect("resolve direct URL");
+
+        assert_eq!(entry.id, "ggml-custom");
+        assert_eq!(entry.name, "ggml-custom.bin");
+        assert_eq!(entry.size_mb, 1);
+        assert_eq!(entry.url, url);
+        assert_eq!(entry.category.as_deref(), Some("custom"));
+        if let Some(previous) = previous {
+            env::set_var("OSTT_MODELS_DIR", previous);
+        } else {
+            env::remove_var("OSTT_MODELS_DIR");
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn hugging_face_page_resolution_selects_compatible_file() {
+        let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
+        let previous = env::var_os("OSTT_MODELS_DIR");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("ostt-hf-url-test-{unique}"));
+        env::set_var("OSTT_MODELS_DIR", dir.join("models"));
+        let body = br#"{
+            "tags": ["language:sv", "whisper"],
+            "siblings": [
+                {"rfilename": "README.md"},
+                {"rfilename": "model.gguf", "size": 1048576},
+                {"rfilename": "ggml-model.bin", "size": 2097152}
+            ]
+        }"#
+        .to_vec();
+        let api_url = serve_once("200 OK", "application/json", body);
+        let url = Url::parse("https://huggingface.co/KBLab/kb-whisper").unwrap();
+
+        let entry = resolve_hugging_face_model_page_url_from_api(url, &api_url)
+            .await
+            .expect("resolve Hugging Face page");
+
+        assert_eq!(entry.id, "kblab-kb-whisper-model");
+        assert_eq!(entry.languages, vec!["sv"]);
+        assert_eq!(entry.size_mb, 1);
+        assert_eq!(
+            entry.url,
+            "https://huggingface.co/KBLab/kb-whisper/resolve/main/model.gguf"
+        );
+        if let Some(previous) = previous {
+            env::set_var("OSTT_MODELS_DIR", previous);
+        } else {
+            env::remove_var("OSTT_MODELS_DIR");
+        }
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn custom_model_validation_rejects_unsafe_ids_and_filename_collisions() {
+        with_isolated_data_dir(|_| {
+            let mut unsafe_entry = registry_entry("bad/id");
+            unsafe_entry.category = Some("custom".to_string());
+            let error = register_custom_model(unsafe_entry).expect_err("unsafe ID should fail");
+            assert!(error.to_string().contains("filesystem-safe"));
+
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_files_dir().join("custom.bin"), [1]).expect("write colliding model");
+            let mut entry = registry_entry("custom");
+            entry.category = Some("custom".to_string());
+            let error = register_custom_model(entry).expect_err("collision should fail");
+            assert!(error.to_string().contains("collision"));
+        });
+    }
+
+    #[tokio::test]
+    async fn cancelled_download_cleans_up_temp_file() {
+        let url = serve_two_chunks(
+            "200 OK",
+            "application/octet-stream",
+            vec![1_u8; 1024],
+            vec![2_u8; 1024],
+        );
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("ostt-cancel-test-{unique}"));
+        let dest_path = dir.join("files").join("custom.bin");
+        let handle = DownloadHandle::new();
+        let callback_handle = handle.clone();
+
+        let error = download_model_with_handle(
+            &url,
+            &dest_path,
+            Some(Box::new(move |_, _, _| callback_handle.cancel())),
+            Some(handle),
+        )
+        .await
+        .expect_err("download should be cancelled");
+
+        assert!(error.to_string().contains("cancelled"));
+        assert!(!dest_path.exists());
+        assert!(!dest_path.with_extension("tmp").exists());
         let _ = fs::remove_dir_all(dir);
     }
 }

@@ -108,16 +108,16 @@ Depends on: `2.2.B`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.2 - Model Download Engine.md`
 
-- [ ] **2.2.20** Implement `resolve_custom_model(input)` that rejects non-URL inputs with a clear URL-required error.
-- [ ] **2.2.21** Detect Hugging Face model page URLs separately from direct model file URLs.
-- [ ] **2.2.22** Resolve direct model file URLs into registry-shaped custom entries with safe IDs, names, size metadata when available, URL, and `category = Some("custom")`.
-- [ ] **2.2.23** Resolve Hugging Face model page URLs through the Hugging Face API and select a whisper.cpp-compatible file conservatively.
-- [ ] **2.2.24** Validate custom IDs with the shared safe-ID helper and detect derived filename collisions before registration/download.
-- [ ] **2.2.25** Add `DownloadHandle` or equivalent cancellation flag support and check it during chunk streaming.
-- [ ] **2.2.26** Clean up `.tmp` files on cancellation or failed partial downloads.
-- [ ] **2.2.27** Add focused tests for URL classification, invalid inputs, direct URL resolution, ID validation, collision detection, and cancellation cleanup.
-- [ ] **2.2.28** Verify: run `cargo check`.
-- [ ] **2.2.29** Verify: run focused `cargo test` for custom URL/cancellation tests.
+- [x] **2.2.20** Implement `resolve_custom_model(input)` that rejects non-URL inputs with a clear URL-required error.
+- [x] **2.2.21** Detect Hugging Face model page URLs separately from direct model file URLs.
+- [x] **2.2.22** Resolve direct model file URLs into registry-shaped custom entries with safe IDs, names, size metadata when available, URL, and `category = Some("custom")`.
+- [x] **2.2.23** Resolve Hugging Face model page URLs through the Hugging Face API and select a whisper.cpp-compatible file conservatively.
+- [x] **2.2.24** Validate custom IDs with the shared safe-ID helper and detect derived filename collisions before registration/download.
+- [x] **2.2.25** Add `DownloadHandle` or equivalent cancellation flag support and check it during chunk streaming.
+- [x] **2.2.26** Clean up `.tmp` files on cancellation or failed partial downloads.
+- [x] **2.2.27** Add focused tests for URL classification, invalid inputs, direct URL resolution, ID validation, collision detection, and cancellation cleanup.
+- [x] **2.2.28** Verify: run `cargo check`.
+- [!] **2.2.29** Verify: run focused `cargo test` for custom URL/cancellation tests.
 
 ### 2.3.A — TUI Module, Entry Point, and Model List
 

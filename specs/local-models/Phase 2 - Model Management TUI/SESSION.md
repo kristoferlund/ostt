@@ -76,3 +76,18 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - Custom URL resolution, collision detection, cancellation, and failed partial download cleanup remain scoped to `2.2.C`.
+
+## Session 6: Spec 2.2.C — Custom URL Resolution and Cancellation
+
+Accomplished:
+- Added custom model URL resolution for direct model file URLs and Hugging Face model page URLs.
+- Added conservative whisper.cpp-compatible file classification/selection, safe custom ID derivation, custom filename collision checks, `DownloadHandle` cancellation, and `.tmp` cleanup on cancellation/failure.
+- Added focused tests for URL classification, invalid inputs, direct URL resolution, Hugging Face metadata resolution, unsafe ID/collision rejection, and cancellation cleanup.
+- Verified `cargo check` passed.
+
+Obstacles encountered:
+- `cargo test transcription::local_models` failed twice. The first failure was due the test HTTP helper writing a body for `HEAD` requests and poisoning the test env mutex. After fixing the helper, the second run still failed because direct URL size resolution returned `0` instead of `1`, which again poisoned the shared test env mutex and caused many dependent test failures.
+- Per the crash-recovery rule, `2.2.29` was marked `[!]` and work stopped after committing partial changes.
+
+Out-of-scope observations:
+- The focused test failure appears isolated to test HTTP `HEAD`/`Content-Length` behavior and test env lock poisoning, not to `cargo check` or cancellation cleanup.
