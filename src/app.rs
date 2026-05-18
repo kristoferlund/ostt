@@ -452,7 +452,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
         }
         Some(Commands::Model) => {
-            commands::handle_models_tui().await?;
+            commands::handle_model().await?;
         }
         Some(Commands::History) => {
             commands::handle_history().await?;

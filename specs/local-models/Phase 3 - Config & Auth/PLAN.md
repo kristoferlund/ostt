@@ -79,15 +79,15 @@ Depends on: `3.2.A`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/3.2 - Auth Flow & First-Time Setup.md`
 
-- [ ] **3.2.11** Create `src/commands/model.rs` for the canonical `ostt model` Ratatui selection flow.
-- [ ] **3.2.12** Add data types for grouped model-selection entries covering authenticated cloud providers, local registry/custom entries, and the local management row.
-- [ ] **3.2.13** Build cloud model sections from providers that currently have credentials.
-- [ ] **3.2.14** Build the Local section from Phase 2 registry/custom state and filesystem downloaded status.
-- [ ] **3.2.15** Mark the active provider/model using provider-aware selected-model state.
-- [ ] **3.2.16** Add first-run and recovery error helpers for no selected model, missing cloud credentials, and missing local model files.
-- [ ] **3.2.17** Add tests for grouped model data, authenticated-provider filtering, Local entries, active marking, and actionable recovery messages.
-- [ ] **3.2.18** Verify: run `cargo check`.
-- [ ] **3.2.19** Verify: run focused `cargo test commands::model` or the nearest focused model-selection test target.
+- [x] **3.2.11** Create `src/commands/model.rs` for the canonical `ostt model` Ratatui selection flow.
+- [x] **3.2.12** Add data types for grouped model-selection entries covering authenticated cloud providers, local registry/custom entries, and the local management row.
+- [x] **3.2.13** Build cloud model sections from providers that currently have credentials.
+- [x] **3.2.14** Build the Local section from Phase 2 registry/custom state and filesystem downloaded status.
+- [x] **3.2.15** Mark the active provider/model using provider-aware selected-model state.
+- [x] **3.2.16** Add first-run and recovery error helpers for no selected model, missing cloud credentials, and missing local model files.
+- [x] **3.2.17** Add tests for grouped model data, authenticated-provider filtering, Local entries, active marking, and actionable recovery messages.
+- [x] **3.2.18** Verify: run `cargo check`.
+- [x] **3.2.19** Verify: run focused `cargo test commands::model` or the nearest focused model-selection test target.
 
 ### 3.2.C - Ratatui Model Wizard and Local Management Integration
 

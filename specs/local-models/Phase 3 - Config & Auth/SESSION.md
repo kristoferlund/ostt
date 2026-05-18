@@ -56,3 +56,22 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - Existing error strings in record/retry/transcribe still point users to `ostt auth`; recovery-message updates are scoped to later 3.2 sections.
+
+## Session 4: Spec 3.2.B - Model Selection Data and Recovery Errors
+
+Accomplished:
+- Added `src/commands/model.rs` with grouped model-selection data types and builders for authenticated cloud providers, Local registry/custom entries, downloaded status, active marking, and local management row data.
+- Added first-run and recovery error helpers for no selected model, missing cloud credentials, and missing local model files.
+- Wired the canonical `ostt model` command to the new module with UI implementation left for `3.2.C`.
+- Added focused tests for grouped data, authenticated-provider filtering, Local entries, provider-aware active marking, and actionable recovery messages.
+- Updated `PLAN.md` after each completed task.
+
+Verification:
+- `cargo check` failed once due to unnecessary equality derives over `RegistryEntry`, then passed after removing those derives.
+- `cargo test commands::model` passed.
+
+Obstacles encountered:
+- `RegistryEntry` does not implement `PartialEq`/`Eq`; no shared type changes were needed.
+
+Out-of-scope observations:
+- The full Ratatui `ostt model` UI, selection persistence behavior, download flow, and routing into local model management remain scoped to `3.2.C`.
