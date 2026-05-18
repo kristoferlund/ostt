@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::PathBuf;
+use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
@@ -34,6 +35,10 @@ impl Default for LocalModelState {
 
 /// Returns the directory where local transcription models are stored.
 pub fn models_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os("OSTT_MODELS_DIR") {
+        return PathBuf::from(path);
+    }
+
     let base = dirs::data_dir().unwrap_or_else(|| PathBuf::from("~/.local/share"));
     base.join("ostt").join("models")
 }
@@ -59,13 +64,55 @@ pub enum ModelError {
     RegistryUnavailable,
 }
 
+#[derive(Debug, Clone)]
+pub struct InstalledModelView {
+    pub entry: RegistryEntry,
+    pub path: PathBuf,
+    pub size_bytes: u64,
+    pub modified_at: Option<SystemTime>,
+    pub is_active: bool,
+}
+
 pub fn model_filename(id: &str, url: &str) -> String {
-    url.rsplit('/')
+    let extension = url
+        .split(['?', '#'])
         .next()
-        .and_then(|segment| segment.split('?').next())
-        .filter(|segment| !segment.is_empty() && segment.contains('.'))
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("{id}.gguf"))
+        .and_then(|without_query| without_query.rsplit('/').next())
+        .and_then(|segment| segment.rsplit_once('.').map(|(_, extension)| extension))
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or("bin");
+
+    format!("{id}.{extension}")
+}
+
+pub fn is_safe_model_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+}
+
+pub fn installed_models(
+    registry: &[RegistryEntry],
+    state: &LocalModelState,
+    selected_model: Option<&str>,
+) -> Vec<InstalledModelView> {
+    registry
+        .iter()
+        .chain(state.custom_models.iter())
+        .filter_map(|entry| {
+            let path = model_files_dir().join(model_filename(&entry.id, &entry.url));
+            let metadata = fs::metadata(&path).ok()?;
+
+            Some(InstalledModelView {
+                entry: entry.clone(),
+                path,
+                size_bytes: metadata.len(),
+                modified_at: metadata.modified().ok(),
+                is_active: selected_model == Some(entry.id.as_str()),
+            })
+        })
+        .collect()
 }
 
 pub fn load_registry_entries() -> Result<Vec<RegistryEntry>, ModelError> {
@@ -135,20 +182,21 @@ mod tests {
 
     fn with_isolated_data_dir(test: impl FnOnce(PathBuf)) {
         let _guard = ENV_LOCK.lock().expect("test env lock poisoned");
-        let previous = env::var_os("XDG_DATA_HOME");
+        let previous = env::var_os("OSTT_MODELS_DIR");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
             .as_nanos();
         let dir = env::temp_dir().join(format!("ostt-local-models-test-{unique}"));
-        env::set_var("XDG_DATA_HOME", &dir);
+        let models_dir = dir.join("models");
+        env::set_var("OSTT_MODELS_DIR", &models_dir);
 
-        test(dir.clone());
+        test(models_dir);
 
         if let Some(previous) = previous {
-            env::set_var("XDG_DATA_HOME", previous);
+            env::set_var("OSTT_MODELS_DIR", previous);
         } else {
-            env::remove_var("XDG_DATA_HOME");
+            env::remove_var("OSTT_MODELS_DIR");
         }
         let _ = fs::remove_dir_all(dir);
     }
@@ -164,6 +212,13 @@ mod tests {
             recommended_hardware: None,
             sha256: None,
             category: None,
+        }
+    }
+
+    fn registry_entry_with_url(id: &str, url: &str) -> RegistryEntry {
+        RegistryEntry {
+            url: url.to_string(),
+            ..registry_entry(id)
         }
     }
 
@@ -216,6 +271,88 @@ mod tests {
             save_state(&LocalModelState::default()).expect("save state");
 
             assert!(state_path().exists());
+        });
+    }
+
+    #[test]
+    fn model_filename_uses_id_with_url_extension() {
+        assert_eq!(
+            model_filename("kb-whisper-large", "https://example.com/models/kb.bin?download=1"),
+            "kb-whisper-large.bin"
+        );
+        assert_eq!(
+            model_filename("turbo", "https://example.com/ggml-turbo.gguf#fragment"),
+            "turbo.gguf"
+        );
+        assert_eq!(model_filename("custom", "https://example.com/download"), "custom.bin");
+    }
+
+    #[test]
+    fn safe_model_id_allows_only_portable_filename_characters() {
+        assert!(is_safe_model_id("kb-whisper.large_v3"));
+        assert!(!is_safe_model_id(""));
+        assert!(!is_safe_model_id("Large"));
+        assert!(!is_safe_model_id("model/name"));
+        assert!(!is_safe_model_id("model name"));
+    }
+
+    #[test]
+    fn installed_models_discovers_registry_and_custom_files() {
+        with_isolated_data_dir(|_| {
+            let registry = vec![registry_entry_with_url(
+                "turbo",
+                "https://example.com/ggml-turbo.gguf",
+            )];
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![registry_entry("custom")],
+            };
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_files_dir().join("turbo.gguf"), [1, 2, 3]).expect("write registry model");
+            fs::write(model_files_dir().join("custom.bin"), [4, 5]).expect("write custom model");
+
+            let installed = installed_models(&registry, &state, None);
+
+            assert_eq!(installed.len(), 2);
+            assert!(installed.iter().any(|model| {
+                model.entry.id == "turbo"
+                    && model.path == model_files_dir().join("turbo.gguf")
+                    && model.size_bytes == 3
+                    && model.modified_at.is_some()
+            }));
+            assert!(installed.iter().any(|model| {
+                model.entry.id == "custom"
+                    && model.path == model_files_dir().join("custom.bin")
+                    && model.size_bytes == 2
+            }));
+        });
+    }
+
+    #[test]
+    fn installed_models_marks_selected_model_active() {
+        with_isolated_data_dir(|_| {
+            let registry = vec![registry_entry("turbo")];
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_files_dir().join("turbo.bin"), [1]).expect("write model");
+
+            let installed = installed_models(&registry, &LocalModelState::default(), Some("turbo"));
+
+            assert_eq!(installed.len(), 1);
+            assert!(installed[0].is_active);
+        });
+    }
+
+    #[test]
+    fn installed_models_does_not_persist_registry_entries() {
+        with_isolated_data_dir(|_| {
+            let registry = vec![registry_entry("turbo")];
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_files_dir().join("turbo.bin"), [1]).expect("write model");
+
+            let installed = installed_models(&registry, &LocalModelState::default(), None);
+
+            assert_eq!(installed.len(), 1);
+            assert!(!state_path().exists());
         });
     }
 }

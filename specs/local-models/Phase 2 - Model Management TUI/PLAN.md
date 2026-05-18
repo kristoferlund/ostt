@@ -42,15 +42,15 @@ Depends on: `2.1.A`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.1 - Model Registry & Storage.md`
 
-- [ ] **2.1.10** Implement URL extension extraction so `model_filename(id, url)` derives `{id}.{ext}` and falls back to `{id}.bin`.
-- [ ] **2.1.11** Add safe model ID validation matching `^[a-z0-9._-]+$` for reuse by registry/custom flows.
-- [ ] **2.1.12** Add `InstalledModelView` with entry, path, size, modified time, and active flag.
-- [ ] **2.1.13** Implement `installed_models(registry, state, selected_model)` by merging registry and custom entries and checking `models/files/`.
-- [ ] **2.1.14** Update `resolve_installed_model_path()` to use `model_files_dir()` and derived filenames consistently.
-- [ ] **2.1.15** Ensure installed status is inferred from files and does not write registry models into `models.json`.
-- [ ] **2.1.16** Add focused tests for filename derivation, safe ID validation, installed discovery, and active marking.
-- [ ] **2.1.17** Verify: run `cargo check`.
-- [ ] **2.1.18** Verify: run focused `cargo test` for filename/discovery tests.
+- [x] **2.1.10** Implement URL extension extraction so `model_filename(id, url)` derives `{id}.{ext}` and falls back to `{id}.bin`.
+- [x] **2.1.11** Add safe model ID validation matching `^[a-z0-9._-]+$` for reuse by registry/custom flows.
+- [x] **2.1.12** Add `InstalledModelView` with entry, path, size, modified time, and active flag.
+- [x] **2.1.13** Implement `installed_models(registry, state, selected_model)` by merging registry and custom entries and checking `models/files/`.
+- [x] **2.1.14** Update `resolve_installed_model_path()` to use `model_files_dir()` and derived filenames consistently.
+- [x] **2.1.15** Ensure installed status is inferred from files and does not write registry models into `models.json`.
+- [x] **2.1.16** Add focused tests for filename derivation, safe ID validation, installed discovery, and active marking.
+- [x] **2.1.17** Verify: run `cargo check`.
+- [x] **2.1.18** Verify: run focused `cargo test` for filename/discovery tests.
 
 ### 2.1.C — Activation and Deletion
 
