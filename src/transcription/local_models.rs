@@ -165,9 +165,10 @@ pub fn mark_downloaded_registry_model(entry: &RegistryEntry) -> anyhow::Result<(
 }
 
 pub fn register_custom_model(entry: RegistryEntry) -> anyhow::Result<()> {
-    validate_custom_model_entry(&entry)?;
+    validate_custom_model_id(&entry)?;
     let mut state = load_state();
-    state.custom_models.retain(|model| model.id != entry.id);
+    check_filename_collision(&entry, &state)?;
+    state.custom_models.retain(|m| m.id != entry.id);
     state.custom_models.push(entry);
     save_state(&state)
 }
@@ -389,19 +390,10 @@ pub fn load_state() -> LocalModelState {
         return LocalModelState::default();
     }
 
-    let mut state: LocalModelState = fs::read_to_string(&path)
+    fs::read_to_string(&path)
         .ok()
         .and_then(|content| serde_json::from_str(&content).ok())
-        .unwrap_or_default();
-    state.custom_models.retain(|entry| !is_test_placeholder_model(entry));
-    state
-}
-
-fn is_test_placeholder_model(entry: &RegistryEntry) -> bool {
-    entry.id == "custom"
-        && entry.name == "Test Model"
-        && entry.description == "Test model"
-        && entry.url == "https://example.com/custom.bin"
+        .unwrap_or_default()
 }
 
 async fn resolve_direct_model_file_url(url: Url) -> anyhow::Result<RegistryEntry> {
@@ -423,7 +415,7 @@ async fn resolve_direct_model_file_url(url: Url) -> anyhow::Result<RegistryEntry
         sha256: None,
         category: Some("custom".to_string()),
     };
-    validate_custom_model_entry(&entry)?;
+    validate_custom_model_id(&entry)?;
     Ok(entry)
 }
 
@@ -492,16 +484,29 @@ async fn resolve_hugging_face_model_page_url_from_api(
         sha256: None,
         category: Some("custom".to_string()),
     };
-    validate_custom_model_entry(&entry)?;
+    validate_custom_model_id(&entry)?;
     Ok(entry)
 }
 
-fn validate_custom_model_entry(entry: &RegistryEntry) -> anyhow::Result<()> {
+fn validate_custom_model_id(entry: &RegistryEntry) -> anyhow::Result<()> {
     if !is_safe_model_id(&entry.id) {
         anyhow::bail!("custom model ID '{}' is not filesystem-safe", entry.id);
     }
+    Ok(())
+}
+
+/// Checks for filename collision with an *existing unrelated* installed model.
+/// Only called before registering a new custom model, not during URL resolution.
+fn check_filename_collision(entry: &RegistryEntry, state: &LocalModelState) -> anyhow::Result<()> {
     let filename = model_filename(&entry.id, &entry.url);
-    if model_files_dir().join(&filename).exists() {
+    let path = model_files_dir().join(&filename);
+    if !path.exists() {
+        return Ok(());
+    }
+    // Allow collision if this exact ID is already registered as a custom model —
+    // that is a replacement, not a conflict.
+    let already_registered = state.custom_models.iter().any(|m| m.id == entry.id);
+    if !already_registered {
         anyhow::bail!("custom model filename collision detected for {filename}");
     }
     Ok(())
@@ -619,13 +624,10 @@ fn find_installed_file_by_id(model_id: &str) -> Result<PathBuf, ModelError> {
 }
 
 pub fn activate_model(model_id: &str) -> anyhow::Result<()> {
-    let entry = find_model_entry(model_id)?;
-    let path = model_files_dir().join(model_filename(&entry.id, &entry.url));
-
+    let path = resolve_installed_model_path(model_id)?;
     if !path.exists() {
         return Err(ModelError::NotDownloaded(model_id.to_string()).into());
     }
-
     config::save_selected_model("local", model_id)
 }
 
@@ -634,14 +636,9 @@ pub fn deactivate_model() -> anyhow::Result<()> {
 }
 
 pub fn delete_model(model_id: &str) -> anyhow::Result<()> {
-    let entry = find_model_entry(model_id)?;
-    let file_path = model_files_dir().join(model_filename(&entry.id, &entry.url));
+    let file_path = resolve_installed_model_path(model_id)?;
 
-    if !file_path.exists() {
-        return Err(ModelError::NotDownloaded(model_id.to_string()).into());
-    }
-
-    fs::remove_file(file_path)?;
+    fs::remove_file(&file_path)?;
 
     if config::get_selected_model_entry()?
         .is_some_and(|selected| selected.provider_id == "local" && selected.model_id == model_id)
@@ -1134,27 +1131,18 @@ mod tests {
     }
 
     #[test]
-    fn load_state_filters_test_placeholder_model() {
+    fn load_state_round_trips_custom_entries() {
         with_isolated_data_dir(|_| {
             let state = LocalModelState {
                 version: 1,
-                custom_models: vec![RegistryEntry {
-                    id: "custom".to_string(),
-                    name: "Test Model".to_string(),
-                    description: "Test model".to_string(),
-                    languages: vec!["en".to_string()],
-                    size_mb: 1,
-                    url: "https://example.com/custom.bin".to_string(),
-                    recommended_hardware: None,
-                    sha256: None,
-                    category: None,
-                }],
+                custom_models: vec![registry_entry("my-custom-model")],
             };
-            save_state(&state).expect("save placeholder state");
+            save_state(&state).expect("save state");
 
             let loaded = load_state();
 
-            assert!(loaded.custom_models.is_empty());
+            assert_eq!(loaded.custom_models.len(), 1);
+            assert_eq!(loaded.custom_models[0].id, "my-custom-model");
         });
     }
 
@@ -1442,19 +1430,28 @@ mod tests {
     }
 
     #[test]
-    fn custom_model_validation_rejects_unsafe_ids_and_filename_collisions() {
+    fn custom_model_validation_rejects_unsafe_ids_and_unregistered_filename_collisions() {
         with_isolated_data_dir(|_| {
             let mut unsafe_entry = registry_entry("bad/id");
             unsafe_entry.category = Some("custom".to_string());
             let error = register_custom_model(unsafe_entry).expect_err("unsafe ID should fail");
             assert!(error.to_string().contains("filesystem-safe"));
 
+            // A file whose ID is not yet registered counts as a collision.
             fs::create_dir_all(model_files_dir()).expect("create files dir");
-            fs::write(model_files_dir().join("custom.bin"), [1]).expect("write colliding model");
-            let mut entry = registry_entry("custom");
+            fs::write(model_files_dir().join("other.bin"), [1]).expect("write colliding model");
+            let mut entry = registry_entry("other");
             entry.category = Some("custom".to_string());
-            let error = register_custom_model(entry).expect_err("collision should fail");
+            let error = register_custom_model(entry).expect_err("unregistered collision should fail");
             assert!(error.to_string().contains("collision"));
+
+            // Re-registering an already-registered ID (replacement) must succeed even
+            // if the file already exists on disk.
+            let mut existing = registry_entry("custom");
+            existing.category = Some("custom".to_string());
+            register_custom_model(existing.clone()).expect("first registration");
+            fs::write(model_files_dir().join("custom.bin"), [1]).expect("write model file");
+            register_custom_model(existing).expect("replacement of registered model");
         });
     }
 

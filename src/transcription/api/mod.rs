@@ -27,7 +27,9 @@ pub struct TranscriptionConfig {
     pub provider: TranscriptionProvider,
     /// The selected model ID, including data-driven local model IDs
     pub model_id: String,
-    /// The model to use
+    /// The enum model variant. For cloud providers this is authoritative.
+    /// For local transcription (`provider == Local`) this is a placeholder —
+    /// dispatch must use `provider`, not this field.
     pub model: TranscriptionModel,
     /// The API key for authentication
     pub api_key: String,

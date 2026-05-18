@@ -236,7 +236,12 @@ fn remove_toml_section(content: &str, section: &str) -> String {
             continue;
         }
         if skipping && trimmed.starts_with('[') && trimmed.ends_with(']') {
-            skipping = false;
+            // Stop skipping only at top-level sections, not subsections like
+            // [transcription.local] which belong to the section being removed.
+            let is_subsection = trimmed.starts_with(&format!("[{section}.")); 
+            if !is_subsection {
+                skipping = false;
+            }
         }
         if !skipping {
             output.push(line);
