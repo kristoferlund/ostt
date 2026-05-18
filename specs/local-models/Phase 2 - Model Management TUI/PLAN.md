@@ -26,15 +26,15 @@ Deferred: hardware recommendation integration from spec `4.1` is outside this Ph
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.1 - Model Registry & Storage.md`
 
-- [ ] **2.1.1** Update `src/transcription/local_models.rs` `RegistryEntry` to match the spec shape with serde serialize/deserialize support.
-- [ ] **2.1.2** Add `LocalModelState.version` and implement `Default` with version `1` and empty `custom_models`.
-- [ ] **2.1.3** Add helpers for `state_path()` and `model_files_dir()` using the existing `models_dir()` convention.
-- [ ] **2.1.4** Replace custom-only loading with `load_state()` that returns default when `models.json` is missing or corrupted.
-- [ ] **2.1.5** Add `save_state(&LocalModelState)` that creates parent directories and writes pretty JSON.
-- [ ] **2.1.6** Preserve a compatibility helper for loading custom entries through the new local state shape if existing callers need it.
-- [ ] **2.1.7** Add focused tests for default load, corrupted load, save/load round trip, and parent directory creation.
-- [ ] **2.1.8** Verify: run `cargo check`.
-- [ ] **2.1.9** Verify: run focused `cargo test` for local model state persistence tests.
+- [x] **2.1.1** Update `src/transcription/local_models.rs` `RegistryEntry` to match the spec shape with serde serialize/deserialize support.
+- [x] **2.1.2** Add `LocalModelState.version` and implement `Default` with version `1` and empty `custom_models`.
+- [x] **2.1.3** Add helpers for `state_path()` and `model_files_dir()` using the existing `models_dir()` convention.
+- [x] **2.1.4** Replace custom-only loading with `load_state()` that returns default when `models.json` is missing or corrupted.
+- [x] **2.1.5** Add `save_state(&LocalModelState)` that creates parent directories and writes pretty JSON.
+- [x] **2.1.6** Preserve a compatibility helper for loading custom entries through the new local state shape if existing callers need it.
+- [x] **2.1.7** Add focused tests for default load, corrupted load, save/load round trip, and parent directory creation.
+- [x] **2.1.8** Verify: run `cargo check`.
+- [x] **2.1.9** Verify: run focused `cargo test` for local model state persistence tests.
 
 ### 2.1.B — Filename Derivation and Installed Discovery
 
