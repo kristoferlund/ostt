@@ -1,8 +1,7 @@
 use crate::commands::models_tui;
 use crate::config::{self, SelectedModel};
 use crate::transcription::local_models::{
-    download_model_with_handle, fetch_registry, load_state, mark_downloaded_registry_model,
-    model_destination, validate_downloaded_model, DownloadHandle, LocalModelState, RegistryEntry,
+    load_state, model_destination, LocalModelState, RegistryEntry,
 };
 use crate::transcription::{TranscriptionModel, TranscriptionProvider};
 use crossterm::event::{self, Event, KeyCode, KeyModifiers};
@@ -11,14 +10,13 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::{Frame, Terminal};
 use std::collections::HashSet;
 use std::io::{self, Stdout};
-use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 const BG: Color = Color::Rgb(0, 0, 0);
@@ -28,8 +26,13 @@ const HELP_FG: Color = Color::Rgb(100, 100, 100);
 
 #[derive(Debug, Clone)]
 pub enum ModelSelectionEntryKind {
-    Cloud { model: TranscriptionModel },
-    Local { entry: RegistryEntry, is_downloaded: bool },
+    Cloud {
+        model: TranscriptionModel,
+    },
+    Local {
+        entry: RegistryEntry,
+        is_downloaded: bool,
+    },
     LocalManagement,
 }
 
@@ -74,6 +77,13 @@ pub enum ModelWizardAction {
     ManageLocalModels,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderChoice {
+    Local,
+    Cloud,
+    Quit,
+}
+
 #[derive(Debug, Clone)]
 pub struct ModelWizard {
     pub sections: Vec<ModelSelectionSection>,
@@ -84,33 +94,318 @@ pub struct ModelWizard {
     pub notification: Option<(String, Instant)>,
 }
 
+#[derive(Debug)]
+pub struct UserQuit;
+
+impl std::fmt::Display for UserQuit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("quit")
+    }
+}
+
+impl std::error::Error for UserQuit {}
+
 pub async fn handle_model() -> anyhow::Result<()> {
     let mut guard = TerminalGuard::new()?;
 
     loop {
-        let authorized_provider_ids = config::get_authorized_providers()?;
-        let local_state = load_local_selection_state()?;
-        let registry = fetch_registry().await.unwrap_or_default();
-        let selected_model = config::get_selected_model_entry()?;
-        let sections = build_model_sections(
-            &authorized_provider_ids,
-            &local_state,
-            &registry,
-            selected_model.as_ref(),
-        );
-        let mut wizard = ModelWizard::new(sections, local_audio_warning()?);
-        if registry.is_empty() {
-            wizard.status_message = Some("Could not load remote Local registry".to_string());
+        let choice = show_provider_picker(&mut guard.terminal).await?;
+        let result = match choice {
+            ProviderChoice::Quit => break,
+            ProviderChoice::Local => models_tui::handle_models_tui_with(&mut guard.terminal).await,
+            ProviderChoice::Cloud => run_cloud_selector(&mut guard.terminal).await,
+        };
+        if let Err(e) = result {
+            if e.downcast_ref::<UserQuit>().is_some() {
+                break;
+            }
+            return Err(e);
         }
-
-        let action = run_model_wizard(&mut guard.terminal, &mut wizard).await?;
-        if action == ModelWizardAction::ManageLocalModels {
-            models_tui::handle_models_tui_with(&mut guard.terminal).await?;
-            continue;
-        }
-        break;
     }
     Ok(())
+}
+
+async fn show_provider_picker(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+) -> anyhow::Result<ProviderChoice> {
+    let choices = ["Local provider", "Cloud provider"];
+    let mut selected = 0_usize;
+
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+
+            let padding_block = Block::default()
+                .padding(Padding::uniform(1))
+                .style(Style::default().bg(BG));
+            frame.render_widget(&padding_block, area);
+            let padded_area = padding_block.inner(area);
+
+            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+            frame.render_widget(&main_block, padded_area);
+            let inner_area = main_block.inner(padded_area);
+
+            let [header_area, list_area, footer_area] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(5),
+                Constraint::Length(1),
+            ])
+            .areas(inner_area);
+
+            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+                .style(Style::default().fg(FG))
+                .alignment(Alignment::Left);
+            frame.render_widget(header, header_area);
+
+            let items: Vec<ListItem> = choices
+                .iter()
+                .map(|choice| ListItem::new(Line::from(choice.to_string())))
+                .collect();
+
+            let mut state = ListState::default().with_selected(Some(selected));
+            frame.render_stateful_widget(
+                List::new(items)
+                    .block(Block::default().title(" Provider ").borders(Borders::ALL))
+                    .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG))
+                    .highlight_symbol("> "),
+                list_area,
+                &mut state,
+            );
+
+            frame.render_widget(
+                Paragraph::new("↑↓ select, ↵ confirm, esc/q quit")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(HELP_FG)),
+                footer_area,
+            );
+        })?;
+
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Up => selected = selected.saturating_sub(1),
+                    KeyCode::Down => selected = (selected + 1).min(1),
+                    KeyCode::Enter => {
+                        return Ok(match selected {
+                            0 => ProviderChoice::Local,
+                            _ => ProviderChoice::Cloud,
+                        })
+                    }
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(ProviderChoice::Quit),
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        return Ok(ProviderChoice::Quit)
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+async fn run_cloud_selector(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+) -> anyhow::Result<()> {
+    let authorized_provider_ids = config::get_authorized_providers()?;
+
+    if authorized_provider_ids.is_empty() {
+        show_no_providers_screen(terminal).await?;
+        return Ok(());
+    }
+
+    let selected_model = config::get_selected_model_entry()?;
+    let sections = build_cloud_sections(&authorized_provider_ids, selected_model.as_ref());
+    let entries: Vec<&ModelSelectionEntry> =
+        sections.iter().flat_map(|s| s.entries.iter()).collect();
+
+    if entries.is_empty() {
+        show_no_providers_screen(terminal).await?;
+        return Ok(());
+    }
+
+    let mut notification: Option<(String, Instant)> = None;
+    let mut selected = 0_usize;
+
+    loop {
+        if let Some((_, start_time)) = &notification {
+            if start_time.elapsed() >= Duration::from_millis(750) {
+                notification = None;
+            }
+        }
+
+        terminal.draw(|frame| {
+            let area = frame.area();
+
+            let padding_block = Block::default()
+                .padding(Padding::uniform(1))
+                .style(Style::default().bg(BG));
+            frame.render_widget(&padding_block, area);
+            let padded_area = padding_block.inner(area);
+
+            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+            frame.render_widget(&main_block, padded_area);
+            let inner_area = main_block.inner(padded_area);
+
+            let [header_area, list_area, footer_area] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(5),
+                Constraint::Length(1),
+            ])
+            .areas(inner_area);
+
+            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+                .style(Style::default().fg(FG))
+                .alignment(Alignment::Left);
+            frame.render_widget(header, header_area);
+
+            let mut items = Vec::new();
+            let mut display_index = 0_usize;
+            let mut model_index = 0_usize;
+            let mut selected_display_index = None;
+            for section in &sections {
+                items.push(ListItem::new(Line::from(Span::styled(
+                    section.title.to_string(),
+                    Style::default().fg(Color::Rgb(120, 120, 120)),
+                ))));
+                display_index += 1;
+                for entry in &section.entries {
+                    if model_index == selected {
+                        selected_display_index = Some(display_index);
+                    }
+                    items.push(cloud_list_item(entry));
+                    display_index += 1;
+                    model_index += 1;
+                }
+                items.push(ListItem::new(Line::from("")));
+                display_index += 1;
+            }
+
+            let mut state = ListState::default().with_selected(selected_display_index);
+            frame.render_stateful_widget(
+                List::new(items)
+                    .block(
+                        Block::default()
+                            .title(" Cloud Model ")
+                            .borders(Borders::ALL),
+                    )
+                    .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG))
+                    .highlight_symbol("> "),
+                list_area,
+                &mut state,
+            );
+
+            frame.render_widget(
+                Paragraph::new("↑↓ select, ↵ activate, esc/q back")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(HELP_FG)),
+                footer_area,
+            );
+
+            if let Some((message, _)) = &notification {
+                render_notification(frame, area, message);
+            }
+        })?;
+
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Up => selected = selected.saturating_sub(1),
+                    KeyCode::Down => selected = (selected + 1).min(entries.len().saturating_sub(1)),
+                    KeyCode::Enter => {
+                        if let Some(entry) = entries.get(selected) {
+                            if let ModelSelectionEntryKind::Cloud { model } = &entry.kind {
+                                save_cloud_selection(&entry.provider_id, model)?;
+                                notification =
+                                    Some((format!("Activated {}", entry.name), Instant::now()));
+                            }
+                        }
+                    }
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        return Err(UserQuit.into())
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+}
+
+fn cloud_list_item(entry: &ModelSelectionEntry) -> ListItem<'static> {
+    let marker = if entry.is_active { "◉" } else { "○" };
+    ListItem::new(Line::from(format!("{marker} {}", entry.name)))
+}
+
+async fn show_no_providers_screen(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+) -> anyhow::Result<()> {
+    loop {
+        terminal.draw(|frame| {
+            let area = frame.area();
+
+            let padding_block = Block::default()
+                .padding(Padding::uniform(1))
+                .style(Style::default().bg(BG));
+            frame.render_widget(&padding_block, area);
+            let padded_area = padding_block.inner(area);
+
+            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+            frame.render_widget(&main_block, padded_area);
+            let inner_area = main_block.inner(padded_area);
+
+            let [header_area, content_area, footer_area] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Min(5),
+                Constraint::Length(1),
+            ])
+            .areas(inner_area);
+
+            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
+                .style(Style::default().fg(FG))
+                .alignment(Alignment::Left);
+            frame.render_widget(header, header_area);
+
+            frame.render_widget(
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        "No cloud providers authenticated.",
+                        Style::default().add_modifier(Modifier::BOLD),
+                    )),
+                    Line::from(""),
+                    Line::from("Run `ostt auth login` to add credentials."),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "Available providers: OpenAI, Groq",
+                        Style::default().fg(HELP_FG),
+                    )),
+                ])
+                .block(
+                    Block::default()
+                        .title(" Cloud Provider ")
+                        .borders(Borders::ALL),
+                ),
+                content_area,
+            );
+
+            frame.render_widget(
+                Paragraph::new("esc/q back")
+                    .alignment(Alignment::Center)
+                    .style(Style::default().fg(HELP_FG)),
+                footer_area,
+            );
+        })?;
+
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                match key.code {
+                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                        return Err(UserQuit.into())
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
 impl ModelWizard {
@@ -212,97 +507,6 @@ impl Drop for TerminalGuard {
     }
 }
 
-struct RunningDownload {
-    entry: RegistryEntry,
-    state: Arc<Mutex<DownloadState>>,
-    handle: DownloadHandle,
-    task: tokio::task::JoinHandle<anyhow::Result<()>>,
-}
-
-async fn run_model_wizard(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    wizard: &mut ModelWizard,
-) -> anyhow::Result<ModelWizardAction> {
-    let mut running_download: Option<RunningDownload> = None;
-
-    loop {
-        if let Some(running) = running_download.as_ref() {
-            sync_download_mode(wizard, running);
-            if running.task.is_finished() {
-                let running = running_download.take().expect("running download");
-                match running.task.await? {
-                    Ok(()) => {
-                        wizard.status_message = Some(format!(
-                            "Downloaded {}. Press Enter again to activate.",
-                            running.entry.name
-                        ));
-                        update_local_downloaded_status(wizard, &running.entry.id, true);
-                    }
-                    Err(error) => wizard.status_message = Some(error.to_string()),
-                }
-                wizard.mode = ModelWizardMode::Browse;
-            }
-        }
-
-        if let Some((_, start_time)) = &wizard.notification {
-            if start_time.elapsed() >= Duration::from_millis(750) {
-                wizard.notification = None;
-            }
-        }
-
-        terminal.draw(|frame| render_model_wizard(frame, wizard))?;
-
-        if !event::poll(Duration::from_millis(100))? {
-            continue;
-        }
-
-        if let Event::Key(key) = event::read()? {
-            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-                if let Some(running) = running_download.as_ref() {
-                    running.handle.cancel();
-                    if let Ok(mut state) = running.state.lock() {
-                        state.status = "Cancelling download".to_string();
-                    }
-                    continue;
-                }
-                return Ok(ModelWizardAction::Quit);
-            }
-
-            match (wizard.mode.clone(), key.code) {
-                (ModelWizardMode::Browse, KeyCode::Char('q')) => return Ok(ModelWizardAction::Quit),
-                (ModelWizardMode::Browse, KeyCode::Esc) => return Ok(wizard.back()),
-                (ModelWizardMode::Browse, KeyCode::Down) => wizard.move_down(),
-                (ModelWizardMode::Browse, KeyCode::Up) => wizard.move_up(),
-                (ModelWizardMode::Browse, KeyCode::Char('m')) => {
-                    return Ok(ModelWizardAction::ManageLocalModels)
-                }
-                (ModelWizardMode::Browse, KeyCode::Enter) => match wizard.select_current()? {
-                    ModelWizardAction::ManageLocalModels => {
-                        return Ok(ModelWizardAction::ManageLocalModels)
-                    }
-                    action => {
-                        if action != ModelWizardAction::Continue {
-                            return Ok(action);
-                        }
-                    }
-                },
-                (ModelWizardMode::ConfirmDownload { .. }, KeyCode::Esc) => {
-                    wizard.mode = ModelWizardMode::Browse
-                }
-                (ModelWizardMode::ConfirmDownload { entry }, KeyCode::Enter) => {
-                    if let ModelSelectionEntryKind::Local { entry, .. } = entry.kind {
-                        let running = start_download(entry);
-                        sync_download_mode(wizard, &running);
-                        running_download = Some(running);
-                    }
-                }
-                (ModelWizardMode::Downloading(_), KeyCode::Esc | KeyCode::Char('q')) => {}
-                _ => {}
-            }
-        }
-    }
-}
-
 pub fn build_model_sections(
     authorized_provider_ids: &[String],
     local_state: &LocalModelState,
@@ -328,20 +532,18 @@ pub fn build_cloud_sections(
             let entries: Vec<ModelSelectionEntry> =
                 TranscriptionModel::models_for_provider(provider)
                     .into_iter()
-                    .map(|model| {
-                        let model_id = model.id().to_string();
-                        ModelSelectionEntry {
-                            provider_id: provider.id().to_string(),
-                            model_id: model_id.clone(),
-                            name: model_id,
-                            description: model.description().to_string(),
-                            is_active: selected_model
-                                .map(|selected| {
-                                    selected.provider_id == provider.id() && selected.model_id == model.id()
-                                })
-                                .unwrap_or(false),
-                            kind: ModelSelectionEntryKind::Cloud { model },
-                        }
+                    .map(|model| ModelSelectionEntry {
+                        provider_id: provider.id().to_string(),
+                        model_id: model.id().to_string(),
+                        name: model.description().to_string(),
+                        description: String::new(),
+                        is_active: selected_model
+                            .map(|selected| {
+                                selected.provider_id == provider.id()
+                                    && selected.model_id == model.id()
+                            })
+                            .unwrap_or(false),
+                        kind: ModelSelectionEntryKind::Cloud { model },
                     })
                     .collect();
 
@@ -372,7 +574,9 @@ pub fn build_local_section(
                 name: entry.name.clone(),
                 description: entry.description.clone(),
                 is_active: selected_model
-                    .map(|selected| selected.provider_id == "local" && selected.model_id == entry.id)
+                    .map(|selected| {
+                        selected.provider_id == "local" && selected.model_id == entry.id
+                    })
                     .unwrap_or(false),
                 kind: ModelSelectionEntryKind::Local {
                     entry: entry.clone(),
@@ -406,138 +610,16 @@ pub fn save_local_selection(model_id: &str) -> anyhow::Result<()> {
     config::save_selected_model("local", model_id)
 }
 
-pub fn save_cloud_selection(
-    provider_id: &str,
-    model: &TranscriptionModel,
-) -> anyhow::Result<()> {
+pub fn save_cloud_selection(provider_id: &str, model: &TranscriptionModel) -> anyhow::Result<()> {
     config::save_selected_model(provider_id, model.id())
 }
 
 fn mark_active(sections: &mut [ModelSelectionSection], provider_id: &str, model_id: &str) {
-    for entry in sections.iter_mut().flat_map(|section| section.entries.iter_mut()) {
+    for entry in sections
+        .iter_mut()
+        .flat_map(|section| section.entries.iter_mut())
+    {
         entry.is_active = entry.provider_id == provider_id && entry.model_id == model_id;
-    }
-}
-
-fn update_local_downloaded_status(wizard: &mut ModelWizard, model_id: &str, is_downloaded: bool) {
-    for entry in wizard.sections.iter_mut().flat_map(|section| section.entries.iter_mut()) {
-        if entry.provider_id == "local" && entry.model_id == model_id {
-            if let ModelSelectionEntryKind::Local {
-                is_downloaded: downloaded,
-                ..
-            } = &mut entry.kind
-            {
-                *downloaded = is_downloaded;
-            }
-        }
-    }
-}
-
-pub fn local_audio_warning() -> anyhow::Result<Option<String>> {
-    let config = config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    let output = config.audio.output_format.trim();
-    if output == "pcm_s16le -ar 16000" && config.audio.sample_rate == 16000 {
-        return Ok(None);
-    }
-    Ok(Some(
-        "Local transcription works best with audio.output_format = \"pcm_s16le -ar 16000\" and sample_rate = 16000."
-            .to_string(),
-    ))
-}
-
-fn initial_download_state(entry: &RegistryEntry) -> DownloadState {
-    DownloadState {
-        model_id: entry.id.clone(),
-        downloaded_bytes: 0,
-        total_bytes: u64::from(entry.size_mb) * 1024 * 1024,
-        progress: 0.0,
-        speed_mbps: 0.0,
-        status: "Starting download".to_string(),
-    }
-}
-
-fn start_download(entry: RegistryEntry) -> RunningDownload {
-    let state = Arc::new(Mutex::new(initial_download_state(&entry)));
-    let progress_state = state.clone();
-    let handle = DownloadHandle::new();
-    let task_handle = handle.clone();
-    let task_entry = entry.clone();
-    let task = tokio::spawn(async move {
-        let destination = model_destination(&task_entry);
-        download_model_with_handle(
-            &task_entry.url,
-            &destination,
-            Some(Box::new(move |downloaded_bytes, total_bytes, speed_mbps| {
-                if let Ok(mut state) = progress_state.lock() {
-                    state.downloaded_bytes = downloaded_bytes;
-                    state.total_bytes = total_bytes;
-                    state.speed_mbps = speed_mbps;
-                    state.progress = if total_bytes > 0 {
-                        downloaded_bytes as f64 / total_bytes as f64
-                    } else {
-                        0.0
-                    };
-                    state.status = "Downloading".to_string();
-                }
-            })),
-            Some(task_handle),
-        )
-        .await?;
-        validate_downloaded_model(&task_entry)?;
-        mark_downloaded_registry_model(&task_entry)?;
-        Ok(())
-    });
-
-    RunningDownload {
-        entry,
-        state,
-        handle,
-        task,
-    }
-}
-
-fn sync_download_mode(wizard: &mut ModelWizard, running: &RunningDownload) {
-    if let Ok(state) = running.state.lock() {
-        wizard.mode = ModelWizardMode::Downloading(state.clone());
-    }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    let mb = bytes as f64 / (1024.0 * 1024.0);
-    if mb >= 1024.0 {
-        format!("{:.1} GB", mb / 1024.0)
-    } else {
-        format!("{mb:.0} MB")
-    }
-}
-
-fn render_model_wizard(frame: &mut Frame<'_>, wizard: &ModelWizard) {
-    let area = frame.area();
-
-    let padding_block = Block::default()
-        .padding(Padding::uniform(1))
-        .style(Style::default().bg(BG));
-    frame.render_widget(&padding_block, area);
-    let padded_area = padding_block.inner(area);
-
-    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-    frame.render_widget(&main_block, padded_area);
-    let inner_area = main_block.inner(padded_area);
-
-    match &wizard.mode {
-        ModelWizardMode::Browse => render_browse(frame, inner_area, wizard),
-        ModelWizardMode::ConfirmDownload { entry } => {
-            render_logo(frame, inner_area);
-            render_confirm_download(frame, entry);
-        }
-        ModelWizardMode::Downloading(state) => {
-            render_logo(frame, inner_area);
-            render_download(frame, state);
-        }
-    }
-
-    if let Some((message, _)) = &wizard.notification {
-        render_notification(frame, area, message);
     }
 }
 
@@ -568,188 +650,6 @@ fn render_notification(frame: &mut Frame<'_>, screen_area: Rect, message: &str) 
         .alignment(Alignment::Center);
 
     frame.render_widget(notification_text, inner_area);
-}
-
-fn render_logo(frame: &mut Frame<'_>, area: Rect) {
-    let [header_area, _] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(0),
-    ])
-    .areas(area);
-    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-        .style(Style::default().fg(FG))
-        .alignment(Alignment::Left);
-    frame.render_widget(header, header_area);
-}
-
-fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, wizard: &ModelWizard) {
-    let [header_area, list_area, footer_area] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(5),
-        Constraint::Length(2),
-    ])
-    .areas(inner_area);
-
-    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-        .style(Style::default().fg(FG))
-        .alignment(Alignment::Left);
-    frame.render_widget(header, header_area);
-
-    let mut items = Vec::new();
-    let mut display_index = 0_usize;
-    let mut selected_display_index = None;
-    for section in &wizard.sections {
-        items.push(ListItem::new(Line::from(vec![Span::styled(
-            section.title.clone(),
-            Style::default().add_modifier(Modifier::BOLD),
-        )])));
-        display_index += 1;
-        for entry in &section.entries {
-            if wizard.selected_entry().is_some_and(|selected| {
-                selected.provider_id == entry.provider_id && selected.model_id == entry.model_id
-            }) {
-                selected_display_index = Some(display_index);
-            }
-            items.push(model_list_item(entry));
-            display_index += 1;
-        }
-        items.push(ListItem::new(Line::from("")));
-        display_index += 1;
-    }
-
-    let mut state = ListState::default().with_selected(selected_display_index);
-    frame.render_stateful_widget(
-        List::new(items)
-            .block(
-                Block::default()
-                    .title(" Model ")
-                    .borders(Borders::ALL),
-            )
-            .highlight_style(
-                Style::default()
-                    .bg(HIGHLIGHT_BG)
-                    .fg(FG),
-            )
-            .highlight_symbol("> "),
-        list_area,
-        &mut state,
-    );
-
-    let default_help = "[↑↓] Navigate  [Enter] Select  [m] Manage local  [Esc/q] Quit".to_string();
-    let help_text = wizard.status_message.clone().unwrap_or(default_help);
-    let footer_text = if let Some(warning) = &wizard.local_audio_warning {
-        format!("{}\n{}", help_text, warning)
-    } else {
-        help_text
-    };
-    frame.render_widget(
-        Paragraph::new(footer_text)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(HELP_FG)),
-        footer_area,
-    );
-}
-
-fn model_list_item(entry: &ModelSelectionEntry) -> ListItem<'_> {
-    let marker = if entry.is_active { "◉" } else { "○" };
-    let suffix = match &entry.kind {
-        ModelSelectionEntryKind::Local {
-            entry: registry_entry,
-            is_downloaded,
-        } => {
-            let status = if *is_downloaded { "downloaded" } else { "available" };
-            format!(
-                " ({}) - {} [{}]",
-                format_bytes(u64::from(registry_entry.size_mb) * 1024 * 1024),
-                entry.description,
-                status
-            )
-        }
-        ModelSelectionEntryKind::LocalManagement => format!(" - {}", entry.description),
-        ModelSelectionEntryKind::Cloud { .. } => format!(" - {}", entry.description),
-    };
-    ListItem::new(Line::from(format!("  {marker} {}{suffix}", entry.name)))
-}
-
-fn render_confirm_download(frame: &mut Frame<'_>, entry: &ModelSelectionEntry) {
-    let area = centered_rect(70, 30, frame.area());
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(format!(
-            "Download {} before activation?\n\n[Enter] Download  [Esc] Back",
-            entry.name
-        ))
-        .block(Block::default().title("Download Local Model").borders(Borders::ALL)),
-        area,
-    );
-}
-
-fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
-    let area = centered_rect(80, 40, frame.area());
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(1),
-        ])
-        .split(area);
-    let eta = if state.speed_mbps > 0.0 && state.total_bytes > state.downloaded_bytes {
-        let remaining_mb = (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
-        format!("ETA: {:.0}s", remaining_mb / state.speed_mbps)
-    } else {
-        "ETA: unknown".to_string()
-    };
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Block::default().title("Downloading").borders(Borders::ALL),
-        area,
-    );
-    frame.render_widget(Paragraph::new(format!("Model: {}", state.model_id)), chunks[0]);
-    frame.render_widget(
-        Gauge::default()
-            .gauge_style(Style::default().fg(Color::Green))
-            .ratio(state.progress.clamp(0.0, 1.0)),
-        chunks[1],
-    );
-    frame.render_widget(
-        Paragraph::new(format!(
-            "{} / {}  •  {:.1} MB/s  •  {}",
-            format_bytes(state.downloaded_bytes),
-            if state.total_bytes == 0 {
-                "unknown".to_string()
-            } else {
-                format_bytes(state.total_bytes)
-            },
-            state.speed_mbps,
-            eta
-        )),
-        chunks[2],
-    );
-    frame.render_widget(
-        Paragraph::new(format!("{}  [Ctrl+C] Cancel", state.status)),
-        chunks[3],
-    );
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
-    let vertical = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(area);
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(vertical[1])[1]
 }
 
 pub fn no_selected_model_error() -> anyhow::Error {
@@ -788,8 +688,9 @@ pub fn validate_selected_model_is_usable(selected: &SelectedModel) -> anyhow::Re
         return Ok(());
     }
 
-    let provider = TranscriptionProvider::from_id(&selected.provider_id)
-        .ok_or_else(|| anyhow::anyhow!("Unknown transcription provider: {}", selected.provider_id))?;
+    let provider = TranscriptionProvider::from_id(&selected.provider_id).ok_or_else(|| {
+        anyhow::anyhow!("Unknown transcription provider: {}", selected.provider_id)
+    })?;
     if config::get_api_key(provider.id())?.is_none() {
         return Err(missing_cloud_credentials_error(&provider));
     }
@@ -826,10 +727,7 @@ mod tests {
             std::env::set_var("HOME", &dir);
             crate::transcription::local_models::set_test_models_dir(Some(dir.join("models")));
 
-            Self {
-                previous_home,
-                dir,
-            }
+            Self { previous_home, dir }
         }
     }
 
@@ -950,9 +848,11 @@ mod tests {
     #[test]
     fn recovery_messages_are_actionable() {
         assert!(no_selected_model_error().to_string().contains("ostt model"));
-        assert!(missing_cloud_credentials_error(&TranscriptionProvider::OpenAI)
-            .to_string()
-            .contains("ostt auth login"));
+        assert!(
+            missing_cloud_credentials_error(&TranscriptionProvider::OpenAI)
+                .to_string()
+                .contains("ostt auth login")
+        );
         assert!(missing_local_model_error("turbo")
             .to_string()
             .contains("download or select"));
@@ -997,11 +897,10 @@ mod tests {
 
     #[test]
     fn selecting_management_row_routes_to_local_management() {
-        let mut wizard = ModelWizard::new(vec![build_local_section(
-            &LocalModelState::default(),
-            &[],
+        let mut wizard = ModelWizard::new(
+            vec![build_local_section(&LocalModelState::default(), &[], None)],
             None,
-        )], None);
+        );
         wizard.selected = 0;
 
         assert_eq!(
@@ -1014,11 +913,14 @@ mod tests {
     fn missing_local_selection_enters_download_confirmation_without_activation() {
         let _guard = test_env_lock();
         let _env = TestEnv::new();
-        let mut wizard = ModelWizard::new(vec![build_local_section(
-            &LocalModelState::default(),
-            &[registry_entry("turbo")],
+        let mut wizard = ModelWizard::new(
+            vec![build_local_section(
+                &LocalModelState::default(),
+                &[registry_entry("turbo")],
+                None,
+            )],
             None,
-        )], None);
+        );
 
         assert_eq!(
             wizard.select_current().expect("select missing local"),
@@ -1042,8 +944,7 @@ mod tests {
         assert_eq!(selected.provider_id, "local");
         assert_eq!(selected.model_id, "turbo");
 
-        save_cloud_selection("openai", &TranscriptionModel::Whisper)
-            .expect("save cloud selection");
+        save_cloud_selection("openai", &TranscriptionModel::Whisper).expect("save cloud selection");
         let config = config::OsttConfig::load().expect("load config");
         assert_eq!(config.transcription.provider.as_deref(), Some("openai"));
         assert_eq!(
@@ -1065,11 +966,14 @@ mod tests {
         fs::create_dir_all(crate::transcription::local_models::model_files_dir())
             .expect("create model files dir");
         fs::write(model_destination(&registry[0]), b"model").expect("write model file");
-        let mut wizard = ModelWizard::new(vec![build_local_section(
-            &LocalModelState::default(),
-            &registry,
+        let mut wizard = ModelWizard::new(
+            vec![build_local_section(
+                &LocalModelState::default(),
+                &registry,
+                None,
+            )],
             None,
-        )], None);
+        );
 
         assert_eq!(
             wizard.select_current().expect("select downloaded local"),

@@ -7,7 +7,8 @@ use crate::config::file::ProcessAction;
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -236,6 +237,9 @@ impl ActionPicker {
     fn handle_key(&mut self, key: KeyEvent) -> Option<PickerAction> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => Some(PickerAction::Exit),
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(PickerAction::Exit)
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.list_state.select_previous();
                 None

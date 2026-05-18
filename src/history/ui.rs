@@ -7,7 +7,8 @@ use crate::history::TranscriptionEntry;
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEvent, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEvent,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -127,6 +128,9 @@ impl HistoryViewer {
 
     /// Handles keyboard input.
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> Option<InputAction> {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Some(InputAction::Exit);
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
                 tracing::debug!("History viewer exited via Escape/q");

@@ -7,7 +7,8 @@ use crate::keywords::KeywordsManager;
 use anyhow::Result;
 use ratatui::crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -117,6 +118,9 @@ impl KeywordsViewer {
         manager: &mut KeywordsManager,
         key: KeyEvent,
     ) -> Result<bool> {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(true);
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
             KeyCode::Up => {

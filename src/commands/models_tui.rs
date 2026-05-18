@@ -1,10 +1,11 @@
+use crate::commands::model::UserQuit;
 use crate::config::{self, SelectedModel};
 use crate::transcription::local_models::{
     delete_model, download_model_with_handle, fetch_registry, load_state,
     mark_downloaded_registry_model, model_destination, register_custom_model, resolve_custom_model,
     validate_downloaded_model, DownloadHandle, LocalModelState, RegistryEntry,
 };
-use crossterm::event::{self, Event, KeyCode};
+use crossterm::event::{self, Event, KeyCode, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -13,7 +14,9 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Padding, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Clear, Gauge, List, ListItem, ListState, Padding, Paragraph, Wrap,
+};
 use ratatui::{Frame, Terminal};
 use std::fs;
 use std::io::{self, Stdout};
@@ -414,11 +417,8 @@ fn render_tui(frame: &mut Frame<'_>, tui: &ModelTui) {
 }
 
 fn render_logo(frame: &mut Frame<'_>, area: Rect) {
-    let [header_area, _] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(0),
-    ])
-    .areas(area);
+    let [header_area, _] =
+        Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
     let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
         .style(Style::default().fg(FG))
         .alignment(Alignment::Left);
@@ -439,21 +439,17 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &ModelTui) {
     frame.render_widget(header, header_area);
 
     let mut items = Vec::new();
-    let disk_line = format!(
-        "Downloaded: {} used",
-        format_bytes(tui.disk_usage_bytes)
-    );
     items.push(ListItem::new(Line::from(Span::styled(
-        disk_line,
-        Style::default().add_modifier(Modifier::BOLD),
+        "Downloaded",
+        Style::default().fg(Color::Rgb(120, 120, 120)),
     ))));
     for entry in tui.entries.iter().filter(|entry| entry.is_downloaded) {
         items.push(model_list_item(entry));
     }
     items.push(ListItem::new(Line::from("")));
     items.push(ListItem::new(Line::from(Span::styled(
-        "Available to download:",
-        Style::default().add_modifier(Modifier::BOLD),
+        "Available to download",
+        Style::default().fg(Color::Rgb(120, 120, 120)),
     ))));
     for entry in tui.entries.iter().filter(|entry| !entry.is_downloaded) {
         items.push(model_list_item(entry));
@@ -468,18 +464,13 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &ModelTui) {
                     .title(" Local Models ")
                     .borders(Borders::ALL),
             )
-            .highlight_style(
-                Style::default()
-                    .bg(HIGHLIGHT_BG)
-                    .fg(FG),
-            )
+            .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG))
             .highlight_symbol("> "),
         list_area,
         &mut state,
     );
 
-    let default_help =
-        "[↑↓] Nav  [Enter] Activate  [d] Download  [r] Remove  [i] Info  [c] Custom  [Esc/q] Quit";
+    let default_help = "↑↓ nav, ↵ activate, d download, r remove, i info, c custom, esc/q back";
     let footer_text = tui.status_message.as_deref().unwrap_or(default_help);
     frame.render_widget(
         Paragraph::new(footer_text)
@@ -489,18 +480,14 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &ModelTui) {
     );
 }
 
-fn model_list_item(entry: &TuiModelEntry) -> ListItem<'_> {
+fn model_list_item(entry: &TuiModelEntry) -> ListItem<'static> {
     let marker = if entry.is_active { "◉" } else { "○" };
-    let active = if entry.is_active { " (active)" } else { "" };
-    let languages = if entry.languages.is_empty() {
-        String::new()
-    } else {
-        format!("     {}", entry.languages.join(", "))
-    };
+    let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
+    let description = entry.description.trim();
+
     ListItem::new(Line::from(format!(
-        "{marker} {}{active}     {}{languages}",
-        entry.name,
-        format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
+        "{} {}, {}, {}",
+        marker, entry.name, size, description,
     )))
 }
 
@@ -744,6 +731,9 @@ pub async fn handle_models_tui_with(
         }
 
         if let Event::Key(key) = event::read()? {
+            if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+                return Err(UserQuit.into());
+            }
             let mode = tui.mode.clone();
             match (mode, key.code) {
                 (TuiMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => break,
@@ -1038,15 +1028,15 @@ mod tests {
         let mut tui = ModelTui::new(entries, 0);
 
         assert_eq!(tui.selected_entry().expect("selected").id, "turbo");
-        assert_eq!(display_index_for_selection(&tui), Some(1));
+        assert_eq!(display_index_for_selection(&tui), Some(2));
 
         tui.move_selection_down();
         assert_eq!(tui.selected_entry().expect("selected").id, "tiny");
-        assert_eq!(display_index_for_selection(&tui), Some(4));
+        assert_eq!(display_index_for_selection(&tui), Some(5));
 
         tui.move_selection_down();
         assert_eq!(tui.selected_entry().expect("selected").id, "large-v3");
-        assert_eq!(display_index_for_selection(&tui), Some(5));
+        assert_eq!(display_index_for_selection(&tui), Some(6));
     }
 
     #[test]
