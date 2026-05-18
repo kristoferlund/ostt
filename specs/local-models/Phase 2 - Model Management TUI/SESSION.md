@@ -106,3 +106,18 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - The TUI handler currently builds state and reports availability; full terminal setup/rendering and interactive browse behavior remain scoped to `2.3.B` and later.
+
+## Session 8: Spec 2.3.B — Browse, Info, Activation, and Deletion UI
+
+Accomplished:
+- Implemented ratatui/crossterm terminal setup with cleanup on quit or error.
+- Added browse rendering with active model, downloaded/available sections, disk usage, and key hints.
+- Added bounds-safe arrow navigation, Enter activation, info view, Escape back behavior, delete confirmation, confirmed deletion, list refresh, and status messages.
+- Added focused tests for navigation bounds, info/back behavior, activation requirements, and deletion clearing active selection.
+- Verified with `cargo check` and `cargo test commands::models_tui`.
+
+Obstacles encountered:
+- Existing `activate_model()`/`delete_model()` can only resolve persisted custom entries because `load_registry_entries()` is still unavailable. The TUI now uses entry-aware activation/deletion for registry entries, while still calling `delete_model()` first for custom entries.
+
+Out-of-scope observations:
+- Download action, progress rendering, cancellation, custom URL input, and final integration remain scoped to `2.3.C`.

@@ -142,16 +142,16 @@ Depends on: `2.3.A`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.3 - Model Management TUI.md`
 
-- [ ] **2.3.11** Implement terminal setup/teardown so quitting or errors restore the terminal cleanly.
-- [ ] **2.3.12** Render the browse screen with active model, downloaded section, available section, disk usage, and key hints.
-- [ ] **2.3.13** Implement arrow-key navigation with bounds-safe selection behavior.
-- [ ] **2.3.14** Implement Enter activation for downloaded models and a clear message for non-downloaded models.
-- [ ] **2.3.15** Implement `i` info view with size, download date, path, URL, languages, and recommendation metadata.
-- [ ] **2.3.16** Implement `Esc` behavior from info and other sub-views back to browse.
-- [ ] **2.3.17** Implement `r` deletion confirmation and `y/N` handling.
-- [ ] **2.3.18** Call `delete_model()` on confirmed deletion and refresh model list, including active-model clearing.
-- [ ] **2.3.19** Verify: run `cargo check`.
-- [ ] **2.3.20** Verify: run focused `cargo test` for browse/info/delete logic tests where practical.
+- [x] **2.3.11** Implement terminal setup/teardown so quitting or errors restore the terminal cleanly.
+- [x] **2.3.12** Render the browse screen with active model, downloaded section, available section, disk usage, and key hints.
+- [x] **2.3.13** Implement arrow-key navigation with bounds-safe selection behavior.
+- [x] **2.3.14** Implement Enter activation for downloaded models and a clear message for non-downloaded models.
+- [x] **2.3.15** Implement `i` info view with size, download date, path, URL, languages, and recommendation metadata.
+- [x] **2.3.16** Implement `Esc` behavior from info and other sub-views back to browse.
+- [x] **2.3.17** Implement `r` deletion confirmation and `y/N` handling.
+- [x] **2.3.18** Call `delete_model()` on confirmed deletion and refresh model list, including active-model clearing.
+- [x] **2.3.19** Verify: run `cargo check`.
+- [x] **2.3.20** Verify: run focused `cargo test` for browse/info/delete logic tests where practical.
 
 ### 2.3.C — Download Progress, Custom Flow, and Final Integration
 
