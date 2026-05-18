@@ -13,6 +13,7 @@ pub use file::{
     ProcessConfig,
 };
 pub use file::{AudioConfig, OsttConfig, PopupConfig, ProvidersConfig, VisualizationType};
+pub use file::{EffectiveLocalConfig, LocalModelOverride, LocalTranscriptionConfig};
 pub use secrets::{
     clear_api_key, clear_selected_model, get_api_key, get_authorized_providers, get_selected_model,
     get_selected_model_entry, save_api_key, save_selected_model, SelectedModel,

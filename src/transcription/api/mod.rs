@@ -18,7 +18,7 @@ use std::path::Path;
 
 use super::model::TranscriptionModel;
 use super::provider::TranscriptionProvider;
-use crate::config::file::ProvidersConfig;
+use crate::config::file::{LocalTranscriptionConfig, ProvidersConfig};
 
 /// Configuration for transcription requests
 #[derive(Debug, Clone)]
@@ -67,6 +67,15 @@ impl TranscriptionConfig {
             api_key: String::new(),
             keywords,
             providers,
+        }
+    }
+
+    /// Returns the local-specific config only for local transcription requests.
+    pub fn local_config(&self) -> Option<&LocalTranscriptionConfig> {
+        if self.provider == TranscriptionProvider::Local {
+            Some(&self.providers.local)
+        } else {
+            None
         }
     }
 }

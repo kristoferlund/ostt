@@ -45,16 +45,16 @@ Depends on: `3.1.A`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/3.1 - Local Provider Config Types.md`
 
-- [ ] **3.1.10** Implement local config validation for temperature, entropy threshold, no-speech threshold, models path existence, and daemon idle timeout.
-- [ ] **3.1.11** Implement per-model override validation using the same value rules where override values are present.
-- [ ] **3.1.12** Validate per-model override keys as safe local model IDs without validating the active selected model ID.
-- [ ] **3.1.13** Call local provider validation from the existing config load validation path.
-- [ ] **3.1.14** Re-export `LocalTranscriptionConfig`, `LocalModelOverride`, and `EffectiveLocalConfig` from `src/config/mod.rs`.
-- [ ] **3.1.15** Add tests for invalid local values, valid values, missing models path, safe override keys, and active model ID non-validation.
-- [ ] **3.1.16** Add an integration helper or access pattern so local transcription callers can obtain local config only when the selected provider is local.
-- [ ] **3.1.17** Verify: run `cargo check`.
-- [ ] **3.1.18** Verify: run `cargo clippy -- -D warnings`.
-- [ ] **3.1.19** Verify: run focused `cargo test config::file`.
+- [x] **3.1.10** Implement local config validation for temperature, entropy threshold, no-speech threshold, models path existence, and daemon idle timeout.
+- [x] **3.1.11** Implement per-model override validation using the same value rules where override values are present.
+- [x] **3.1.12** Validate per-model override keys as safe local model IDs without validating the active selected model ID.
+- [x] **3.1.13** Call local provider validation from the existing config load validation path.
+- [x] **3.1.14** Re-export `LocalTranscriptionConfig`, `LocalModelOverride`, and `EffectiveLocalConfig` from `src/config/mod.rs`.
+- [x] **3.1.15** Add tests for invalid local values, valid values, missing models path, safe override keys, and active model ID non-validation.
+- [x] **3.1.16** Add an integration helper or access pattern so local transcription callers can obtain local config only when the selected provider is local.
+- [x] **3.1.17** Verify: run `cargo check`.
+- [x] **3.1.18** Verify: run `cargo clippy -- -D warnings`.
+- [x] **3.1.19** Verify: run focused `cargo test config::file`.
 
 ### 3.2.A - Auth Login and Logout Credential Commands
 

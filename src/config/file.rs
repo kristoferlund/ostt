@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Visualization type for recording display.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -271,6 +271,30 @@ impl Default for LocalTranscriptionConfig {
 }
 
 impl LocalTranscriptionConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_local_values(
+            self.temperature,
+            self.entropy_thold,
+            self.no_speech_thold,
+            self.daemon_idle_timeout_secs,
+        )?;
+
+        if let Some(path) = &self.models_path {
+            if !Path::new(path).exists() {
+                anyhow::bail!("models_path '{}' does not exist", path);
+            }
+        }
+
+        for (model_id, override_config) in &self.models {
+            if !is_safe_local_model_id(model_id) {
+                anyhow::bail!("local model override key '{}' is not a safe model ID", model_id);
+            }
+            override_config.validate()?;
+        }
+
+        Ok(())
+    }
+
     pub fn effective_for_model(&self, model_id: &str) -> EffectiveLocalConfig {
         let override_config = self.models.get(model_id);
         EffectiveLocalConfig {
@@ -300,6 +324,60 @@ impl LocalTranscriptionConfig {
                 .unwrap_or(self.daemon_idle_timeout_secs),
         }
     }
+}
+
+impl LocalModelOverride {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(temperature) = self.temperature {
+            if !(0.0..=1.0).contains(&temperature) {
+                anyhow::bail!("temperature must be between 0.0 and 1.0");
+            }
+        }
+        if let Some(entropy_thold) = self.entropy_thold {
+            if entropy_thold < 0.0 {
+                anyhow::bail!("entropy_thold must be >= 0.0");
+            }
+        }
+        if let Some(no_speech_thold) = self.no_speech_thold {
+            if !(0.0..=1.0).contains(&no_speech_thold) {
+                anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
+            }
+        }
+        if let Some(daemon_idle_timeout_secs) = self.daemon_idle_timeout_secs {
+            if daemon_idle_timeout_secs < 30 {
+                anyhow::bail!("daemon_idle_timeout_secs must be at least 30 seconds");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_safe_local_model_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+}
+
+fn validate_local_values(
+    temperature: f32,
+    entropy_thold: f32,
+    no_speech_thold: f32,
+    daemon_idle_timeout_secs: u64,
+) -> anyhow::Result<()> {
+    if !(0.0..=1.0).contains(&temperature) {
+        anyhow::bail!("temperature must be between 0.0 and 1.0");
+    }
+    if entropy_thold < 0.0 {
+        anyhow::bail!("entropy_thold must be >= 0.0");
+    }
+    if !(0.0..=1.0).contains(&no_speech_thold) {
+        anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
+    }
+    if daemon_idle_timeout_secs < 30 {
+        anyhow::bail!("daemon_idle_timeout_secs must be at least 30 seconds");
+    }
+    Ok(())
 }
 
 /// Provider-specific configuration
@@ -719,6 +797,7 @@ impl OsttConfig {
         let config_path = get_config_path()?;
         let config_content = fs::read_to_string(&config_path)?;
         let config: OsttConfig = toml::from_str(&config_content)?;
+        config.providers.local.validate()?;
         for action in &config.process.actions {
             action.validate()?;
         }
@@ -808,6 +887,16 @@ mod tests {
     fn validate_process_config(config: &ProcessConfig) -> Result<(), Box<dyn std::error::Error>> {
         for action in &config.actions {
             action.validate()?;
+        }
+        Ok(())
+    }
+
+    fn validate_ostt_config(config: &OsttConfig) -> anyhow::Result<()> {
+        config.providers.local.validate()?;
+        for action in &config.process.actions {
+            action
+                .validate()
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
         }
         Ok(())
     }
@@ -1072,6 +1161,126 @@ mod tests {
         assert_eq!(effective.no_speech_thold, 0.6);
         assert!(effective.daemon);
         assert_eq!(effective.daemon_idle_timeout_secs, 300);
+    }
+
+    #[test]
+    fn local_validation_rejects_invalid_global_values() {
+        let cases = [
+            ("temperature = 1.1", "temperature"),
+            ("temperature = -0.1", "temperature"),
+            ("entropy_thold = -0.1", "entropy_thold"),
+            ("no_speech_thold = 1.1", "no_speech_thold"),
+            (
+                "daemon_idle_timeout_secs = 29",
+                "daemon_idle_timeout_secs",
+            ),
+        ];
+
+        for (local_setting, expected_error) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+                    sample_rate = 16000
+
+                    [providers.local]
+                    {local_setting}
+                "#
+            );
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(
+                err.contains(expected_error),
+                "expected '{err}' to contain '{expected_error}'"
+            );
+        }
+    }
+
+    #[test]
+    fn local_validation_accepts_valid_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            temperature = 1.0
+            entropy_thold = 0.0
+            no_speech_thold = 0.0
+            daemon_idle_timeout_secs = 30
+
+            [providers.local.models."kb-whisper.large_v3"]
+            temperature = 0.5
+            entropy_thold = 1.5
+            no_speech_thold = 1.0
+            daemon_idle_timeout_secs = 31
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn local_validation_rejects_missing_models_path() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            models_path = "/definitely/missing/ostt/models/path"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("models_path"));
+    }
+
+    #[test]
+    fn local_validation_rejects_unsafe_override_keys() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local.models."Model With Spaces"]
+            language = "en"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("safe model ID"));
+    }
+
+    #[test]
+    fn local_validation_rejects_invalid_override_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local.models."turbo"]
+            no_speech_thold = -0.1
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("no_speech_thold"));
+    }
+
+    #[test]
+    fn local_config_validation_does_not_validate_active_model_id() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            language = "auto"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
     }
 
     #[test]
