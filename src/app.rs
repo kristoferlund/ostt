@@ -189,6 +189,10 @@ enum Commands {
     #[command(visible_alias = "a")]
     Auth,
 
+    /// Manage local transcription models
+    #[command(name = "model")]
+    Model,
+
     /// View and browse transcription history
     ///
     /// Browse previous transcriptions, select one to copy to clipboard.
@@ -431,6 +435,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
                     return Err(e);
                 }
             }
+        }
+        Some(Commands::Model) => {
+            commands::handle_models_tui().await?;
         }
         Some(Commands::History) => {
             commands::handle_history().await?;

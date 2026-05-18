@@ -91,3 +91,18 @@ Obstacles encountered:
 
 Out-of-scope observations:
 - The focused test failure appears isolated to test HTTP `HEAD`/`Content-Length` behavior and test env lock poisoning, not to `cargo check` or cancellation cleanup.
+
+## Session 7: Spec 2.3.A — TUI Module, Entry Point, and Model List
+
+Accomplished:
+- Added `src/commands/models_tui.rs` and exported it from `src/commands/mod.rs`.
+- Added the TUI model entry data model, TUI mode/state skeleton, model-list builder, and disk usage calculation.
+- Wired the singular `ostt model` command to the local model TUI handler without adding `ostt models`.
+- Added focused tests for registry/custom merging, downloaded/active status, and disk usage.
+- Verified with `cargo check` and `cargo test commands::models_tui`.
+
+Obstacles encountered:
+- No existing `ostt model` command or local model management row was present in the current codebase, so this session added the singular command as the minimal entry point for later TUI rendering work.
+
+Out-of-scope observations:
+- The TUI handler currently builds state and reports availability; full terminal setup/rendering and interactive browse behavior remain scoped to `2.3.B` and later.

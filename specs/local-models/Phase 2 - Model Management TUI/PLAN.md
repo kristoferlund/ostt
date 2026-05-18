@@ -125,16 +125,16 @@ Depends on: `2.1.C`, `2.2.C`
 
 Spec: `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 2 - Model Management TUI/2.3 - Model Management TUI.md`
 
-- [ ] **2.3.1** Add `src/commands/models_tui.rs` and declare/export it from `src/commands/mod.rs` following existing command module conventions.
-- [ ] **2.3.2** Add `TuiModelEntry` matching the spec data model.
-- [ ] **2.3.3** Implement `build_model_list(local_state, registry, selected_model)` by merging registry and custom entries.
-- [ ] **2.3.4** Compute downloaded and active status from `models/files/` and selected-model state.
-- [ ] **2.3.5** Add disk usage summary calculation from downloaded model file metadata.
-- [ ] **2.3.6** Add `ModelTui` and `TuiMode` state skeleton with browse, custom input, downloading, info, and confirmation states as needed.
-- [ ] **2.3.7** Wire opening the TUI from the local model management entry in `ostt model` without adding a separate `ostt models` command.
-- [ ] **2.3.8** Add focused tests for `build_model_list()` and disk usage calculation.
-- [ ] **2.3.9** Verify: run `cargo check`.
-- [ ] **2.3.10** Verify: run focused `cargo test` for TUI model-list tests.
+- [x] **2.3.1** Add `src/commands/models_tui.rs` and declare/export it from `src/commands/mod.rs` following existing command module conventions.
+- [x] **2.3.2** Add `TuiModelEntry` matching the spec data model.
+- [x] **2.3.3** Implement `build_model_list(local_state, registry, selected_model)` by merging registry and custom entries.
+- [x] **2.3.4** Compute downloaded and active status from `models/files/` and selected-model state.
+- [x] **2.3.5** Add disk usage summary calculation from downloaded model file metadata.
+- [x] **2.3.6** Add `ModelTui` and `TuiMode` state skeleton with browse, custom input, downloading, info, and confirmation states as needed.
+- [x] **2.3.7** Wire opening the TUI from the local model management entry in `ostt model` without adding a separate `ostt models` command.
+- [x] **2.3.8** Add focused tests for `build_model_list()` and disk usage calculation.
+- [x] **2.3.9** Verify: run `cargo check`.
+- [x] **2.3.10** Verify: run focused `cargo test` for TUI model-list tests.
 
 ### 2.3.B — Browse, Info, Activation, and Deletion UI
 
