@@ -2,6 +2,7 @@ use crate::commands::local_models;
 use crate::config::{self, SelectedModel};
 use crate::transcription::local_models::{load_state, model_destination};
 use crate::transcription::{TranscriptionModel, TranscriptionProvider};
+use crate::ui::{render_toast, Toast, ToastStyle};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -11,11 +12,11 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::{Frame, Terminal};
 use std::collections::HashSet;
 use std::io::{self, Stdout};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const BG: Color = Color::Rgb(0, 0, 0);
 const FG: Color = Color::Rgb(255, 255, 255);
@@ -183,26 +184,25 @@ async fn run_cloud_model_selector(
     }
 
     let selected_model = config::get_selected_model_entry()?;
-    let sections = build_cloud_provider_sections(&authorized_provider_ids, selected_model.as_ref());
-    let models: Vec<&CloudModelEntry> = sections.iter().flat_map(|s| s.models.iter()).collect();
+    let mut sections =
+        build_cloud_provider_sections(&authorized_provider_ids, selected_model.as_ref());
+    let model_count = cloud_model_count(&sections);
 
-    if models.is_empty() {
+    if model_count == 0 {
         show_no_cloud_providers_screen(terminal).await?;
         return Ok(());
     }
 
-    let mut notification: Option<(String, Instant)> = None;
-    let mut selected = 0_usize;
+    let mut toast: Option<Toast> = None;
+    let mut selected = active_cloud_model_index(&sections).unwrap_or(0);
 
     loop {
-        if let Some((_, start_time)) = &notification {
-            if start_time.elapsed() >= Duration::from_millis(750) {
-                notification = None;
-            }
+        if toast.as_ref().is_some_and(Toast::is_expired) {
+            toast = None;
         }
 
         terminal.draw(|frame| {
-            let [list_area, footer_area, screen_area] = render_shell(frame);
+            let [list_area, footer_area, _] = render_shell(frame);
             let (items, selected_display_index) = cloud_model_list_items(&sections, selected);
             let mut state = ListState::default().with_selected(selected_display_index);
             frame.render_stateful_widget(
@@ -220,8 +220,8 @@ async fn run_cloud_model_selector(
 
             render_footer(frame, footer_area, "↑↓ select, ↵ activate, esc/q back");
 
-            if let Some((message, _)) = &notification {
-                render_notification(frame, screen_area, message);
+            if let Some(toast) = &toast {
+                render_toast(frame, toast, ToastStyle::default());
             }
         })?;
 
@@ -229,12 +229,16 @@ async fn run_cloud_model_selector(
             if let Event::Key(key) = event::read()? {
                 match key.code {
                     KeyCode::Up => selected = selected.saturating_sub(1),
-                    KeyCode::Down => selected = (selected + 1).min(models.len().saturating_sub(1)),
+                    KeyCode::Down => selected = (selected + 1).min(model_count.saturating_sub(1)),
                     KeyCode::Enter => {
-                        if let Some(entry) = models.get(selected) {
+                        if let Some(entry) = cloud_model_at(&sections, selected).cloned() {
                             save_cloud_selection(&entry.provider_id, &entry.model)?;
-                            notification =
-                                Some((format!("Activated {}", entry.name), Instant::now()));
+                            mark_active_cloud_model(
+                                &mut sections,
+                                &entry.provider_id,
+                                &entry.model_id,
+                            );
+                            toast = Some(Toast::new(format!("Activated {}", entry.name)));
                         }
                     }
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -281,6 +285,37 @@ fn cloud_model_list_items(
     }
 
     (items, selected_display_index)
+}
+
+fn cloud_model_count(sections: &[CloudProviderSection]) -> usize {
+    sections.iter().map(|section| section.models.len()).sum()
+}
+
+fn cloud_model_at(sections: &[CloudProviderSection], index: usize) -> Option<&CloudModelEntry> {
+    sections
+        .iter()
+        .flat_map(|section| section.models.iter())
+        .nth(index)
+}
+
+fn active_cloud_model_index(sections: &[CloudProviderSection]) -> Option<usize> {
+    sections
+        .iter()
+        .flat_map(|section| section.models.iter())
+        .position(|entry| entry.is_active)
+}
+
+fn mark_active_cloud_model(
+    sections: &mut [CloudProviderSection],
+    provider_id: &str,
+    model_id: &str,
+) {
+    for entry in sections
+        .iter_mut()
+        .flat_map(|section| section.models.iter_mut())
+    {
+        entry.is_active = entry.provider_id == provider_id && entry.model_id == model_id;
+    }
 }
 
 async fn show_no_cloud_providers_screen(
@@ -388,35 +423,6 @@ pub fn build_cloud_provider_sections(
 
 pub fn save_cloud_selection(provider_id: &str, model: &TranscriptionModel) -> anyhow::Result<()> {
     config::save_selected_model(provider_id, model.id())
-}
-
-fn render_notification(frame: &mut Frame<'_>, screen_area: Rect, message: &str) {
-    let modal_width = (message.len() as u16).saturating_add(4);
-    let modal_height = 3;
-
-    let modal_x = screen_area.x + (screen_area.width.saturating_sub(modal_width)) / 2;
-    let modal_y = screen_area.y + (screen_area.height.saturating_sub(modal_height)) / 2;
-
-    let modal_area = Rect {
-        x: modal_x,
-        y: modal_y,
-        width: modal_width.min(screen_area.width),
-        height: modal_height,
-    };
-
-    let modal_block = Block::default()
-        .borders(Borders::ALL)
-        .style(Style::default().bg(Color::Green).fg(Color::Black));
-
-    frame.render_widget(Clear, modal_area);
-    frame.render_widget(&modal_block, modal_area);
-
-    let inner_area = modal_block.inner(modal_area);
-    let notification_text = Paragraph::new(message)
-        .style(Style::default().bg(Color::Green).fg(Color::Black))
-        .alignment(Alignment::Center);
-
-    frame.render_widget(notification_text, inner_area);
 }
 
 pub fn no_selected_model_error() -> anyhow::Error {
