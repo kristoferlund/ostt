@@ -5,9 +5,9 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::{Duration, Instant};
 
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const TOAST_DURATION: Duration = Duration::from_secs(1);
+const BG: Color = Color::Black;
+const FG: Color = Color::White;
+const TOAST_DURATION: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DialogAction {
@@ -18,13 +18,27 @@ pub enum DialogAction {
 #[derive(Clone, Debug)]
 pub struct Toast {
     message: String,
+    style: ToastStyle,
     created_at: Instant,
 }
 
 impl Toast {
     pub fn new(message: impl Into<String>) -> Self {
+        Self::success(message)
+    }
+
+    pub fn success(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
+            style: ToastStyle::success(),
+            created_at: Instant::now(),
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            style: ToastStyle::error(),
             created_at: Instant::now(),
         }
     }
@@ -36,6 +50,10 @@ impl Toast {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    pub fn style(&self) -> ToastStyle {
+        self.style
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -46,9 +64,20 @@ pub struct ToastStyle {
 
 impl ToastStyle {
     pub const fn default() -> Self {
+        Self::success()
+    }
+
+    pub const fn success() -> Self {
         Self {
             fg: Color::Black,
             bg: Color::Green,
+        }
+    }
+
+    pub const fn error() -> Self {
+        Self {
+            fg: Color::Black,
+            bg: Color::Red,
         }
     }
 }
@@ -59,17 +88,15 @@ pub fn render_dialog(
     mut lines: Vec<Line<'static>>,
     primary_action: &'static str,
 ) {
-    let area = centered_fixed_rect(70, 9, frame.area());
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!("<{primary_action}>"),
         Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD),
     )));
-    render_box(frame, area, title, lines);
+    render_dialog_content(frame, title, lines, 70, 9);
 }
 
 pub fn render_error_dialog(frame: &mut Frame<'_>, title: &'static str, message: String) {
-    let area = centered_fixed_rect(70, 8, frame.area());
     let lines = vec![
         Line::from(message),
         Line::from(""),
@@ -78,10 +105,11 @@ pub fn render_error_dialog(frame: &mut Frame<'_>, title: &'static str, message: 
             Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD),
         )),
     ];
-    render_box(frame, area, title, lines);
+    render_dialog_content(frame, title, lines, 70, 8);
 }
 
-pub fn render_toast(frame: &mut Frame<'_>, toast: &Toast, style: ToastStyle) {
+pub fn render_toast(frame: &mut Frame<'_>, toast: &Toast) {
+    let style = toast.style();
     let screen = frame.area();
     let width = (toast.message().len() as u16 + 4)
         .clamp(20, 50)
@@ -118,7 +146,18 @@ pub fn centered_fixed_rect(width: u16, height: u16, area: Rect) -> Rect {
     }
 }
 
-fn render_box(frame: &mut Frame<'_>, area: Rect, title: &'static str, lines: Vec<Line<'static>>) {
+pub fn render_dialog_content(
+    frame: &mut Frame<'_>,
+    title: &str,
+    lines: Vec<Line<'static>>,
+    width: u16,
+    height: u16,
+) {
+    let area = centered_fixed_rect(width, height, frame.area());
+    render_box(frame, area, title, lines);
+}
+
+fn render_box(frame: &mut Frame<'_>, area: Rect, title: &str, lines: Vec<Line<'static>>) {
     frame.render_widget(Clear, area);
     frame.render_widget(
         Block::default().style(Style::default().bg(Color::Black)),
@@ -139,7 +178,10 @@ fn render_box(frame: &mut Frame<'_>, area: Rect, title: &'static str, lines: Vec
         .width
         .saturating_sub(title_width.saturating_add(escape_width));
     let title_line = Line::from(vec![
-        Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
+        Span::styled(
+            title.to_string(),
+            Style::default().add_modifier(Modifier::UNDERLINED),
+        ),
         Span::raw(" ".repeat(spacer_width as usize)),
         Span::styled(escape, Style::default().fg(Color::White)),
     ]);

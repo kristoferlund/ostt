@@ -15,17 +15,11 @@ use ratatui::crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Padding, Paragraph},
 };
 use std::io::{self, Stdout};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
-
-/// Common colors/styles.
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
-const HELP_FG: Color = Color::Rgb(100, 100, 100);
 
 /// Interactive keywords viewer for managing keywords.
 pub struct KeywordsViewer {
@@ -224,31 +218,42 @@ impl KeywordsViewer {
         self.terminal.draw(|frame| {
             let area = frame.area();
 
-            let padding_block = Block::default()
-                .padding(Padding::uniform(1))
-                .style(Style::default().bg(BG));
+            let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
             frame.render_widget(&padding_block, area);
             let padded_area = padding_block.inner(area);
 
-            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+            let main_block = Block::default();
             frame.render_widget(&main_block, padded_area);
             let inner_area = main_block.inner(padded_area);
 
             // Split into header and content
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Min(0)])
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Length(2),
+                    Constraint::Min(0),
+                ])
                 .split(inner_area);
 
             let header_area = layout[0];
-            let content_area = layout[1];
+            let title_area = layout[1];
+            let content_area = layout[2];
 
             // Header
             let header_text = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
-            let header_paragraph = Paragraph::new(header_text)
-                .style(Style::default().fg(FG))
-                .alignment(Alignment::Left);
+            let header_paragraph = Paragraph::new(header_text).alignment(Alignment::Left);
             frame.render_widget(header_paragraph, header_area);
+
+            let title = " Keywords ";
+            frame.render_widget(
+                Paragraph::new(title).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+                Rect {
+                    width: title.len() as u16,
+                    height: 1,
+                    ..title_area
+                },
+            );
 
             if input_mode {
                 Self::draw_with_input(
@@ -282,7 +287,7 @@ impl KeywordsViewer {
         let help_text = "↑↓ select, x/del remove, a add, esc/q exit";
         let help_paragraph = Paragraph::new(help_text)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(HELP_FG));
+            .style(Style::default().fg(Color::White).bg(Color::Black));
         frame.render_widget(help_paragraph, help_area);
     }
 
@@ -297,7 +302,7 @@ impl KeywordsViewer {
     ) {
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .constraints([Constraint::Min(1), Constraint::Length(5)])
             .split(area);
 
         let list_area = layout[0];
@@ -305,17 +310,41 @@ impl KeywordsViewer {
 
         Self::render_keywords_list(frame, list_area, keywords, list_state);
 
-        let input_block = Block::default().title("New Keyword").borders(Borders::ALL);
-        frame.render_widget(&input_block, input_area);
-        let input_inner = input_block.inner(input_area);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(Color::Black)),
+            input_area,
+        );
+        let input_inner = Rect {
+            x: input_area.x.saturating_add(2),
+            y: input_area.y.saturating_add(1),
+            width: input_area.width.saturating_sub(4),
+            height: input_area.height.saturating_sub(2),
+        };
 
-        let input_widget =
-            Paragraph::new(input_value).style(Style::default().fg(Color::Rgb(255, 255, 255)));
-        frame.render_widget(input_widget, input_inner);
+        let title = "New Keyword";
+        let escape = "esc";
+        let spacer_width = input_inner
+            .width
+            .saturating_sub((title.len() + escape.len()) as u16);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
+                Span::raw(" ".repeat(spacer_width as usize)),
+                Span::styled(escape, Style::default().fg(Color::White)),
+            ])),
+            input_inner,
+        );
+
+        let input_value_area = Rect {
+            y: input_inner.y.saturating_add(2),
+            height: 1,
+            ..input_inner
+        };
+        frame.render_widget(Paragraph::new(input_value), input_value_area);
 
         // Cursor position based on tui_input cursor
-        let cursor_x = input_area.x + input_cursor as u16 + 1;
-        let cursor_y = input_area.y + 1;
+        let cursor_x = input_value_area.x + input_cursor as u16;
+        let cursor_y = input_value_area.y;
         frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
 
@@ -331,9 +360,8 @@ impl KeywordsViewer {
             .map(|keyword| ListItem::new(keyword.clone()))
             .collect();
 
-        let list = List::new(items)
-            .block(Block::default().title(" Keywords ").borders(Borders::ALL))
-            .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG));
+        let list =
+            List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::Black));
 
         frame.render_stateful_widget(list, area, list_state);
     }

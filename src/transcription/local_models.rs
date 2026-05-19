@@ -382,23 +382,54 @@ pub async fn download_model_with_handle(
 pub async fn resolve_custom_model(input: &str) -> anyhow::Result<RegistryEntry> {
     let url = Url::parse(input).map_err(|_| anyhow::anyhow!("custom models require a URL"))?;
 
-    if is_hugging_face_model_page_url(&url) {
-        return resolve_hugging_face_model_page_url(url).await;
+    if is_direct_model_file_url(&url) {
+        return resolve_direct_model_file_url(normalize_hugging_face_file_url(url)?).await;
     }
 
-    if is_direct_model_file_url(&url) {
-        return resolve_direct_model_file_url(url).await;
+    if is_hugging_face_model_page_url(&url) {
+        return resolve_hugging_face_model_page_url(url).await;
     }
 
     anyhow::bail!("custom model URL must be a Hugging Face model page or a direct model file URL")
 }
 
 fn is_hugging_face_model_page_url(url: &Url) -> bool {
-    url.host_str() == Some("huggingface.co")
+    is_hugging_face_url(url)
+        && !is_direct_model_file_url(url)
         && url.path_segments().is_some_and(|segments| {
-            let segments: Vec<_> = segments.collect();
-            segments.len() == 2 && !segments.iter().any(|segment| segment.is_empty())
+            let segments: Vec<_> = segments.filter(|segment| !segment.is_empty()).collect();
+            segments.len() >= 2
         })
+}
+
+fn is_hugging_face_url(url: &Url) -> bool {
+    matches!(
+        url.host_str(),
+        Some("huggingface.co" | "www.huggingface.co")
+    )
+}
+
+fn normalize_hugging_face_file_url(url: Url) -> anyhow::Result<Url> {
+    if !is_hugging_face_url(&url) {
+        return Ok(url);
+    }
+
+    let Some(segments) = url.path_segments() else {
+        return Ok(url);
+    };
+    let segments: Vec<_> = segments.filter(|segment| !segment.is_empty()).collect();
+    if segments.len() < 5 || !matches!(segments[2], "blob" | "resolve") {
+        return Ok(url);
+    }
+
+    Url::parse(&format!(
+        "https://huggingface.co/{}/{}/resolve/{}/{}",
+        segments[0],
+        segments[1],
+        segments[3],
+        segments[4..].join("/")
+    ))
+    .map_err(Into::into)
 }
 
 fn is_direct_model_file_url(url: &Url) -> bool {
@@ -458,7 +489,11 @@ struct HuggingFaceSibling {
 }
 
 async fn resolve_hugging_face_model_page_url(url: Url) -> anyhow::Result<RegistryEntry> {
-    let segments: Vec<_> = url.path_segments().unwrap().collect();
+    let segments: Vec<_> = url
+        .path_segments()
+        .unwrap()
+        .filter(|segment| !segment.is_empty())
+        .collect();
     let repo = format!("{}/{}", segments[0], segments[1]);
     let api_url = format!("https://huggingface.co/api/models/{repo}");
     resolve_hugging_face_model_page_url_from_api(url, &api_url).await
@@ -468,14 +503,26 @@ async fn resolve_hugging_face_model_page_url_from_api(
     url: Url,
     api_url: &str,
 ) -> anyhow::Result<RegistryEntry> {
-    let segments: Vec<_> = url.path_segments().unwrap().collect();
+    let segments: Vec<_> = url
+        .path_segments()
+        .unwrap()
+        .filter(|segment| !segment.is_empty())
+        .collect();
     let repo = format!("{}/{}", segments[0], segments[1]);
-    let response = reqwest::get(api_url)
+    let response = reqwest::Client::new()
+        .get(api_url)
+        .header(reqwest::header::USER_AGENT, "ostt")
+        .send()
         .await
         .map_err(|error| anyhow::anyhow!("failed to query Hugging Face model metadata: {error}"))?;
     let status = response.status();
     if !status.is_success() {
-        anyhow::bail!("failed to query Hugging Face model metadata: HTTP {status}");
+        let body = response.text().await.unwrap_or_default();
+        let detail = body.lines().next().unwrap_or_default().trim();
+        if detail.is_empty() {
+            anyhow::bail!("failed to query Hugging Face model metadata: HTTP {status}");
+        }
+        anyhow::bail!("failed to query Hugging Face model metadata: HTTP {status}: {detail}");
     }
     let info = response
         .json::<HuggingFaceModelInfo>()
@@ -1386,15 +1433,35 @@ mod tests {
     #[test]
     fn classifies_hugging_face_pages_and_direct_model_files() {
         let hf_page = Url::parse("https://huggingface.co/Supertone/supertonic-3").unwrap();
+        let hf_page_trailing =
+            Url::parse("https://huggingface.co/Supertone/supertonic-3/").unwrap();
+        let hf_tree =
+            Url::parse("https://huggingface.co/Supertone/supertonic-3/tree/main").unwrap();
         let hf_file =
             Url::parse("https://huggingface.co/Supertone/supertonic-3/resolve/main/model.gguf")
                 .unwrap();
         let direct_file = Url::parse("https://example.com/models/ggml-custom.bin").unwrap();
 
         assert!(is_hugging_face_model_page_url(&hf_page));
+        assert!(is_hugging_face_model_page_url(&hf_page_trailing));
+        assert!(is_hugging_face_model_page_url(&hf_tree));
         assert!(!is_hugging_face_model_page_url(&hf_file));
         assert!(is_direct_model_file_url(&hf_file));
         assert!(is_direct_model_file_url(&direct_file));
+    }
+
+    #[test]
+    fn normalizes_hugging_face_blob_file_urls_to_resolve_urls() {
+        let url =
+            Url::parse("https://huggingface.co/KBLab/kb-whisper/blob/main/ggml-model-q5_0.bin")
+                .unwrap();
+
+        let normalized = normalize_hugging_face_file_url(url).expect("normalize file url");
+
+        assert_eq!(
+            normalized.as_str(),
+            "https://huggingface.co/KBLab/kb-whisper/resolve/main/ggml-model-q5_0.bin"
+        );
     }
 
     #[tokio::test]

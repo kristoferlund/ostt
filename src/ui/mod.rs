@@ -7,7 +7,7 @@ pub mod components;
 pub mod error;
 
 pub use components::{
-    centered_fixed_rect, render_dialog, render_error_dialog, render_toast, DialogAction, Toast,
-    ToastStyle,
+    centered_fixed_rect, render_dialog, render_dialog_content, render_error_dialog, render_toast,
+    DialogAction, Toast, ToastStyle,
 };
 pub use error::ErrorScreen;

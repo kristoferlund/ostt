@@ -177,13 +177,13 @@ impl TranscriptionAnimation {
             for x in area.x..area.x + area.width {
                 frame
                     .buffer_mut()
-                    .set_string(x, y, " ", Style::default().bg(Color::Rgb(0, 0, 0)));
+                    .set_string(x, y, " ", Style::default().bg(Color::Black));
             }
         }
 
         // Render ASCII art characters (2 lines each)
         let center_y = height / 2;
-        let color = Color::Rgb(255, 255, 255);
+        let color = Color::White;
 
         for anim_char in &self.chars {
             // Use the x position directly (already calculated in update_chars)
@@ -222,7 +222,7 @@ impl TranscriptionAnimation {
                 area.x + label_x,
                 area.y + label_y,
                 &self.status_label,
-                Style::default().fg(Color::Rgb(128, 128, 128)),
+                Style::default().fg(Color::DarkGray),
             );
         }
     }

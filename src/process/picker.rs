@@ -15,15 +15,9 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
 };
 use std::io::{self, Stdout};
-
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
-const HELP_FG: Color = Color::Rgb(100, 100, 100);
-const HOVER_BG: Color = Color::Rgb(10, 10, 10);
 
 /// Renders the action picker UI into the given frame area.
 ///
@@ -36,29 +30,36 @@ pub fn render_picker_frame(
     list_state: &mut ListState,
     hovered_index: Option<usize>,
 ) -> Rect {
-    let padding_block = Block::default()
-        .padding(Padding::uniform(1))
-        .style(Style::default().bg(BG));
+    let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
     frame.render_widget(&padding_block, area);
     let padded_area = padding_block.inner(area);
 
-    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+    let main_block = Block::default();
     frame.render_widget(&main_block, padded_area);
     let inner_area = main_block.inner(padded_area);
 
     // Split into header, list, and footer areas
-    let [header_area, list_area, footer_area] = Layout::vertical([
+    let [header_area, title_area, list_area, footer_area] = Layout::vertical([
         Constraint::Length(3),
+        Constraint::Length(2),
         Constraint::Min(0),
         Constraint::Length(1),
     ])
     .areas(inner_area);
 
     // Render ostt logo header
-    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-        .style(Style::default().fg(FG))
-        .alignment(Alignment::Left);
+    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n").alignment(Alignment::Left);
     frame.render_widget(header, header_area);
+
+    let title = " Process action ";
+    frame.render_widget(
+        Paragraph::new(title).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        Rect {
+            width: title.len() as u16,
+            height: 1,
+            ..title_area
+        },
+    );
 
     // Build list items from action names
     let selected_index = list_state.selected();
@@ -68,7 +69,7 @@ pub fn render_picker_frame(
         .map(|(i, action)| {
             let mut item = ListItem::new(action.name.clone());
             if Some(i) == hovered_index && Some(i) != selected_index {
-                item = item.style(Style::default().bg(HOVER_BG));
+                item = item.style(Style::default().fg(Color::White).bg(Color::Black));
             }
             item
         })
@@ -76,12 +77,7 @@ pub fn render_picker_frame(
 
     // Render list with title
     let list = List::new(items)
-        .block(
-            Block::default()
-                .title(" Process action ")
-                .borders(Borders::ALL),
-        )
-        .highlight_style(Style::default().bg(HIGHLIGHT_BG))
+        .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
         .highlight_symbol("> ")
         .highlight_spacing(HighlightSpacing::Always);
 
@@ -91,7 +87,7 @@ pub fn render_picker_frame(
     let help_text = "↑/↓ select, ↵ confirm, esc/q cancel";
     let help_paragraph = Paragraph::new(help_text)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(HELP_FG));
+        .style(Style::default().fg(Color::White).bg(Color::Black));
     frame.render_widget(help_paragraph, footer_area);
 
     list_area
@@ -207,9 +203,8 @@ impl ActionPicker {
                         self.list_state.select_next();
                     }
                     MouseEventKind::Moved => {
-                        let inner_top = self.list_area.y + 1; // top border
-                        let inner_bottom =
-                            self.list_area.y + self.list_area.height.saturating_sub(1); // bottom border
+                        let inner_top = self.list_area.y;
+                        let inner_bottom = self.list_area.y + self.list_area.height;
                         if mouse.row < inner_top || mouse.row >= inner_bottom {
                             self.hovered_index = None;
                         } else {

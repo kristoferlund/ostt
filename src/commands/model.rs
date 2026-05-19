@@ -2,7 +2,7 @@ use crate::commands::local_models;
 use crate::config::{self, SelectedModel};
 use crate::transcription::local_models::{load_state, model_destination};
 use crate::transcription::{TranscriptionModel, TranscriptionProvider};
-use crate::ui::{render_toast, Toast, ToastStyle};
+use crate::ui::{render_toast, Toast};
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
@@ -12,17 +12,12 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, List, ListItem, ListState, Padding, Paragraph};
 use ratatui::{Frame, Terminal};
 use std::collections::HashSet;
 use std::io::{self, Stdout};
 use std::time::Duration;
 
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
-const HELP_FG: Color = Color::Rgb(100, 100, 100);
-const SECTION_FG: Color = Color::Rgb(120, 120, 120);
 const LOGO: &str = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
 
 #[derive(Debug, Clone)]
@@ -89,13 +84,11 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
 fn render_shell(frame: &mut Frame<'_>) -> [Rect; 3] {
     let area = frame.area();
 
-    let padding_block = Block::default()
-        .padding(Padding::uniform(1))
-        .style(Style::default().bg(BG));
+    let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
     frame.render_widget(&padding_block, area);
     let padded_area = padding_block.inner(area);
 
-    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+    let main_block = Block::default();
     frame.render_widget(&main_block, padded_area);
     let inner_area = main_block.inner(padded_area);
 
@@ -106,12 +99,7 @@ fn render_shell(frame: &mut Frame<'_>) -> [Rect; 3] {
     ])
     .areas(inner_area);
 
-    frame.render_widget(
-        Paragraph::new(LOGO)
-            .style(Style::default().fg(FG))
-            .alignment(Alignment::Left),
-        header_area,
-    );
+    frame.render_widget(Paragraph::new(LOGO).alignment(Alignment::Left), header_area);
 
     [body_area, footer_area, area]
 }
@@ -120,9 +108,24 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, text: &'static str) {
     frame.render_widget(
         Paragraph::new(text)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(HELP_FG)),
+            .style(Style::default().fg(Color::White).bg(Color::Black)),
         area,
     );
+}
+
+fn render_title(frame: &mut Frame<'_>, area: Rect, title: &'static str) -> Rect {
+    let [title_area, content_area] =
+        Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(area);
+    let label = format!(" {title} ");
+    frame.render_widget(
+        Paragraph::new(label.clone()).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        Rect {
+            width: label.len() as u16,
+            height: 1,
+            ..title_area
+        },
+    );
+    content_area
 }
 
 async fn choose_model_provider(
@@ -133,7 +136,8 @@ async fn choose_model_provider(
 
     loop {
         terminal.draw(|frame| {
-            let [list_area, footer_area, _] = render_shell(frame);
+            let [body_area, footer_area, _] = render_shell(frame);
+            let list_area = render_title(frame, body_area, "Provider");
 
             let items: Vec<ListItem> = choices
                 .iter()
@@ -143,8 +147,7 @@ async fn choose_model_provider(
             let mut state = ListState::default().with_selected(Some(selected));
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(Block::default().title(" Provider ").borders(Borders::ALL))
-                    .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG))
+                    .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
                     .highlight_symbol("> "),
                 list_area,
                 &mut state,
@@ -202,17 +205,13 @@ async fn run_cloud_model_selector(
         }
 
         terminal.draw(|frame| {
-            let [list_area, footer_area, _] = render_shell(frame);
+            let [body_area, footer_area, _] = render_shell(frame);
+            let list_area = render_title(frame, body_area, "Cloud Model");
             let (items, selected_display_index) = cloud_model_list_items(&sections, selected);
             let mut state = ListState::default().with_selected(selected_display_index);
             frame.render_stateful_widget(
                 List::new(items)
-                    .block(
-                        Block::default()
-                            .title(" Cloud Model ")
-                            .borders(Borders::ALL),
-                    )
-                    .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG))
+                    .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
                     .highlight_symbol("> "),
                 list_area,
                 &mut state,
@@ -221,7 +220,7 @@ async fn run_cloud_model_selector(
             render_footer(frame, footer_area, "↑↓ select, ↵ activate, esc/q back");
 
             if let Some(toast) = &toast {
-                render_toast(frame, toast, ToastStyle::default());
+                render_toast(frame, toast);
             }
         })?;
 
@@ -238,7 +237,7 @@ async fn run_cloud_model_selector(
                                 &entry.provider_id,
                                 &entry.model_id,
                             );
-                            toast = Some(Toast::new(format!("Activated {}", entry.name)));
+                            toast = Some(Toast::success(format!("Activated {}", entry.name)));
                         }
                     }
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
@@ -267,7 +266,7 @@ fn cloud_model_list_items(
     for section in sections {
         items.push(ListItem::new(Line::from(Span::styled(
             section.title.to_string(),
-            Style::default().fg(SECTION_FG),
+            Style::default().add_modifier(Modifier::BOLD),
         ))));
         display_index += 1;
 
@@ -323,7 +322,8 @@ async fn show_no_cloud_providers_screen(
 ) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| {
-            let [content_area, footer_area, _] = render_shell(frame);
+            let [body_area, footer_area, _] = render_shell(frame);
+            let content_area = render_title(frame, body_area, "Cloud Provider");
 
             frame.render_widget(
                 Paragraph::new(vec![
@@ -336,14 +336,10 @@ async fn show_no_cloud_providers_screen(
                     Line::from(""),
                     Line::from(Span::styled(
                         "Available providers: OpenAI, Groq",
-                        Style::default().fg(HELP_FG),
+                        Style::default(),
                     )),
                 ])
-                .block(
-                    Block::default()
-                        .title(" Cloud Provider ")
-                        .borders(Borders::ALL),
-                ),
+                .wrap(ratatui::widgets::Wrap { trim: false }),
                 content_area,
             );
 

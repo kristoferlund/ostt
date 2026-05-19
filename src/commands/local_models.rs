@@ -7,8 +7,7 @@ use crate::transcription::local_models::{
     DownloadHandle, LocalModelState, RegistryEntry,
 };
 use crate::ui::{
-    centered_fixed_rect, render_dialog, render_error_dialog, render_toast, DialogAction, Toast,
-    ToastStyle,
+    render_dialog, render_dialog_content, render_error_dialog, render_toast, DialogAction, Toast,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
@@ -19,9 +18,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{
-    Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap,
-};
+use ratatui::widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::fs;
 use std::io::{self, Stdout};
@@ -58,6 +55,7 @@ pub struct DownloadState {
     pub speed_mbps: f64,
     pub status: String,
     pub is_complete: bool,
+    pub is_custom: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -417,7 +415,7 @@ fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn initial_download_state(entry: &RegistryEntry) -> DownloadState {
+fn initial_download_state(entry: &RegistryEntry, is_custom: bool) -> DownloadState {
     DownloadState {
         model_id: entry.id.clone(),
         downloaded_bytes: 0,
@@ -426,11 +424,12 @@ fn initial_download_state(entry: &RegistryEntry) -> DownloadState {
         speed_mbps: 0.0,
         status: "Starting download".to_string(),
         is_complete: false,
+        is_custom,
     }
 }
 
 fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
-    let state = Arc::new(Mutex::new(initial_download_state(&entry)));
+    let state = Arc::new(Mutex::new(initial_download_state(&entry, is_custom)));
     let progress_state = state.clone();
     let handle = DownloadHandle::new();
     let task_handle = handle.clone();
@@ -514,7 +513,7 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
             input,
             selected_action,
         } => {
-            render_logo(frame, inner_area);
+            render_browse(frame, inner_area, tui);
             render_custom_input(frame, input, *selected_action);
         }
         LocalModelsMode::CustomModelDetails {
@@ -524,7 +523,7 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
             selected_action,
             ..
         } => {
-            render_logo(frame, inner_area);
+            render_browse(frame, inner_area, tui);
             render_custom_details(frame, id_input, name_input, *focus, *selected_action);
         }
         LocalModelsMode::Downloading(state) => {
@@ -540,7 +539,7 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
                     input,
                     selected_action,
                 } => {
-                    render_logo(frame, inner_area);
+                    render_browse(frame, inner_area, tui);
                     render_custom_input(frame, input, *selected_action);
                 }
                 _ => render_browse(frame, inner_area, tui),
@@ -550,7 +549,7 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
     }
 
     if let Some(toast) = &tui.toast {
-        render_toast(frame, toast, ToastStyle::default());
+        render_toast(frame, toast);
     }
 }
 
@@ -563,13 +562,6 @@ fn section_header(label: impl Into<String>) -> ListItem<'static> {
         label.into(),
         Style::default().add_modifier(Modifier::BOLD),
     )))
-}
-
-fn render_logo(frame: &mut Frame<'_>, area: Rect) {
-    let [header_area, _] =
-        Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
-    let header = Paragraph::new(LOGO).alignment(Alignment::Left);
-    frame.render_widget(header, header_area);
 }
 
 fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) {
@@ -673,13 +665,24 @@ fn grouped_display_index(
 }
 
 fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry) {
-    let [header_area, content_area, footer_area] = Layout::vertical([
+    let [header_area, title_area, content_area, footer_area] = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Min(5),
         Constraint::Length(2),
+        Constraint::Min(5),
+        Constraint::Length(1),
     ])
     .areas(inner_area);
     frame.render_widget(Paragraph::new(LOGO).alignment(Alignment::Left), header_area);
+
+    let title = format!(" {} ", entry.name);
+    frame.render_widget(
+        Paragraph::new(title.clone()).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        Rect {
+            width: title.len() as u16,
+            height: 1,
+            ..title_area
+        },
+    );
 
     let (_, path) = downloaded_details(entry);
     let mut lines = vec![
@@ -720,19 +723,13 @@ fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry)
     }
 
     frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title(entry.name.as_str())
-                    .borders(Borders::ALL),
-            )
-            .wrap(Wrap { trim: false }),
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
         content_area,
     );
     frame.render_widget(
         Paragraph::new("esc/q back")
             .alignment(Alignment::Center)
-            .style(Style::default().add_modifier(Modifier::REVERSED)),
+            .style(Style::default().fg(Color::White).bg(Color::Black)),
         footer_area,
     );
 }
@@ -779,7 +776,6 @@ fn render_confirm_download(
 }
 
 fn render_custom_input(frame: &mut Frame<'_>, input: &Input, selected_action: DialogAction) {
-    let area = centered_fixed_rect(70, 12, frame.area());
     let lines = vec![
         padded_line("Paste a Hugging Face model page or a direct model file URL."),
         padded_line("Supported files: .gguf and ggml-*.bin."),
@@ -787,19 +783,9 @@ fn render_custom_input(frame: &mut Frame<'_>, input: &Input, selected_action: Di
         padded_line("Enter model page or file URL:"),
         input_line(input.value(), true),
         Line::from(""),
-        wizard_buttons(selected_action),
+        wizard_button("Next", selected_action),
     ];
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title("Download Custom Model")
-                    .borders(Borders::ALL),
-            )
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    render_dialog_content(frame, "Download Custom Model 1/3", lines, 70, 12);
 }
 
 fn render_custom_details(
@@ -809,7 +795,6 @@ fn render_custom_details(
     focus: CustomModelDetailsFocus,
     selected_action: DialogAction,
 ) {
-    let area = centered_fixed_rect(70, 14, frame.area());
     let lines = vec![
         padded_line("Choose how this custom model should appear in OSTT."),
         Line::from(""),
@@ -819,19 +804,9 @@ fn render_custom_details(
         padded_line("Name:"),
         input_line(name_input.value(), focus == CustomModelDetailsFocus::Name),
         Line::from(""),
-        wizard_buttons(selected_action),
+        wizard_button("Download", selected_action),
     ];
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title("Custom Model Details")
-                    .borders(Borders::ALL),
-            )
-            .wrap(Wrap { trim: false }),
-        area,
-    );
+    render_dialog_content(frame, "Download Custom Model 2/3", lines, 70, 14);
 }
 
 fn padded_line(text: impl Into<String>) -> Line<'static> {
@@ -841,41 +816,44 @@ fn padded_line(text: impl Into<String>) -> Line<'static> {
 fn input_line(value: &str, focused: bool) -> Line<'static> {
     let cursor = if focused { "█" } else { "" };
     let text = format!("{value}{cursor}");
-    let padded = format!(" {:<66}", text);
+    let padded = format!("{text:<66}");
     Line::from(Span::styled(
         padded,
-        Style::default().add_modifier(Modifier::REVERSED),
+        Style::default().fg(Color::White).bg(Color::DarkGray),
     ))
 }
 
-fn wizard_buttons(selected_action: DialogAction) -> Line<'static> {
-    let button_style = |action| {
-        if selected_action == action {
-            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
-        } else {
-            Style::default()
-        }
-    };
-    Line::from(vec![
-        Span::raw("                                                "),
-        Span::styled("<Cancel>", button_style(DialogAction::Cancel)),
-        Span::raw("  "),
-        Span::styled("<Next>", button_style(DialogAction::Ok)),
-    ])
+fn wizard_button(action: &'static str, _selected_action: DialogAction) -> Line<'static> {
+    Line::from(Span::styled(
+        format!("<{action}>"),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    ))
 }
 
 fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
-    let area = centered_fixed_rect(70, 10, frame.area());
     let eta = if state.speed_mbps > 0.0 && state.total_bytes > state.downloaded_bytes {
         let remaining_mb = (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
         format!("ETA: {:.0}s", remaining_mb / state.speed_mbps)
     } else {
         "ETA: unknown".to_string()
     };
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(vec![
+    render_dialog_content(
+        frame,
+        if state.is_custom {
+            "Download Custom Model 3/3"
+        } else {
+            state.status.as_str()
+        },
+        vec![
             Line::from(format!("Model: {}", state.model_id)),
+            if state.is_custom {
+                Line::from(format!("Status: {}", state.status))
+            } else {
+                Line::from("")
+            },
             Line::from(""),
             Line::from(progress_bar(state.progress, 58)),
             Line::from(""),
@@ -893,17 +871,14 @@ fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
             Line::from(""),
             Line::from(Span::styled(
                 "<Cancel>",
-                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             )),
-        ])
-        .block(
-            Block::default()
-                .title(state.status.as_str())
-                .borders(Borders::ALL),
-        )
-        .alignment(Alignment::Center)
-        .wrap(Wrap { trim: false }),
-        area,
+        ],
+        70,
+        10,
     );
 }
 
@@ -933,7 +908,7 @@ async fn finish_completed_download(
         Ok(()) => {
             tui.back_to_browse();
             tui.refresh(&load_state(), registry)?;
-            tui.toast = Some(Toast::new("Download complete"));
+            tui.toast = Some(Toast::success("Download complete"));
         }
         Err(error) => {
             if error.to_string() != "model download cancelled" {
@@ -992,9 +967,6 @@ async fn handle_key(
                 tui.back_to_browse();
             }
         }
-        (LocalModelsMode::CustomModelInput { .. }, KeyCode::Left | KeyCode::Right) => {
-            tui.toggle_dialog_action()
-        }
         (
             LocalModelsMode::CustomModelInput {
                 input,
@@ -1011,9 +983,6 @@ async fn handle_key(
         }
         (LocalModelsMode::CustomModelDetails { .. }, KeyCode::Esc | KeyCode::Char('q')) => {
             tui.back_to_browse()
-        }
-        (LocalModelsMode::CustomModelDetails { .. }, KeyCode::Left | KeyCode::Right) => {
-            tui.toggle_dialog_action()
         }
         (LocalModelsMode::CustomModelDetails { .. }, KeyCode::Tab) => {
             toggle_custom_details_focus(tui)
@@ -1105,10 +1074,10 @@ fn handle_selected_entry(
 
     match activate_entry(&entry) {
         Ok(()) => {
-            tui.toast = Some(Toast::new(format!("Activated {}", entry.name)));
+            tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
             tui.refresh(&load_state(), registry)?;
         }
-        Err(error) => tui.toast = Some(Toast::new(error.to_string())),
+        Err(error) => tui.toast = Some(Toast::error(error.to_string())),
     }
     Ok(())
 }
@@ -1144,7 +1113,7 @@ async fn resolve_custom_input(tui: &mut LocalModelsTui, value: &str) {
                 selected_action: DialogAction::Ok,
             };
         }
-        Err(error) => tui.toast = Some(Toast::new(error.to_string())),
+        Err(error) => tui.toast = Some(Toast::error(error.to_string())),
     }
 }
 
@@ -1186,23 +1155,23 @@ fn start_custom_details_download(
     let id = id_input.value().trim();
     let name = name_input.value().trim();
     if !is_safe_model_id(id) {
-        tui.toast = Some(Toast::new(
+        tui.toast = Some(Toast::error(
             "Model ID must use lowercase letters, numbers, '.', '_' or '-'",
         ));
         return;
     }
     if tui.entries.iter().any(|entry| entry.id == id) {
-        tui.toast = Some(Toast::new(format!("Model ID '{id}' already exists")));
+        tui.toast = Some(Toast::error(format!("Model ID '{id}' already exists")));
         return;
     }
     if name.is_empty() {
-        tui.toast = Some(Toast::new("Model name is required"));
+        tui.toast = Some(Toast::error("Model name is required"));
         return;
     }
     resolved_entry.id = id.to_string();
     resolved_entry.name = name.to_string();
     if let Err(error) = validate_custom_model_registration(&resolved_entry) {
-        tui.toast = Some(Toast::new(error.to_string()));
+        tui.toast = Some(Toast::error(error.to_string()));
         return;
     }
     let running = start_download(resolved_entry, true);
@@ -1217,7 +1186,7 @@ fn delete_confirmed_entry(
 ) -> anyhow::Result<()> {
     match delete_entry(entry) {
         Ok(()) => {
-            tui.toast = Some(Toast::new(format!("Deleted {}", entry.name)));
+            tui.toast = Some(Toast::success(format!("Deleted {}", entry.name)));
             tui.back_to_browse();
             tui.refresh(&load_state(), registry)?;
         }
