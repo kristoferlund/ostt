@@ -15,7 +15,7 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Padding, Paragraph},
 };
 use std::io::{self, Stdout};
 
@@ -48,12 +48,12 @@ pub fn render_picker_frame(
     .areas(inner_area);
 
     // Render ostt logo header
-    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n").alignment(Alignment::Left);
+    let header = Paragraph::new("┏┓┏╋╋ \n┗┛┛┗┗ \n").alignment(Alignment::Left);
     frame.render_widget(header, header_area);
 
     let title = " Process action ";
     frame.render_widget(
-        Paragraph::new(title).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
         Rect {
             width: title.len() as u16,
             height: 1,
@@ -69,7 +69,7 @@ pub fn render_picker_frame(
         .map(|(i, action)| {
             let mut item = ListItem::new(action.name.clone());
             if Some(i) == hovered_index && Some(i) != selected_index {
-                item = item.style(Style::default().fg(Color::White).bg(Color::Black));
+                item = item.style(Style::default().fg(Color::White).bg(Color::DarkGray));
             }
             item
         })
@@ -77,9 +77,7 @@ pub fn render_picker_frame(
 
     // Render list with title
     let list = List::new(items)
-        .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
-        .highlight_symbol("> ")
-        .highlight_spacing(HighlightSpacing::Always);
+        .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
     frame.render_stateful_widget(list, list_area, list_state);
 
@@ -87,7 +85,7 @@ pub fn render_picker_frame(
     let help_text = "↑/↓ select, ↵ confirm, esc/q cancel";
     let help_paragraph = Paragraph::new(help_text)
         .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::White).bg(Color::Black));
+        .style(Style::default().fg(Color::White).bg(Color::DarkGray));
     frame.render_widget(help_paragraph, footer_area);
 
     list_area

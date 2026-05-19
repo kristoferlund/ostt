@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::io::{self, Stdout};
 use std::time::Duration;
 
-const LOGO: &str = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
+const LOGO: &str = "┏┓┏╋╋ \n┗┛┛┗┗ \n";
 
 #[derive(Debug, Clone)]
 pub struct CloudModelEntry {
@@ -115,7 +115,7 @@ fn render_footer(frame: &mut Frame<'_>, area: Rect, text: &'static str) {
     frame.render_widget(
         Paragraph::new(text)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White).bg(Color::Black)),
+            .style(Style::default().fg(Color::White).bg(Color::DarkGray)),
         area,
     );
 }
@@ -125,7 +125,7 @@ fn render_title(frame: &mut Frame<'_>, area: Rect, title: &'static str) -> Rect 
         Layout::vertical([Constraint::Length(2), Constraint::Min(0)]).areas(area);
     let label = format!(" {title} ");
     frame.render_widget(
-        Paragraph::new(label.clone()).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        Paragraph::new(label.clone()).style(Style::default().fg(Color::White).bg(Color::Blue)),
         Rect {
             width: label.len() as u16,
             height: 1,
@@ -154,8 +154,7 @@ async fn choose_model_provider(
             let mut state = ListState::default().with_selected(Some(selected));
             frame.render_stateful_widget(
                 List::new(items)
-                    .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
-                    .highlight_symbol("> "),
+                    .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
                 list_area,
                 &mut state,
             );
@@ -222,8 +221,7 @@ async fn run_cloud_model_selector(
                     let mut state = ListState::default().with_selected(selected_display_index);
                     frame.render_stateful_widget(
                         List::new(items)
-                            .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
-                            .highlight_symbol("> "),
+                            .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
                         list_area,
                         &mut state,
                     );

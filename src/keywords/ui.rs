@@ -241,13 +241,13 @@ impl KeywordsViewer {
             let content_area = layout[2];
 
             // Header
-            let header_text = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
+            let header_text = "┏┓┏╋╋ \n┗┛┛┗┗ \n";
             let header_paragraph = Paragraph::new(header_text).alignment(Alignment::Left);
             frame.render_widget(header_paragraph, header_area);
 
             let title = " Keywords ";
             frame.render_widget(
-                Paragraph::new(title).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+                Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
                 Rect {
                     width: title.len() as u16,
                     height: 1,
@@ -287,7 +287,7 @@ impl KeywordsViewer {
         let help_text = "↑↓ select, x/del remove, a add, esc/q exit";
         let help_paragraph = Paragraph::new(help_text)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White).bg(Color::Black));
+            .style(Style::default().fg(Color::White).bg(Color::DarkGray));
         frame.render_widget(help_paragraph, help_area);
     }
 
@@ -311,7 +311,7 @@ impl KeywordsViewer {
         Self::render_keywords_list(frame, list_area, keywords, list_state);
 
         frame.render_widget(
-            Block::default().style(Style::default().bg(Color::Black)),
+            Block::default().style(Style::default().bg(Color::DarkGray)),
             input_area,
         );
         let input_inner = Rect {
@@ -340,7 +340,11 @@ impl KeywordsViewer {
             height: 1,
             ..input_inner
         };
-        frame.render_widget(Paragraph::new(input_value), input_value_area);
+        frame.render_widget(
+            Paragraph::new(input_value)
+                .style(Style::default().fg(Color::DarkGray).bg(Color::Gray)),
+            input_value_area,
+        );
 
         // Cursor position based on tui_input cursor
         let cursor_x = input_value_area.x + input_cursor as u16;
@@ -361,7 +365,7 @@ impl KeywordsViewer {
             .collect();
 
         let list =
-            List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::Black));
+            List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
         frame.render_stateful_widget(list, area, list_state);
     }

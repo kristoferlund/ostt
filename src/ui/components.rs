@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use std::time::{Duration, Instant};
 
-const BG: Color = Color::Black;
+const BG: Color = Color::DarkGray;
 const FG: Color = Color::White;
 const TOAST_DURATION: Duration = Duration::from_secs(2);
 
@@ -91,7 +91,10 @@ pub fn render_dialog(
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
         format!("<{primary_action}>"),
-        Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD),
+        Style::default()
+            .fg(Color::Black)
+            .bg(Color::White)
+            .add_modifier(Modifier::BOLD),
     )));
     render_dialog_content(frame, title, lines, 70, 9);
 }
@@ -102,7 +105,10 @@ pub fn render_error_dialog(frame: &mut Frame<'_>, title: &'static str, message: 
         Line::from(""),
         Line::from(Span::styled(
             "<Close>",
-            Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Black)
+                .bg(Color::White)
+                .add_modifier(Modifier::BOLD),
         )),
     ];
     render_dialog_content(frame, title, lines, 70, 8);
@@ -159,10 +165,7 @@ pub fn render_dialog_content(
 
 fn render_box(frame: &mut Frame<'_>, area: Rect, title: &str, lines: Vec<Line<'static>>) {
     frame.render_widget(Clear, area);
-    frame.render_widget(
-        Block::default().style(Style::default().bg(Color::Black)),
-        area,
-    );
+    frame.render_widget(Block::default().style(Style::default().bg(BG)), area);
 
     let inner_area = Rect {
         x: area.x.saturating_add(2),
@@ -183,7 +186,7 @@ fn render_box(frame: &mut Frame<'_>, area: Rect, title: &str, lines: Vec<Line<'s
             Style::default().add_modifier(Modifier::UNDERLINED),
         ),
         Span::raw(" ".repeat(spacer_width as usize)),
-        Span::styled(escape, Style::default().fg(Color::White)),
+        Span::styled(escape, Style::default().fg(Color::Gray)),
     ]);
 
     let mut padded_lines = Vec::with_capacity(lines.len() + 2);
@@ -193,7 +196,7 @@ fn render_box(frame: &mut Frame<'_>, area: Rect, title: &str, lines: Vec<Line<'s
 
     frame.render_widget(
         Paragraph::new(padded_lines)
-            .style(Style::default().bg(Color::Black))
+            .style(Style::default().fg(FG).bg(BG))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: false }),
         inner_area,

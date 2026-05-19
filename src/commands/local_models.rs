@@ -27,7 +27,7 @@ use std::time::{Duration, SystemTime};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-const LOGO: &str = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
+const LOGO: &str = "┏┓┏╋╋ \n┗┛┛┗┗ \n";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LocalModelEntry {
@@ -602,7 +602,7 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) 
         ..title_area
     };
     frame.render_widget(
-        Paragraph::new(" Local Models ").style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        Paragraph::new(" Local Models ").style(Style::default().fg(Color::White).bg(Color::Blue)),
         title_label_area,
     );
 
@@ -612,9 +612,7 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) 
     let selected_display_index = display_index_for_selected_model(tui);
     let mut state = ListState::default().with_selected(selected_display_index);
     frame.render_stateful_widget(
-        List::new(items)
-            .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
-            .highlight_symbol("> "),
+        List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
         list_area,
         &mut state,
     );
@@ -623,7 +621,7 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) 
     frame.render_widget(
         Paragraph::new(footer_text)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White).bg(Color::Black)),
+            .style(Style::default().fg(Color::White).bg(Color::DarkGray)),
         footer_area,
     );
 }
@@ -645,14 +643,19 @@ fn push_grouped_model_items(items: &mut Vec<ListItem<'static>>, entries: Vec<&Lo
 
 fn local_model_list_item(entry: &LocalModelEntry) -> ListItem<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
-    let downloaded_marker = if entry.is_downloaded { "✓" } else { " " };
     let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
     let description = entry.description.trim();
 
-    ListItem::new(Line::from(format!(
-        "{} {} {}, {}, {}",
-        active_marker, downloaded_marker, entry.name, size, description,
-    )))
+    let mut spans = vec![Span::raw(format!("{active_marker} "))];
+    if entry.is_downloaded {
+        spans.push(Span::raw("✅ "));
+    }
+    spans.push(Span::raw(format!(
+        "{}, {}, {}",
+        entry.name, size, description,
+    )));
+
+    ListItem::new(Line::from(spans))
 }
 
 fn display_index_for_selected_model(tui: &LocalModelsTui) -> Option<usize> {
@@ -696,7 +699,7 @@ fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry)
 
     let title = format!(" {} ", entry.name);
     frame.render_widget(
-        Paragraph::new(title.clone()).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        Paragraph::new(title.clone()).style(Style::default().fg(Color::White).bg(Color::Blue)),
         Rect {
             width: title.len() as u16,
             height: 1,
@@ -749,7 +752,7 @@ fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry)
     frame.render_widget(
         Paragraph::new("esc/q back")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White).bg(Color::Black)),
+            .style(Style::default().fg(Color::White).bg(Color::DarkGray)),
         footer_area,
     );
 }
@@ -812,7 +815,10 @@ fn render_confirm_audio_config(
             Line::from(""),
             Line::from(Span::styled(
                 "<Update>",
-                Style::default().fg(Color::Black).bg(Color::White),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::White)
+                    .add_modifier(Modifier::BOLD),
             )),
         ],
         70,
@@ -825,12 +831,11 @@ fn render_custom_input(frame: &mut Frame<'_>, input: &Input, selected_action: Di
         padded_line("Paste a Hugging Face model page or a direct model file URL."),
         padded_line("Supported files: .gguf and ggml-*.bin."),
         Line::from(""),
-        padded_line("Enter model page or file URL:"),
         input_line(input.value(), true),
         Line::from(""),
         wizard_button("Next", selected_action),
     ];
-    render_dialog_content(frame, "Download Custom Model 1/3", lines, 70, 12);
+    render_dialog_content(frame, "Download Custom Model 1/3", lines, 70, 10);
 }
 
 fn render_custom_details(
@@ -851,7 +856,7 @@ fn render_custom_details(
         Line::from(""),
         wizard_button("Download", selected_action),
     ];
-    render_dialog_content(frame, "Download Custom Model 2/3", lines, 70, 14);
+    render_dialog_content(frame, "Download Custom Model 2/3", lines, 70, 13);
 }
 
 fn padded_line(text: impl Into<String>) -> Line<'static> {
@@ -864,7 +869,7 @@ fn input_line(value: &str, focused: bool) -> Line<'static> {
     let padded = format!("{text:<66}");
     Line::from(Span::styled(
         padded,
-        Style::default().fg(Color::White).bg(Color::DarkGray),
+        Style::default().fg(Color::DarkGray).bg(Color::Gray),
     ))
 }
 

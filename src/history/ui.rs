@@ -16,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Padding, Paragraph},
 };
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
@@ -215,12 +215,12 @@ impl HistoryViewer {
             self.list_area = list_area;
 
             // Render ostt logo header
-            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n").alignment(Alignment::Left);
+            let header = Paragraph::new("┏┓┏╋╋ \n┗┛┛┗┗ \n").alignment(Alignment::Left);
             frame.render_widget(header, header_area);
 
             let title = " History ";
             frame.render_widget(
-                Paragraph::new(title).style(Style::default().fg(Color::Black).bg(Color::Blue)),
+                Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
                 Rect {
                     width: title.len() as u16,
                     height: 1,
@@ -241,7 +241,7 @@ impl HistoryViewer {
                     let text = Line::from(entry.text.clone());
                     let mut item = ListItem::new(vec![timestamp, text]);
                     if Some(i) == hovered_index && Some(i) != selected_index {
-                        item = item.style(Style::default().fg(Color::White).bg(Color::Black));
+                        item = item.style(Style::default().fg(Color::White).bg(Color::DarkGray));
                     }
                     item
                 })
@@ -249,9 +249,7 @@ impl HistoryViewer {
 
             // Render list with History title
             let list = List::new(items)
-                .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
-                .highlight_symbol("> ")
-                .highlight_spacing(HighlightSpacing::Always);
+                .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
             frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
@@ -259,7 +257,7 @@ impl HistoryViewer {
             let help_text = "↑↓ select, ↵ copy, esc/q exit";
             let help_paragraph = Paragraph::new(help_text)
                 .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::White).bg(Color::Black));
+                .style(Style::default().fg(Color::White).bg(Color::DarkGray));
             frame.render_widget(help_paragraph, footer_area);
 
             // Render notification modal if active
