@@ -15,7 +15,7 @@ use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{
-    Block, Borders, Clear, Gauge, List, ListItem, ListState, Padding, Paragraph, Wrap,
+    Block, Borders, Clear, List, ListItem, ListState, Padding, Paragraph, Wrap,
 };
 use ratatui::{Frame, Terminal};
 use std::fs;
@@ -31,6 +31,12 @@ const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
 const HELP_FG: Color = Color::Rgb(100, 100, 100);
 const SECTION_FG: Color = Color::Rgb(120, 120, 120);
 const LOGO: &str = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DialogAction {
+    Ok,
+    Cancel,
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LocalModelEntry {
@@ -61,11 +67,25 @@ pub struct DownloadState {
 #[derive(Clone, Debug)]
 pub enum LocalModelsMode {
     Browse,
-    CustomModelInput { input: Input },
-    CustomModelConfirm { entry: LocalModelEntry },
+    CustomModelInput {
+        input: Input,
+    },
+    CustomModelConfirm {
+        entry: LocalModelEntry,
+        selected_action: DialogAction,
+    },
+    ConfirmDownload {
+        entry: LocalModelEntry,
+        selected_action: DialogAction,
+    },
     Downloading(DownloadState),
-    Info { entry: LocalModelEntry },
-    ConfirmDelete { entry: LocalModelEntry },
+    Info {
+        entry: LocalModelEntry,
+    },
+    ConfirmDelete {
+        entry: LocalModelEntry,
+        selected_action: DialogAction,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -78,7 +98,6 @@ pub struct LocalModelsTui {
 }
 
 struct RunningDownload {
-    entry: RegistryEntry,
     state: Arc<Mutex<DownloadState>>,
     handle: DownloadHandle,
     task: tokio::task::JoinHandle<anyhow::Result<()>>,
@@ -131,7 +150,67 @@ impl LocalModelsTui {
             .filter(|entry| entry.is_downloaded)
             .cloned()
         {
-            self.mode = LocalModelsMode::ConfirmDelete { entry };
+            self.mode = LocalModelsMode::ConfirmDelete {
+                entry,
+                selected_action: DialogAction::Cancel,
+            };
+        }
+    }
+
+    pub fn confirm_download(&mut self) {
+        if let Some(entry) = self
+            .selected_entry()
+            .filter(|entry| !entry.is_downloaded)
+            .cloned()
+        {
+            self.mode = LocalModelsMode::ConfirmDownload {
+                entry,
+                selected_action: DialogAction::Ok,
+            };
+        }
+    }
+
+    pub fn select_dialog_action(&mut self, action: DialogAction) {
+        self.mode = match self.mode.clone() {
+            LocalModelsMode::ConfirmDelete { entry, .. } => LocalModelsMode::ConfirmDelete {
+                entry,
+                selected_action: action,
+            },
+            LocalModelsMode::ConfirmDownload { entry, .. } => LocalModelsMode::ConfirmDownload {
+                entry,
+                selected_action: action,
+            },
+            LocalModelsMode::CustomModelConfirm { entry, .. } => {
+                LocalModelsMode::CustomModelConfirm {
+                    entry,
+                    selected_action: action,
+                }
+            }
+            mode => mode,
+        };
+    }
+
+    pub fn toggle_dialog_action(&mut self) {
+        let selected_action = match self.dialog_action() {
+            Some(DialogAction::Ok) => DialogAction::Cancel,
+            Some(DialogAction::Cancel) => DialogAction::Ok,
+            None => return,
+        };
+        self.select_dialog_action(selected_action);
+    }
+
+    pub fn dialog_action(&self) -> Option<DialogAction> {
+        match &self.mode {
+            LocalModelsMode::ConfirmDelete {
+                selected_action, ..
+            }
+            | LocalModelsMode::ConfirmDownload {
+                selected_action, ..
+            }
+            | LocalModelsMode::CustomModelConfirm {
+                selected_action, ..
+            } => Some(*selected_action),
+            _ => None,
         }
     }
 
@@ -370,7 +449,6 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
     });
 
     RunningDownload {
-        entry,
         state,
         handle,
         task,
@@ -402,20 +480,33 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
             render_logo(frame, inner_area);
             render_info(frame, entry);
         }
-        LocalModelsMode::ConfirmDelete { entry } => {
-            render_logo(frame, inner_area);
-            render_confirm_delete(frame, entry);
+        LocalModelsMode::ConfirmDelete {
+            entry,
+            selected_action,
+        } => {
+            render_browse(frame, inner_area, tui);
+            render_confirm_delete(frame, entry, *selected_action);
+        }
+        LocalModelsMode::ConfirmDownload {
+            entry,
+            selected_action,
+        } => {
+            render_browse(frame, inner_area, tui);
+            render_confirm_download(frame, entry, *selected_action);
         }
         LocalModelsMode::CustomModelInput { input } => {
             render_logo(frame, inner_area);
             render_custom_input(frame, input, tui.status_message.as_deref());
         }
-        LocalModelsMode::CustomModelConfirm { entry } => {
-            render_logo(frame, inner_area);
-            render_custom_confirm(frame, entry);
+        LocalModelsMode::CustomModelConfirm {
+            entry,
+            selected_action,
+        } => {
+            render_browse(frame, inner_area, tui);
+            render_confirm_download(frame, entry, *selected_action);
         }
         LocalModelsMode::Downloading(state) => {
-            render_logo(frame, inner_area);
+            render_browse(frame, inner_area, tui);
             render_download(frame, state);
         }
     }
@@ -456,7 +547,18 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) 
 
     let mut items = Vec::new();
     items.push(section_header("Downloaded"));
-    for entry in tui.entries.iter().filter(|entry| entry.is_downloaded) {
+    let downloaded_entries: Vec<_> = tui
+        .entries
+        .iter()
+        .filter(|entry| entry.is_downloaded)
+        .collect();
+    if downloaded_entries.is_empty() {
+        items.push(ListItem::new(Line::from(Span::styled(
+            "No models downloaded yet. Select one below and press Enter to download.",
+            Style::default(),
+        ))));
+    }
+    for entry in downloaded_entries {
         items.push(local_model_list_item(entry));
     }
     items.push(ListItem::new(Line::from("")));
@@ -503,14 +605,19 @@ fn local_model_list_item(entry: &LocalModelEntry) -> ListItem<'static> {
 
 fn display_index_for_selected_model(tui: &LocalModelsTui) -> Option<usize> {
     let selected_entry = tui.selected_entry()?;
+    let downloaded_entries: Vec<_> = tui
+        .entries
+        .iter()
+        .filter(|entry| entry.is_downloaded)
+        .collect();
     let mut index = 1;
-    for entry in tui.entries.iter().filter(|entry| entry.is_downloaded) {
+    for entry in &downloaded_entries {
         if entry.id == selected_entry.id {
             return Some(index);
         }
         index += 1;
     }
-    index += 2;
+    index += if downloaded_entries.is_empty() { 3 } else { 2 };
     for entry in tui.entries.iter().filter(|entry| !entry.is_downloaded) {
         if entry.id == selected_entry.id {
             return Some(index);
@@ -564,20 +671,71 @@ fn render_info(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
     );
 }
 
-fn render_confirm_delete(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
-    let area = centered_rect(60, 25, frame.area());
+fn render_confirm_delete(
+    frame: &mut Frame<'_>,
+    entry: &LocalModelEntry,
+    selected_action: DialogAction,
+) {
+    render_confirm_dialog(
+        frame,
+        "Confirm Delete",
+        vec![
+            Line::from(format!(
+                "Delete \"{}\" ({})?",
+                entry.name,
+                format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
+            )),
+            Line::from("This cannot be undone."),
+        ],
+        selected_action,
+    );
+}
+
+fn render_confirm_download(
+    frame: &mut Frame<'_>,
+    entry: &LocalModelEntry,
+    selected_action: DialogAction,
+) {
+    render_confirm_dialog(
+        frame,
+        "Start Download",
+        vec![
+            Line::from(format!("Download \"{}\"?", entry.name)),
+            Line::from(format!(
+                "Size: {}",
+                format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
+            )),
+        ],
+        selected_action,
+    );
+}
+
+fn render_confirm_dialog(
+    frame: &mut Frame<'_>,
+    title: &'static str,
+    mut lines: Vec<Line<'static>>,
+    selected_action: DialogAction,
+) {
+    let area = centered_fixed_rect(70, 8, frame.area());
+    let button_style = |action| {
+        if selected_action == action {
+            Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(FG)
+        }
+    };
+    lines.push(Line::from(""));
+    lines.push(Line::from(vec![
+        Span::styled("<Ok>", button_style(DialogAction::Ok)),
+        Span::raw("  "),
+        Span::styled("<Cancel>", button_style(DialogAction::Cancel)),
+    ]));
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(format!(
-            "Delete \"{}\" ({})?\nThis cannot be undone. [y/N]",
-            entry.name,
-            format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
-        ))
-        .block(
-            Block::default()
-                .title("Confirm Delete")
-                .borders(Borders::ALL),
-        ),
+        Paragraph::new(lines)
+            .block(Block::default().title(title).borders(Borders::ALL))
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: false }),
         area,
     );
 }
@@ -603,43 +761,8 @@ fn render_custom_input(frame: &mut Frame<'_>, input: &Input, status: Option<&str
     );
 }
 
-fn render_custom_confirm(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
-    let area = centered_rect(80, 45, frame.area());
-    let lines = vec![
-        Line::from(format!("Name: {}", entry.name)),
-        Line::from(format!("Model ID: {}", entry.id)),
-        Line::from(format!(
-            "Size: {}",
-            format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
-        )),
-        Line::from(format!("URL: {}", entry.url)),
-        Line::from(""),
-        Line::from("[Enter] Download  [Esc] Cancel"),
-    ];
-    frame.render_widget(Clear, area);
-    frame.render_widget(
-        Paragraph::new(lines)
-            .block(
-                Block::default()
-                    .title("Confirm Custom Model")
-                    .borders(Borders::ALL),
-            )
-            .wrap(Wrap { trim: false }),
-        area,
-    );
-}
-
 fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
-    let area = centered_rect(80, 40, frame.area());
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Length(3),
-            Constraint::Min(1),
-        ])
-        .split(area);
+    let area = centered_fixed_rect(70, 9, frame.area());
     let eta = if state.speed_mbps > 0.0 && state.total_bytes > state.downloaded_bytes {
         let remaining_mb = (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
         format!("ETA: {:.0}s", remaining_mb / state.speed_mbps)
@@ -648,37 +771,43 @@ fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
     };
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Block::default().title("Downloading").borders(Borders::ALL),
+        Paragraph::new(vec![
+            Line::from(format!("Model: {}", state.model_id)),
+            Line::from(progress_bar(state.progress, 58)),
+            Line::from(format!(
+                "{} / {}  •  {:.1} MB/s  •  {}",
+                format_bytes(state.downloaded_bytes),
+                if state.total_bytes == 0 {
+                    "unknown".to_string()
+                } else {
+                    format_bytes(state.total_bytes)
+                },
+                state.speed_mbps,
+                eta
+            )),
+            Line::from(state.status.clone()),
+            Line::from(""),
+            Line::from(Span::styled(
+                "<Cancel>",
+                Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD),
+            )),
+        ])
+        .block(Block::default().title("Downloading").borders(Borders::ALL))
+        .alignment(Alignment::Center)
+        .wrap(Wrap { trim: false }),
         area,
     );
-    frame.render_widget(
-        Paragraph::new(format!("Model: {}", state.model_id)),
-        chunks[0],
-    );
-    frame.render_widget(
-        Gauge::default()
-            .gauge_style(Style::default().fg(Color::Green))
-            .ratio(state.progress.clamp(0.0, 1.0)),
-        chunks[1],
-    );
-    frame.render_widget(
-        Paragraph::new(format!(
-            "{} / {}  •  {:.1} MB/s  •  {}",
-            format_bytes(state.downloaded_bytes),
-            if state.total_bytes == 0 {
-                "unknown".to_string()
-            } else {
-                format_bytes(state.total_bytes)
-            },
-            state.speed_mbps,
-            eta
-        )),
-        chunks[2],
-    );
-    frame.render_widget(
-        Paragraph::new(format!("{}  [Tab] Cancel", state.status)),
-        chunks[3],
-    );
+}
+
+fn progress_bar(progress: f64, width: usize) -> String {
+    let progress = progress.clamp(0.0, 1.0);
+    let completed = (progress * width as f64).round() as usize;
+    let remaining = width.saturating_sub(completed);
+    format!(
+        "{}{}",
+        "█".repeat(completed),
+        "░".repeat(remaining)
+    )
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
@@ -700,6 +829,17 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
         .split(vertical[1])[1]
 }
 
+fn centered_fixed_rect(width: u16, height: u16, area: Rect) -> Rect {
+    let width = width.min(area.width);
+    let height = height.min(area.height);
+    Rect {
+        x: area.x + area.width.saturating_sub(width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    }
+}
+
 async fn finish_completed_download(
     tui: &mut LocalModelsTui,
     registry: &[RegistryEntry],
@@ -717,12 +857,13 @@ async fn finish_completed_download(
     let running = running_download.take().expect("running download");
     match running.task.await? {
         Ok(()) => {
-            tui.status_message = Some(format!("Downloaded {}", running.entry.name));
             tui.back_to_browse();
             tui.refresh(&load_state(), registry)?;
         }
         Err(error) => {
-            tui.status_message = Some(error.to_string());
+            if error.to_string() != "model download cancelled" {
+                tui.status_message = Some(error.to_string());
+            }
             tui.back_to_browse();
         }
     }
@@ -744,10 +885,8 @@ async fn handle_key(
         (LocalModelsMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => return Ok(true),
         (LocalModelsMode::Browse, KeyCode::Down) => tui.move_selection_down(),
         (LocalModelsMode::Browse, KeyCode::Up) => tui.move_selection_up(),
-        (LocalModelsMode::Browse, KeyCode::Enter) => activate_selected_entry(tui, registry)?,
-        (LocalModelsMode::Browse, KeyCode::Char('d')) => {
-            start_selected_download(tui, running_download)
-        }
+        (LocalModelsMode::Browse, KeyCode::Enter) => handle_selected_entry(tui, registry)?,
+        (LocalModelsMode::Browse, KeyCode::Char('d')) => confirm_selected_download(tui),
         (LocalModelsMode::Browse, KeyCode::Char('i')) => tui.show_info(),
         (LocalModelsMode::Browse, KeyCode::Char('c')) => {
             tui.status_message = None;
@@ -755,7 +894,9 @@ async fn handle_key(
         }
         (LocalModelsMode::Browse, KeyCode::Char('r')) => tui.confirm_delete(),
         (LocalModelsMode::Info { .. }, KeyCode::Esc) => tui.back_to_browse(),
-        (LocalModelsMode::Downloading(_), KeyCode::Tab) => cancel_download(running_download),
+        (LocalModelsMode::Downloading(_), KeyCode::Tab | KeyCode::Esc) => {
+            cancel_download(running_download)
+        }
         (LocalModelsMode::CustomModelInput { input }, KeyCode::Enter) => {
             resolve_custom_input(tui, input.value()).await;
         }
@@ -764,17 +905,77 @@ async fn handle_key(
             input.handle_event(&Event::Key(key));
             tui.mode = LocalModelsMode::CustomModelInput { input };
         }
-        (LocalModelsMode::CustomModelConfirm { entry }, KeyCode::Enter) => {
-            let running = start_download(registry_entry_from_model(&entry), true);
-            sync_download_progress(tui, &running);
-            *running_download = Some(running);
+        (
+            LocalModelsMode::CustomModelConfirm { .. }
+            | LocalModelsMode::ConfirmDownload { .. }
+            | LocalModelsMode::ConfirmDelete { .. },
+            KeyCode::Left | KeyCode::Right,
+        ) => tui.toggle_dialog_action(),
+        (
+            LocalModelsMode::ConfirmDownload { .. },
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
+        ) => tui.back_to_browse(),
+        (
+            LocalModelsMode::ConfirmDownload {
+                entry,
+                selected_action,
+            },
+            KeyCode::Enter,
+        ) => {
+            if selected_action == DialogAction::Ok {
+                start_confirmed_download(tui, running_download, &entry);
+            } else {
+                tui.back_to_browse();
+            }
+        }
+        (
+            LocalModelsMode::ConfirmDownload { entry, .. },
+            KeyCode::Char('y') | KeyCode::Char('Y'),
+        ) => {
+            start_confirmed_download(tui, running_download, &entry);
         }
         (
             LocalModelsMode::ConfirmDelete { .. },
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
         ) => tui.back_to_browse(),
-        (LocalModelsMode::ConfirmDelete { entry }, KeyCode::Char('y') | KeyCode::Char('Y')) => {
-            delete_confirmed_entry(tui, registry, &entry)?;
+        (
+            LocalModelsMode::ConfirmDelete {
+                entry,
+                selected_action,
+            },
+            KeyCode::Enter,
+        ) => {
+            if selected_action == DialogAction::Ok {
+                delete_confirmed_entry(tui, registry, &entry)?;
+            } else {
+                tui.back_to_browse();
+            }
+        }
+        (LocalModelsMode::ConfirmDelete { entry, .. }, KeyCode::Char('y') | KeyCode::Char('Y')) => {
+            delete_confirmed_entry(tui, registry, &entry)?
+        }
+        (
+            LocalModelsMode::CustomModelConfirm {
+                entry,
+                selected_action,
+            },
+            KeyCode::Enter,
+        ) => {
+            if selected_action == DialogAction::Ok {
+                let running = start_download(registry_entry_from_model(&entry), true);
+                sync_download_progress(tui, &running);
+                *running_download = Some(running);
+            } else {
+                tui.back_to_browse();
+            }
+        }
+        (
+            LocalModelsMode::CustomModelConfirm { entry, .. },
+            KeyCode::Char('y') | KeyCode::Char('Y'),
+        ) => {
+            let running = start_download(registry_entry_from_model(&entry), true);
+            sync_download_progress(tui, &running);
+            *running_download = Some(running);
         }
         (_, KeyCode::Esc) => tui.back_to_browse(),
         _ => {}
@@ -783,13 +984,25 @@ async fn handle_key(
     Ok(false)
 }
 
-fn activate_selected_entry(
+fn handle_selected_entry(
     tui: &mut LocalModelsTui,
     registry: &[RegistryEntry],
 ) -> anyhow::Result<()> {
     let Some(entry) = tui.selected_entry().cloned() else {
         return Ok(());
     };
+
+    if !entry.is_downloaded {
+        if entry.is_available_in_registry {
+            tui.mode = LocalModelsMode::ConfirmDownload {
+                entry,
+                selected_action: DialogAction::Ok,
+            };
+        } else {
+            tui.status_message = Some("Custom models must be downloaded through [c]".to_string());
+        }
+        return Ok(());
+    }
 
     match activate_entry(&entry) {
         Ok(()) => {
@@ -801,10 +1014,7 @@ fn activate_selected_entry(
     Ok(())
 }
 
-fn start_selected_download(
-    tui: &mut LocalModelsTui,
-    running_download: &mut Option<RunningDownload>,
-) {
+fn confirm_selected_download(tui: &mut LocalModelsTui) {
     let Some(entry) = tui.selected_entry().cloned() else {
         return;
     };
@@ -814,10 +1024,18 @@ fn start_selected_download(
     } else if !entry.is_available_in_registry {
         tui.status_message = Some("Custom models must be downloaded through [c]".to_string());
     } else {
-        let running = start_download(registry_entry_from_model(&entry), false);
-        sync_download_progress(tui, &running);
-        *running_download = Some(running);
+        tui.confirm_download();
     }
+}
+
+fn start_confirmed_download(
+    tui: &mut LocalModelsTui,
+    running_download: &mut Option<RunningDownload>,
+    entry: &LocalModelEntry,
+) {
+    let running = start_download(registry_entry_from_model(entry), false);
+    sync_download_progress(tui, &running);
+    *running_download = Some(running);
 }
 
 fn cancel_download(running_download: &mut Option<RunningDownload>) {
@@ -835,6 +1053,7 @@ async fn resolve_custom_input(tui: &mut LocalModelsTui, value: &str) {
             tui.status_message = None;
             tui.mode = LocalModelsMode::CustomModelConfirm {
                 entry: local_model_entry_from_registry(&entry, false),
+                selected_action: DialogAction::Ok,
             };
         }
         Err(error) => tui.status_message = Some(error.to_string()),
@@ -1101,6 +1320,31 @@ mod tests {
         tui.move_selection_down();
         assert_eq!(tui.selected_entry().expect("selected").id, "large-v3");
         assert_eq!(display_index_for_selected_model(&tui), Some(5));
+    }
+
+    #[test]
+    fn selection_index_skips_empty_downloaded_placeholder() {
+        let entries = vec![LocalModelEntry {
+            id: "tiny".to_string(),
+            name: "Tiny".to_string(),
+            description: String::new(),
+            size_mb: 1,
+            is_downloaded: false,
+            is_active: false,
+            is_available_in_registry: true,
+            languages: Vec::new(),
+            url: "https://example.com/tiny.bin".to_string(),
+            recommended_hardware: None,
+            category: None,
+        }];
+        let tui = LocalModelsTui::new(entries, 0);
+
+        assert_eq!(display_index_for_selected_model(&tui), Some(4));
+    }
+
+    #[test]
+    fn progress_bar_uses_light_shade_for_remaining_width() {
+        assert_eq!(progress_bar(0.5, 4), "██░░");
     }
 
     #[test]
