@@ -57,22 +57,14 @@ pub fn render_dialog(
     frame: &mut Frame<'_>,
     title: &'static str,
     mut lines: Vec<Line<'static>>,
-    selected_action: DialogAction,
+    primary_action: &'static str,
 ) {
-    let area = centered_fixed_rect(70, 8, frame.area());
-    let button_style = |action| {
-        if selected_action == action {
-            Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD)
-        } else {
-            Style::default().fg(FG)
-        }
-    };
+    let area = centered_fixed_rect(70, 9, frame.area());
     lines.push(Line::from(""));
-    lines.push(Line::from(vec![
-        Span::styled("<Ok>", button_style(DialogAction::Ok)),
-        Span::raw("  "),
-        Span::styled("<Cancel>", button_style(DialogAction::Cancel)),
-    ]));
+    lines.push(Line::from(Span::styled(
+        format!("<{primary_action}>"),
+        Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD),
+    )));
     render_box(frame, area, title, lines);
 }
 
@@ -129,10 +121,39 @@ pub fn centered_fixed_rect(width: u16, height: u16, area: Rect) -> Rect {
 fn render_box(frame: &mut Frame<'_>, area: Rect, title: &'static str, lines: Vec<Line<'static>>) {
     frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(lines)
-            .block(Block::default().title(title).borders(Borders::ALL))
+        Block::default().style(Style::default().bg(Color::Black)),
+        area,
+    );
+
+    let inner_area = Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    };
+
+    let title_width = title.len() as u16;
+    let escape = "esc";
+    let escape_width = escape.len() as u16;
+    let spacer_width = inner_area
+        .width
+        .saturating_sub(title_width.saturating_add(escape_width));
+    let title_line = Line::from(vec![
+        Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
+        Span::raw(" ".repeat(spacer_width as usize)),
+        Span::styled(escape, Style::default().fg(Color::White)),
+    ]);
+
+    let mut padded_lines = Vec::with_capacity(lines.len() + 2);
+    padded_lines.push(title_line);
+    padded_lines.push(Line::from(""));
+    padded_lines.extend(lines);
+
+    frame.render_widget(
+        Paragraph::new(padded_lines)
+            .style(Style::default().bg(Color::Black))
             .alignment(Alignment::Center)
             .wrap(Wrap { trim: false }),
-        area,
+        inner_area,
     );
 }

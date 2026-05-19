@@ -30,11 +30,6 @@ use std::time::{Duration, SystemTime};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
-const HELP_FG: Color = Color::Rgb(100, 100, 100);
-const SECTION_FG: Color = Color::Rgb(120, 120, 120);
 const LOGO: &str = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -488,13 +483,11 @@ fn sync_download_progress(tui: &mut LocalModelsTui, running: &RunningDownload) {
 fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
     let area = frame.area();
 
-    let padding_block = Block::default()
-        .padding(Padding::uniform(1))
-        .style(Style::default().bg(BG));
+    let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
     frame.render_widget(&padding_block, area);
     let padded_area = padding_block.inner(area);
 
-    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
+    let main_block = Block::default();
     frame.render_widget(&main_block, padded_area);
     let inner_area = main_block.inner(padded_area);
 
@@ -568,31 +561,38 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
 fn section_header(label: impl Into<String>) -> ListItem<'static> {
     ListItem::new(Line::from(Span::styled(
         label.into(),
-        Style::default().fg(SECTION_FG),
+        Style::default().add_modifier(Modifier::BOLD),
     )))
 }
 
 fn render_logo(frame: &mut Frame<'_>, area: Rect) {
     let [header_area, _] =
         Layout::vertical([Constraint::Length(3), Constraint::Min(0)]).areas(area);
-    let header = Paragraph::new(LOGO)
-        .style(Style::default().fg(FG))
-        .alignment(Alignment::Left);
+    let header = Paragraph::new(LOGO).alignment(Alignment::Left);
     frame.render_widget(header, header_area);
 }
 
 fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) {
-    let [header_area, list_area, footer_area] = Layout::vertical([
+    let [header_area, title_area, list_area, footer_area] = Layout::vertical([
         Constraint::Length(3),
-        Constraint::Min(5),
         Constraint::Length(2),
+        Constraint::Min(5),
+        Constraint::Length(1),
     ])
     .areas(inner_area);
 
-    let header = Paragraph::new(LOGO)
-        .style(Style::default().fg(FG))
-        .alignment(Alignment::Left);
+    let header = Paragraph::new(LOGO).alignment(Alignment::Left);
     frame.render_widget(header, header_area);
+
+    let title_label_area = Rect {
+        width: " Local Models ".len() as u16,
+        height: 1,
+        ..title_area
+    };
+    frame.render_widget(
+        Paragraph::new(" Local Models ").style(Style::default().fg(Color::Black).bg(Color::Blue)),
+        title_label_area,
+    );
 
     let mut items = Vec::new();
     push_grouped_model_items(&mut items, tui.entries.iter().collect());
@@ -601,12 +601,7 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) 
     let mut state = ListState::default().with_selected(selected_display_index);
     frame.render_stateful_widget(
         List::new(items)
-            .block(
-                Block::default()
-                    .title(" Local Models ")
-                    .borders(Borders::ALL),
-            )
-            .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG))
+            .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
             .highlight_symbol("> "),
         list_area,
         &mut state,
@@ -616,15 +611,12 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) 
     frame.render_widget(
         Paragraph::new(footer_text)
             .alignment(Alignment::Center)
-            .style(Style::default().fg(HELP_FG)),
+            .style(Style::default().fg(Color::White).bg(Color::Black)),
         footer_area,
     );
 }
 
-fn push_grouped_model_items(
-    items: &mut Vec<ListItem<'static>>,
-    entries: Vec<&LocalModelEntry>,
-) {
+fn push_grouped_model_items(items: &mut Vec<ListItem<'static>>, entries: Vec<&LocalModelEntry>) {
     let mut current_group: Option<&str> = None;
     for entry in entries {
         let group = entry.group_id.as_deref().unwrap_or("Custom");
@@ -687,12 +679,7 @@ fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry)
         Constraint::Length(2),
     ])
     .areas(inner_area);
-    frame.render_widget(
-        Paragraph::new(LOGO)
-            .style(Style::default().fg(FG))
-            .alignment(Alignment::Left),
-        header_area,
-    );
+    frame.render_widget(Paragraph::new(LOGO).alignment(Alignment::Left), header_area);
 
     let (_, path) = downloaded_details(entry);
     let mut lines = vec![
@@ -745,7 +732,7 @@ fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry)
     frame.render_widget(
         Paragraph::new("esc/q back")
             .alignment(Alignment::Center)
-            .style(Style::default().fg(HELP_FG)),
+            .style(Style::default().add_modifier(Modifier::REVERSED)),
         footer_area,
     );
 }
@@ -753,7 +740,7 @@ fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry)
 fn render_confirm_delete(
     frame: &mut Frame<'_>,
     entry: &LocalModelEntry,
-    selected_action: DialogAction,
+    _selected_action: DialogAction,
 ) {
     render_dialog(
         frame,
@@ -767,14 +754,14 @@ fn render_confirm_delete(
             Line::from(""),
             Line::from("This cannot be undone."),
         ],
-        selected_action,
+        "Delete",
     );
 }
 
 fn render_confirm_download(
     frame: &mut Frame<'_>,
     entry: &LocalModelEntry,
-    selected_action: DialogAction,
+    _selected_action: DialogAction,
 ) {
     render_dialog(
         frame,
@@ -787,7 +774,7 @@ fn render_confirm_download(
                 format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
             )),
         ],
-        selected_action,
+        "Download",
     );
 }
 
@@ -855,15 +842,18 @@ fn input_line(value: &str, focused: bool) -> Line<'static> {
     let cursor = if focused { "█" } else { "" };
     let text = format!("{value}{cursor}");
     let padded = format!(" {:<66}", text);
-    Line::from(Span::styled(padded, Style::default().bg(HIGHLIGHT_BG)))
+    Line::from(Span::styled(
+        padded,
+        Style::default().add_modifier(Modifier::REVERSED),
+    ))
 }
 
 fn wizard_buttons(selected_action: DialogAction) -> Line<'static> {
     let button_style = |action| {
         if selected_action == action {
-            Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD)
+            Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD)
         } else {
-            Style::default().fg(FG)
+            Style::default()
         }
     };
     Line::from(vec![
@@ -903,7 +893,7 @@ fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
             Line::from(""),
             Line::from(Span::styled(
                 "<Cancel>",
-                Style::default().fg(BG).bg(FG).add_modifier(Modifier::BOLD),
+                Style::default().add_modifier(Modifier::REVERSED | Modifier::BOLD),
             )),
         ])
         .block(
@@ -1019,10 +1009,6 @@ async fn handle_key(
                 selected_action,
             };
         }
-        (
-            LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. },
-            KeyCode::Left | KeyCode::Right,
-        ) => tui.toggle_dialog_action(),
         (LocalModelsMode::CustomModelDetails { .. }, KeyCode::Esc | KeyCode::Char('q')) => {
             tui.back_to_browse()
         }
@@ -1072,18 +1058,8 @@ async fn handle_key(
             LocalModelsMode::ConfirmDownload { .. },
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
         ) => tui.back_to_browse(),
-        (
-            LocalModelsMode::ConfirmDownload {
-                entry,
-                selected_action,
-            },
-            KeyCode::Enter,
-        ) => {
-            if selected_action == DialogAction::Ok {
-                start_confirmed_download(tui, running_download, &entry);
-            } else {
-                tui.back_to_browse();
-            }
+        (LocalModelsMode::ConfirmDownload { entry, .. }, KeyCode::Enter) => {
+            start_confirmed_download(tui, running_download, &entry);
         }
         (
             LocalModelsMode::ConfirmDownload { entry, .. },
@@ -1095,18 +1071,8 @@ async fn handle_key(
             LocalModelsMode::ConfirmDelete { .. },
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
         ) => tui.back_to_browse(),
-        (
-            LocalModelsMode::ConfirmDelete {
-                entry,
-                selected_action,
-            },
-            KeyCode::Enter,
-        ) => {
-            if selected_action == DialogAction::Ok {
-                delete_confirmed_entry(tui, registry, &entry)?;
-            } else {
-                tui.back_to_browse();
-            }
+        (LocalModelsMode::ConfirmDelete { entry, .. }, KeyCode::Enter) => {
+            delete_confirmed_entry(tui, registry, &entry)?;
         }
         (LocalModelsMode::ConfirmDelete { entry, .. }, KeyCode::Char('y') | KeyCode::Char('Y')) => {
             delete_confirmed_entry(tui, registry, &entry)?
