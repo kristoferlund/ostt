@@ -8,6 +8,7 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
     let model_path = resolve_installed_model_path(&config.model_id)?;
     validate_local_audio_format(audio_path)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
+    whisper_rs::install_logging_hooks();
 
     let text = tokio::task::spawn_blocking(move || {
         let model_path = model_path.to_string_lossy().into_owned();
@@ -18,6 +19,9 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
             .map_err(|err| anyhow::anyhow!("Failed to create whisper state: {err}"))?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
         params.set_print_timestamps(false);
+        params.set_print_progress(false);
+        params.set_print_realtime(false);
+        params.set_print_special(false);
         params.set_no_context(true);
         params.set_temperature(0.0);
         params.set_entropy_thold(2.4);

@@ -177,7 +177,7 @@ impl TranscriptionAnimation {
             for x in area.x..area.x + area.width {
                 frame
                     .buffer_mut()
-                    .set_string(x, y, " ", Style::default().bg(Color::Black));
+                    .set_string(x, y, " ", Style::default().bg(Color::Rgb(0, 0, 0)));
             }
         }
 
