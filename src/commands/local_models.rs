@@ -7,7 +7,8 @@ use crate::transcription::local_models::{
     DownloadHandle, LocalModelState, RegistryEntry,
 };
 use crate::ui::{
-    render_dialog, render_dialog_content, render_error_dialog, render_toast, DialogAction, Toast,
+    dialog_content_area, render_dialog, render_dialog_content, render_error_dialog, render_toast,
+    DialogAction, Toast,
 };
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
@@ -15,7 +16,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Alignment, Constraint, Layout, Rect};
+use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Wrap};
@@ -535,6 +536,7 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
         } => {
             render_browse(frame, inner_area, tui);
             render_custom_input(frame, input, *selected_action);
+            set_custom_input_cursor(frame, input, 10, 5);
         }
         LocalModelsMode::CustomModelDetails {
             id_input,
@@ -545,6 +547,10 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
         } => {
             render_browse(frame, inner_area, tui);
             render_custom_details(frame, id_input, name_input, *focus, *selected_action);
+            match focus {
+                CustomModelDetailsFocus::Id => set_custom_input_cursor(frame, id_input, 13, 5),
+                CustomModelDetailsFocus::Name => set_custom_input_cursor(frame, name_input, 13, 8),
+            }
         }
         LocalModelsMode::Downloading(state) => {
             render_browse(frame, inner_area, tui);
@@ -561,6 +567,7 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
                 } => {
                     render_browse(frame, inner_area, tui);
                     render_custom_input(frame, input, *selected_action);
+                    set_custom_input_cursor(frame, input, 10, 5);
                 }
                 _ => render_browse(frame, inner_area, tui),
             }
@@ -831,46 +838,64 @@ fn render_custom_input(frame: &mut Frame<'_>, input: &Input, selected_action: Di
         padded_line("Paste a Hugging Face model page or a direct model file URL."),
         padded_line("Supported files: .gguf and ggml-*.bin."),
         Line::from(""),
-        input_line(input.value(), true),
+        Line::from(""),
         Line::from(""),
         wizard_button("Next", selected_action),
     ];
     render_dialog_content(frame, "Download Custom Model 1/3", lines, 70, 10);
+    render_dialog_input(frame, input, 10, 5);
 }
 
 fn render_custom_details(
     frame: &mut Frame<'_>,
     id_input: &Input,
     name_input: &Input,
-    focus: CustomModelDetailsFocus,
+    _focus: CustomModelDetailsFocus,
     selected_action: DialogAction,
 ) {
     let lines = vec![
         padded_line("Choose how this custom model should appear in OSTT."),
         Line::from(""),
         padded_line("ID:"),
-        input_line(id_input.value(), focus == CustomModelDetailsFocus::Id),
+        Line::from(""),
         Line::from(""),
         padded_line("Name:"),
-        input_line(name_input.value(), focus == CustomModelDetailsFocus::Name),
+        Line::from(""),
         Line::from(""),
         wizard_button("Download", selected_action),
     ];
     render_dialog_content(frame, "Download Custom Model 2/3", lines, 70, 13);
+    render_dialog_input(frame, id_input, 13, 5);
+    render_dialog_input(frame, name_input, 13, 8);
 }
 
 fn padded_line(text: impl Into<String>) -> Line<'static> {
     Line::from(format!(" {}", text.into()))
 }
 
-fn input_line(value: &str, focused: bool) -> Line<'static> {
-    let cursor = if focused { "█" } else { "" };
-    let text = format!("{value}{cursor}");
-    let padded = format!("{text:<66}");
-    Line::from(Span::styled(
-        padded,
-        Style::default().fg(Color::DarkGray).bg(Color::Gray),
-    ))
+fn set_custom_input_cursor(frame: &mut Frame<'_>, input: &Input, dialog_height: u16, line: u16) {
+    let inner_area = dialog_content_area(70, dialog_height, frame.area());
+    let cursor_x = inner_area
+        .x
+        .saturating_add(1)
+        .saturating_add(input.cursor() as u16)
+        .min(inner_area.x.saturating_add(inner_area.width.saturating_sub(1)));
+    frame.set_cursor_position(Position::new(cursor_x, inner_area.y.saturating_add(line)));
+}
+
+fn render_dialog_input(frame: &mut Frame<'_>, input: &Input, dialog_height: u16, line: u16) {
+    let inner_area = dialog_content_area(70, dialog_height, frame.area());
+    let area = Rect {
+        x: inner_area.x.saturating_add(1),
+        y: inner_area.y.saturating_add(line),
+        width: inner_area.width.saturating_sub(2),
+        height: 1,
+    };
+    frame.render_widget(
+        Paragraph::new(input.value().to_string())
+            .style(Style::default().fg(Color::DarkGray).bg(Color::Gray)),
+        area,
+    );
 }
 
 fn wizard_button(action: &'static str, _selected_action: DialogAction) -> Line<'static> {
@@ -899,11 +924,6 @@ fn render_download(frame: &mut Frame<'_>, state: &DownloadState) {
         },
         vec![
             Line::from(format!("Model: {}", state.model_id)),
-            if state.is_custom {
-                Line::from(format!("Status: {}", state.status))
-            } else {
-                Line::from("")
-            },
             Line::from(""),
             Line::from(progress_bar(state.progress, 58)),
             Line::from(""),

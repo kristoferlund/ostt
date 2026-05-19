@@ -152,6 +152,16 @@ pub fn centered_fixed_rect(width: u16, height: u16, area: Rect) -> Rect {
     }
 }
 
+pub fn dialog_content_area(width: u16, height: u16, area: Rect) -> Rect {
+    let area = centered_fixed_rect(width, height, area);
+    Rect {
+        x: area.x.saturating_add(2),
+        y: area.y.saturating_add(1),
+        width: area.width.saturating_sub(4),
+        height: area.height.saturating_sub(2),
+    }
+}
+
 pub fn render_dialog_content(
     frame: &mut Frame<'_>,
     title: &str,
@@ -167,12 +177,7 @@ fn render_box(frame: &mut Frame<'_>, area: Rect, title: &str, lines: Vec<Line<'s
     frame.render_widget(Clear, area);
     frame.render_widget(Block::default().style(Style::default().bg(BG)), area);
 
-    let inner_area = Rect {
-        x: area.x.saturating_add(2),
-        y: area.y.saturating_add(1),
-        width: area.width.saturating_sub(4),
-        height: area.height.saturating_sub(2),
-    };
+    let inner_area = dialog_content_area(area.width, area.height, area);
 
     let title_width = title.len() as u16;
     let escape = "esc";
