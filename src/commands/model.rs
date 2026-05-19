@@ -12,7 +12,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Alignment, Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, ListState, Padding, Paragraph};
+use ratatui::widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Wrap};
 use ratatui::{Frame, Terminal};
 use std::collections::HashSet;
 use std::io::{self, Stdout};
@@ -26,6 +26,7 @@ pub struct CloudModelEntry {
     pub model_id: String,
     pub name: String,
     pub description: String,
+    pub languages: Vec<String>,
     pub is_active: bool,
     pub model: TranscriptionModel,
 }
@@ -42,6 +43,12 @@ pub enum ModelProviderChoice {
     Local,
     Cloud,
     Quit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CloudModelMode {
+    Browse,
+    Info,
 }
 
 #[derive(Debug)]
@@ -198,6 +205,7 @@ async fn run_cloud_model_selector(
 
     let mut toast: Option<Toast> = None;
     let mut selected = active_cloud_model_index(&sections).unwrap_or(0);
+    let mut mode = CloudModelMode::Browse;
 
     loop {
         if toast.as_ref().is_some_and(Toast::is_expired) {
@@ -206,18 +214,32 @@ async fn run_cloud_model_selector(
 
         terminal.draw(|frame| {
             let [body_area, footer_area, _] = render_shell(frame);
-            let list_area = render_title(frame, body_area, "Cloud Model");
-            let (items, selected_display_index) = cloud_model_list_items(&sections, selected);
-            let mut state = ListState::default().with_selected(selected_display_index);
-            frame.render_stateful_widget(
-                List::new(items)
-                    .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
-                    .highlight_symbol("> "),
-                list_area,
-                &mut state,
-            );
-
-            render_footer(frame, footer_area, "↑↓ select, ↵ activate, esc/q back");
+            match mode {
+                CloudModelMode::Browse => {
+                    let list_area = render_title(frame, body_area, "Cloud Model");
+                    let (items, selected_display_index) =
+                        cloud_model_list_items(&sections, selected);
+                    let mut state = ListState::default().with_selected(selected_display_index);
+                    frame.render_stateful_widget(
+                        List::new(items)
+                            .highlight_style(Style::default().fg(Color::White).bg(Color::Black))
+                            .highlight_symbol("> "),
+                        list_area,
+                        &mut state,
+                    );
+                    render_footer(
+                        frame,
+                        footer_area,
+                        "↑↓ select, ↵ activate, i info, esc/q back",
+                    );
+                }
+                CloudModelMode::Info => {
+                    if let Some(entry) = cloud_model_at(&sections, selected) {
+                        render_cloud_model_info(frame, body_area, entry);
+                    }
+                    render_footer(frame, footer_area, "esc/q back");
+                }
+            }
 
             if let Some(toast) = &toast {
                 render_toast(frame, toast);
@@ -226,6 +248,15 @@ async fn run_cloud_model_selector(
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
+                if mode == CloudModelMode::Info {
+                    match key.code {
+                        KeyCode::Char('q') | KeyCode::Esc => mode = CloudModelMode::Browse,
+                        _ if is_ctrl_c(&key) => return Err(UserQuit.into()),
+                        _ => {}
+                    }
+                    continue;
+                }
+
                 match key.code {
                     KeyCode::Up => selected = selected.saturating_sub(1),
                     KeyCode::Down => selected = (selected + 1).min(model_count.saturating_sub(1)),
@@ -240,6 +271,7 @@ async fn run_cloud_model_selector(
                             toast = Some(Toast::success(format!("Activated {}", entry.name)));
                         }
                     }
+                    KeyCode::Char('i') => mode = CloudModelMode::Info,
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     _ if is_ctrl_c(&key) => return Err(UserQuit.into()),
                     _ => {}
@@ -247,6 +279,34 @@ async fn run_cloud_model_selector(
             }
         }
     }
+}
+
+fn render_cloud_model_info(frame: &mut Frame<'_>, area: Rect, entry: &CloudModelEntry) {
+    let content_area = render_title(frame, area, "Cloud Model Info");
+    let lines = vec![
+        Line::from(format!("ID: {}", entry.model_id)),
+        Line::from(format!("Name: {}", entry.name)),
+        Line::from(""),
+        Line::from(entry.description.clone()),
+        Line::from(""),
+        Line::from(format!(
+            "Languages: {}",
+            if entry.languages.is_empty() {
+                "unknown".to_string()
+            } else {
+                entry.languages.join(", ")
+            }
+        )),
+        Line::from(format!(
+            "Active: {}",
+            if entry.is_active { "Yes" } else { "No" }
+        )),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines).wrap(Wrap { trim: false }),
+        content_area,
+    );
 }
 
 fn cloud_model_list_item(entry: &CloudModelEntry) -> ListItem<'static> {
@@ -397,8 +457,13 @@ pub fn build_cloud_provider_sections(
                 .map(|model| CloudModelEntry {
                     provider_id: provider.id().to_string(),
                     model_id: model.id().to_string(),
-                    name: model.description().to_string(),
-                    description: String::new(),
+                    name: model.name().to_string(),
+                    description: model.detailed_description().to_string(),
+                    languages: model
+                        .languages()
+                        .iter()
+                        .map(|language| language.to_string())
+                        .collect(),
                     is_active: selected_model
                         .map(|selected| {
                             selected.provider_id == provider.id() && selected.model_id == model.id()
