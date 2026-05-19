@@ -40,6 +40,8 @@ pub struct RegistryEntry {
     pub recommended_hardware: Option<String>,
     pub sha256: Option<String>,
     pub category: Option<String>,
+    #[serde(default)]
+    pub group_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -88,7 +90,7 @@ fn state_path() -> PathBuf {
 }
 
 pub fn model_files_dir() -> PathBuf {
-    models_dir().join("files")
+    models_dir()
 }
 
 /// Error type for local model-related failures.
@@ -168,9 +170,27 @@ pub fn register_custom_model(entry: RegistryEntry) -> anyhow::Result<()> {
     validate_custom_model_id(&entry)?;
     let mut state = load_state();
     check_filename_collision(&entry, &state)?;
+    save_custom_model_entry(entry, &mut state)
+}
+
+pub fn register_downloaded_custom_model(entry: RegistryEntry) -> anyhow::Result<()> {
+    validate_custom_model_id(&entry)?;
+    let mut state = load_state();
+    save_custom_model_entry(entry, &mut state)
+}
+
+fn save_custom_model_entry(
+    entry: RegistryEntry,
+    state: &mut LocalModelState,
+) -> anyhow::Result<()> {
     state.custom_models.retain(|m| m.id != entry.id);
     state.custom_models.push(entry);
-    save_state(&state)
+    save_state(state)
+}
+
+pub fn validate_custom_model_registration(entry: &RegistryEntry) -> anyhow::Result<()> {
+    validate_custom_model_id(entry)?;
+    check_filename_collision(entry, &load_state())
 }
 
 pub fn validate_downloaded_model(entry: &RegistryEntry) -> anyhow::Result<()> {
@@ -417,6 +437,7 @@ async fn resolve_direct_model_file_url(url: Url) -> anyhow::Result<RegistryEntry
         recommended_hardware: None,
         sha256: None,
         category: Some("custom".to_string()),
+        group_id: Some("Custom".to_string()),
     };
     validate_custom_model_id(&entry)?;
     Ok(entry)
@@ -473,19 +494,25 @@ async fn resolve_hugging_face_model_page_url_from_api(
         .filter_map(|tag| tag.strip_prefix("language:"))
         .map(ToString::to_string)
         .collect();
+    let file_url = format!(
+        "https://huggingface.co/{}/{}/resolve/main/{}",
+        segments[0], segments[1], file.rfilename
+    );
+    let size_mb = match file.size {
+        Some(size) => bytes_to_mb(size),
+        None => remote_size_mb(&file_url).await.unwrap_or(0),
+    };
     let entry = RegistryEntry {
         id,
         name: repo,
         description: format!("Custom Hugging Face model file {}", file.rfilename),
         languages,
-        size_mb: file.size.map(bytes_to_mb).unwrap_or(0),
-        url: format!(
-            "https://huggingface.co/{}/{}/resolve/main/{}",
-            segments[0], segments[1], file.rfilename
-        ),
+        size_mb,
+        url: file_url,
         recommended_hardware: None,
         sha256: None,
         category: Some("custom".to_string()),
+        group_id: Some("Custom".to_string()),
     };
     validate_custom_model_id(&entry)?;
     Ok(entry)
@@ -643,6 +670,13 @@ pub fn delete_model(model_id: &str) -> anyhow::Result<()> {
 
     fs::remove_file(&file_path)?;
 
+    let mut state = load_state();
+    let custom_count = state.custom_models.len();
+    state.custom_models.retain(|entry| entry.id != model_id);
+    if state.custom_models.len() != custom_count {
+        save_state(&state)?;
+    }
+
     if config::get_selected_model_entry()?
         .is_some_and(|selected| selected.provider_id == "local" && selected.model_id == model_id)
     {
@@ -721,6 +755,7 @@ mod tests {
             recommended_hardware: None,
             sha256: None,
             category: None,
+            group_id: None,
         }
     }
 
@@ -1039,7 +1074,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_custom_model_keeps_metadata() {
+    fn delete_custom_model_removes_metadata() {
         with_isolated_data_dir(|_| {
             let state = LocalModelState {
                 version: 1,
@@ -1052,8 +1087,7 @@ mod tests {
             delete_model("custom").expect("delete model");
             let state = load_state();
 
-            assert_eq!(state.custom_models.len(), 1);
-            assert_eq!(state.custom_models[0].id, "custom");
+            assert!(state.custom_models.is_empty());
         });
     }
 
@@ -1176,7 +1210,7 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         let dir = env::temp_dir().join(format!("ostt-download-test-{unique}"));
-        let dest_path = dir.join("files").join("turbo.bin");
+        let dest_path = dir.join("turbo.bin");
         let progress_events = std::sync::Arc::new(Mutex::new(Vec::new()));
         let callback_events = progress_events.clone();
 
@@ -1203,7 +1237,7 @@ mod tests {
     }
 
     #[test]
-    fn model_destination_uses_files_dir_and_derived_filename() {
+    fn model_destination_uses_models_dir_and_derived_filename() {
         with_isolated_data_dir(|_| {
             let entry = registry_entry_with_url("turbo", "https://example.com/ggml-turbo.gguf");
 
@@ -1479,7 +1513,7 @@ mod tests {
             .expect("system time before unix epoch")
             .as_nanos();
         let dir = env::temp_dir().join(format!("ostt-cancel-test-{unique}"));
-        let dest_path = dir.join("files").join("custom.bin");
+        let dest_path = dir.join("custom.bin");
         let handle = DownloadHandle::new();
         let callback_handle = handle.clone();
 
