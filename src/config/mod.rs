@@ -22,4 +22,6 @@ pub use secrets::{
     get_selected_model_entry, save_api_key, save_selected_model, SelectedModel,
 };
 
-pub use file::save_config;
+pub use file::{
+    ensure_local_transcription_audio_config, is_local_transcription_audio_compatible, save_config,
+};

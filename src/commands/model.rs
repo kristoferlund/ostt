@@ -393,11 +393,6 @@ async fn show_no_cloud_providers_screen(
                     )),
                     Line::from(""),
                     Line::from("Run `ostt auth login` to add credentials."),
-                    Line::from(""),
-                    Line::from(Span::styled(
-                        "Available providers: OpenAI, Groq",
-                        Style::default(),
-                    )),
                 ])
                 .wrap(ratatui::widgets::Wrap { trim: false }),
                 content_area,

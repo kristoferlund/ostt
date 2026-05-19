@@ -61,6 +61,14 @@ fn default_output_format() -> String {
     "mp3 -ab 16k -ar 12000".to_string()
 }
 
+const LOCAL_TRANSCRIPTION_OUTPUT_FORMAT: &str = "pcm_s16le -ar 16000";
+const LOCAL_TRANSCRIPTION_SAMPLE_RATE: u32 = 16000;
+
+pub fn is_local_transcription_audio_compatible(audio: &AudioConfig) -> bool {
+    audio.sample_rate == LOCAL_TRANSCRIPTION_SAMPLE_RATE
+        && audio.output_format == LOCAL_TRANSCRIPTION_OUTPUT_FORMAT
+}
+
 fn default_peak_volume_threshold() -> u8 {
     90
 }
@@ -888,6 +896,78 @@ pub fn save_config(config: &OsttConfig) -> anyhow::Result<()> {
     config.save()
 }
 
+pub fn ensure_local_transcription_audio_config() -> anyhow::Result<()> {
+    let config_path = get_config_path()?;
+    let content = fs::read_to_string(&config_path)?;
+    let updated = ensure_local_transcription_audio_config_content(&content);
+    fs::write(config_path, updated)?;
+    Ok(())
+}
+
+fn ensure_local_transcription_audio_config_content(content: &str) -> String {
+    let mut output = Vec::new();
+    let mut in_audio = false;
+    let mut saw_audio = false;
+    let mut wrote_sample_rate = false;
+    let mut wrote_output_format = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[audio]" {
+            in_audio = true;
+            saw_audio = true;
+            wrote_sample_rate = false;
+            wrote_output_format = false;
+            output.push(line.to_string());
+            continue;
+        }
+
+        if in_audio && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if !wrote_sample_rate {
+                output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+            }
+            if !wrote_output_format {
+                output.push(format!(
+                    "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+                ));
+            }
+            in_audio = false;
+        }
+
+        if in_audio && trimmed.starts_with("sample_rate") {
+            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+            wrote_sample_rate = true;
+        } else if in_audio && trimmed.starts_with("output_format") {
+            output.push(format!(
+                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+            ));
+            wrote_output_format = true;
+        } else {
+            output.push(line.to_string());
+        }
+    }
+
+    if in_audio {
+        if !wrote_sample_rate {
+            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+        }
+        if !wrote_output_format {
+            output.push(format!(
+                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+            ));
+        }
+    } else if !saw_audio {
+        output.push(String::new());
+        output.push("[audio]".to_string());
+        output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+        output.push(format!(
+            "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+        ));
+    }
+
+    format!("{}\n", output.join("\n").trim())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -904,6 +984,52 @@ mod tests {
 
     fn parse_input(toml_str: &str) -> Result<ActionInput, toml::de::Error> {
         toml::from_str(toml_str)
+    }
+
+    #[test]
+    fn local_transcription_audio_requires_wav_16khz() {
+        let mut audio = AudioConfig {
+            device: "default".to_string(),
+            sample_rate: 16000,
+            peak_volume_threshold: default_peak_volume_threshold(),
+            reference_level_db: default_reference_level_db(),
+            output_format: "pcm_s16le -ar 16000".to_string(),
+            visualization: VisualizationType::default(),
+        };
+
+        assert!(is_local_transcription_audio_compatible(&audio));
+
+        audio.output_format = default_output_format();
+        assert!(!is_local_transcription_audio_compatible(&audio));
+
+        audio.output_format = "pcm_s16le -ar 16000".to_string();
+        audio.sample_rate = 12000;
+        assert!(!is_local_transcription_audio_compatible(&audio));
+    }
+
+    #[test]
+    fn local_transcription_audio_update_preserves_other_config() {
+        let content = r#"# ostt
+[audio]
+device = "default"
+sample_rate = 12000
+peak_volume_threshold = 90
+output_format = "mp3 -ab 16k -ar 12000"
+visualization = "spectrum"
+
+[transcription]
+provider = "openai"
+model = "whisper"
+"#;
+
+        let updated = ensure_local_transcription_audio_config_content(content);
+
+        assert!(updated.contains("device = \"default\""));
+        assert!(updated.contains("sample_rate = 16000"));
+        assert!(updated.contains("peak_volume_threshold = 90"));
+        assert!(updated.contains("output_format = \"pcm_s16le -ar 16000\""));
+        assert!(updated.contains("[transcription]"));
+        assert!(updated.contains("provider = \"openai\""));
     }
 
     fn validate_process_config(config: &ProcessConfig) -> Result<(), Box<dyn std::error::Error>> {

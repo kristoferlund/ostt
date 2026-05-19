@@ -84,6 +84,10 @@ pub enum LocalModelsMode {
         entry: LocalModelEntry,
         selected_action: DialogAction,
     },
+    ConfirmAudioConfig {
+        entry: LocalModelEntry,
+        selected_action: DialogAction,
+    },
     ErrorDialog {
         message: String,
         return_mode: Box<LocalModelsMode>,
@@ -184,6 +188,12 @@ impl LocalModelsTui {
                 entry,
                 selected_action: action,
             },
+            LocalModelsMode::ConfirmAudioConfig { entry, .. } => {
+                LocalModelsMode::ConfirmAudioConfig {
+                    entry,
+                    selected_action: action,
+                }
+            }
             LocalModelsMode::CustomModelInput { input, .. } => LocalModelsMode::CustomModelInput {
                 input,
                 selected_action: action,
@@ -220,6 +230,9 @@ impl LocalModelsTui {
                 selected_action, ..
             }
             | LocalModelsMode::ConfirmDownload {
+                selected_action, ..
+            }
+            | LocalModelsMode::ConfirmAudioConfig {
                 selected_action, ..
             }
             | LocalModelsMode::CustomModelInput {
@@ -509,6 +522,13 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
             render_browse(frame, inner_area, tui);
             render_confirm_download(frame, entry, *selected_action);
         }
+        LocalModelsMode::ConfirmAudioConfig {
+            entry,
+            selected_action,
+        } => {
+            render_browse(frame, inner_area, tui);
+            render_confirm_audio_config(frame, entry, *selected_action);
+        }
         LocalModelsMode::CustomModelInput {
             input,
             selected_action,
@@ -775,6 +795,31 @@ fn render_confirm_download(
     );
 }
 
+fn render_confirm_audio_config(
+    frame: &mut Frame<'_>,
+    entry: &LocalModelEntry,
+    _selected_action: DialogAction,
+) {
+    render_dialog_content(
+        frame,
+        "Update Audio Config",
+        vec![
+            Line::from(format!("Activate \"{}\"?", entry.name)),
+            Line::from(""),
+            Line::from("Local transcription requires WAV audio:"),
+            Line::from("output_format = \"pcm_s16le -ar 16000\""),
+            Line::from("sample_rate = 16000"),
+            Line::from(""),
+            Line::from(Span::styled(
+                "<Update>",
+                Style::default().fg(Color::Black).bg(Color::White),
+            )),
+        ],
+        70,
+        12,
+    );
+}
+
 fn render_custom_input(frame: &mut Frame<'_>, input: &Input, selected_action: DialogAction) {
     let lines = vec![
         padded_line("Paste a Hugging Face model page or a direct model file URL."),
@@ -1037,6 +1082,17 @@ async fn handle_key(
             start_confirmed_download(tui, running_download, &entry);
         }
         (
+            LocalModelsMode::ConfirmAudioConfig { .. },
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
+        ) => tui.back_to_browse(),
+        (LocalModelsMode::ConfirmAudioConfig { entry, .. }, KeyCode::Enter) => {
+            update_audio_config_and_activate(tui, registry, &entry)?;
+        }
+        (
+            LocalModelsMode::ConfirmAudioConfig { entry, .. },
+            KeyCode::Char('y') | KeyCode::Char('Y'),
+        ) => update_audio_config_and_activate(tui, registry, &entry)?,
+        (
             LocalModelsMode::ConfirmDelete { .. },
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
         ) => tui.back_to_browse(),
@@ -1072,8 +1128,33 @@ fn handle_selected_entry(
         return Ok(());
     }
 
+    let config = config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    if !config::is_local_transcription_audio_compatible(&config.audio) {
+        tui.mode = LocalModelsMode::ConfirmAudioConfig {
+            entry,
+            selected_action: DialogAction::Ok,
+        };
+        return Ok(());
+    }
+
     match activate_entry(&entry) {
         Ok(()) => {
+            tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
+            tui.refresh(&load_state(), registry)?;
+        }
+        Err(error) => tui.toast = Some(Toast::error(error.to_string())),
+    }
+    Ok(())
+}
+
+fn update_audio_config_and_activate(
+    tui: &mut LocalModelsTui,
+    registry: &[RegistryEntry],
+    entry: &LocalModelEntry,
+) -> anyhow::Result<()> {
+    match config::ensure_local_transcription_audio_config().and_then(|()| activate_entry(entry)) {
+        Ok(()) => {
+            tui.back_to_browse();
             tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
             tui.refresh(&load_state(), registry)?;
         }

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Local model management** - `ostt model` now lets users choose between cloud and local transcription models. Local models can be downloaded, activated, inspected, deleted, and extended with custom Hugging Face or direct `.gguf` / `ggml-*.bin` model URLs.
+- **Cloud model info screen** - Cloud models now expose model ID, name, description, language coverage, and active status in the model picker.
+- **Model metadata guardrails** - Tests now require every supported cloud model to define complete metadata before release.
+
+### Changed
+
+- Updated model picker UI, dialogs, and toasts to use terminal ANSI colors and consistent local/cloud model screens.
+
 ## 0.0.11 - 2026-05-13
 
 ### Fixed
