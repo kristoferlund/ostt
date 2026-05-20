@@ -313,9 +313,12 @@ jobs:
       - name: Build CUDA release binary
         run: cargo build --profile dist --locked --features whisper-cuda
       - name: Generate shell completions
-        # Use CUDA stubs so the binary starts without actual NVIDIA drivers.
+        # The CUDA stubs ship libcuda.so (unversioned); the binary needs libcuda.so.1.
+        # Symlink the stub so the dynamic linker finds it without real NVIDIA drivers.
         # The completions subcommand does not invoke any CUDA API.
         run: |
+          sudo ln -sf /usr/local/cuda/lib64/stubs/libcuda.so \
+            /usr/local/cuda/lib64/stubs/libcuda.so.1
           mkdir -p completions
           LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
             ./target/dist/ostt completions bash > completions/ostt.bash
