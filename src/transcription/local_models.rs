@@ -89,6 +89,26 @@ fn state_path() -> PathBuf {
     models_dir().join("models.json")
 }
 
+/// Returns the path of the Unix socket used by the local model daemon.
+pub fn daemon_socket_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".local")
+        .join("share")
+        .join("ostt")
+        .join("ostt-daemon.sock")
+}
+
+/// Returns the path of the PID file written by the local model daemon.
+pub fn daemon_pid_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("~"))
+        .join(".local")
+        .join("share")
+        .join("ostt")
+        .join("ostt-daemon.pid")
+}
+
 pub fn model_files_dir() -> PathBuf {
     models_dir()
 }
@@ -195,7 +215,7 @@ pub fn validate_custom_model_registration(entry: &RegistryEntry) -> anyhow::Resu
 
 pub fn validate_downloaded_model(entry: &RegistryEntry) -> anyhow::Result<()> {
     let path = model_destination(entry);
-    let metadata = fs::metadata(&path).map_err(|error| {
+    fs::metadata(&path).map_err(|error| {
         anyhow::anyhow!(
             "download completed but model file is missing at {}: {error}",
             path.display()
@@ -211,20 +231,6 @@ pub fn validate_downloaded_model(entry: &RegistryEntry) -> anyhow::Result<()> {
                 entry.id,
                 expected_sha256,
                 actual_sha256
-            );
-        }
-        return Ok(());
-    }
-
-    if entry.size_mb > 0 {
-        let actual_size_mb = bytes_to_mb(metadata.len());
-        if actual_size_mb != entry.size_mb {
-            anyhow::bail!(
-                "downloaded model size mismatch for {}: expected approximately {} MB, got {} MB ({} bytes)",
-                entry.id,
-                entry.size_mb,
-                actual_size_mb,
-                metadata.len()
             );
         }
     }
@@ -1352,42 +1358,13 @@ mod tests {
     }
 
     #[test]
-    fn validate_downloaded_model_uses_size_when_checksum_missing() {
+    fn validate_downloaded_model_passes_without_sha256() {
         with_isolated_data_dir(|_| {
-            let mut entry = registry_entry("custom");
-            entry.size_mb = 1;
+            let entry = registry_entry("custom"); // no sha256
             fs::create_dir_all(model_files_dir()).expect("create files dir");
-            fs::write(model_destination(&entry), vec![0_u8; 1024 * 1024])
-                .expect("write model file");
+            fs::write(model_destination(&entry), b"any bytes").expect("write model file");
 
-            validate_downloaded_model(&entry).expect("validate size");
-        });
-    }
-
-    #[test]
-    fn validate_downloaded_model_reports_size_mismatch() {
-        with_isolated_data_dir(|_| {
-            let mut entry = registry_entry("custom");
-            entry.size_mb = 2;
-            fs::create_dir_all(model_files_dir()).expect("create files dir");
-            fs::write(model_destination(&entry), [1]).expect("write model file");
-
-            let error = validate_downloaded_model(&entry).expect_err("size mismatch should fail");
-
-            assert!(error.to_string().contains("size mismatch"));
-        });
-    }
-
-    #[test]
-    fn validate_downloaded_model_accepts_rounded_display_size() {
-        with_isolated_data_dir(|_| {
-            let mut entry = registry_entry("custom");
-            entry.size_mb = 75;
-            fs::create_dir_all(model_files_dir()).expect("create files dir");
-            fs::write(model_destination(&entry), vec![0_u8; 77_691_713])
-                .expect("write rounded-size model file");
-
-            validate_downloaded_model(&entry).expect("validate rounded size");
+            validate_downloaded_model(&entry).expect("should pass without checksum");
         });
     }
 

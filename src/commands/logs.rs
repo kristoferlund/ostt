@@ -50,11 +50,6 @@ pub fn handle_logs() -> Result<(), anyhow::Error> {
         0
     };
 
-    println!();
-    println!(" ┏┓┏╋╋ ");
-    println!(" ┗┛┛┗┗ ");
-    println!();
-
     if start_index > 0 {
         println!("Showing last {} of {} lines:", DEFAULT_LINES, lines.len());
     } else {

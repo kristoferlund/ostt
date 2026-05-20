@@ -5,9 +5,7 @@
 
 pub mod animation;
 pub mod api;
-#[cfg(unix)]
 pub mod daemon;
-#[cfg(unix)]
 pub mod daemon_client;
 pub mod local_models;
 pub mod model;

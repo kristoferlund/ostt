@@ -39,10 +39,6 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
         return Ok(());
     }
 
-    println!();
-    println!(" ┏┓┏╋╋ ");
-    println!(" ┗┛┛┗┗ ");
-    println!();
     println!("Available audio input devices:");
     println!();
 
@@ -65,9 +61,9 @@ pub fn handle_list_devices() -> Result<(), anyhow::Error> {
             Err(_) => " (configuration unavailable)".to_string(),
         };
 
-        println!("  ID: {index}");
-        println!("    Name: {device_name}{default_indicator}");
-        println!("    Config:{config_info}");
+        println!("ID: {index}");
+        println!("  Name: {device_name}{default_indicator}");
+        println!("  Config:{config_info}");
         println!();
     }
 

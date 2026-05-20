@@ -10,7 +10,7 @@ mod deepgram;
 mod deepinfra;
 mod elevenlabs;
 mod groq;
-mod local;
+pub(crate) mod local;
 mod openai;
 
 use serde::Deserialize;

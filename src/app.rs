@@ -323,9 +323,7 @@ enum Commands {
     ///   ostt daemon status           # show running status and service info
     ///   ostt daemon install          # install as a login service (auto-start)
     ///   ostt daemon uninstall        # remove the login service
-    ///   ostt daemon logs             # show recent daemon log entries
-    ///   ostt daemon logs -f          # follow the log live
-    #[cfg(unix)]
+    ///   ostt daemon logs             # daemon logs appear in ostt logs
     #[command(visible_alias = "d")]
     Daemon {
         #[command(subcommand)]
@@ -333,7 +331,6 @@ enum Commands {
     },
 }
 
-#[cfg(unix)]
 #[derive(clap::Subcommand)]
 enum DaemonCommand {
     /// Start the daemon for the active local model
@@ -348,15 +345,6 @@ enum DaemonCommand {
     Install,
     /// Remove the daemon login service
     Uninstall,
-    /// Show daemon log entries
-    Logs {
-        /// Follow the log as it grows (like tail -f)
-        #[arg(short, long)]
-        follow: bool,
-        /// Number of lines to show
-        #[arg(short = 'n', long, default_value = "50")]
-        lines: usize,
-    },
     /// [Internal] Run the daemon process — used by the service manager and daemon start
     #[command(hide = true)]
     Run {
@@ -416,7 +404,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
     // Handle commands that don't need logging or config setup
     // The `daemon run` subcommand is the long-running daemon process itself.
     // It must use daemon-specific logging and skip the normal setup flow.
-    #[cfg(unix)]
     if let Some(Commands::Daemon {
         command: DaemonCommand::Run {
             ref model_id,
@@ -424,13 +411,29 @@ pub async fn run() -> Result<(), anyhow::Error> {
         },
     }) = cli.command
     {
-        logging::init_daemon_logging()?;
+        logging::init_logging()?;
         return commands::daemon::handle_daemon_run(model_id.clone(), idle_timeout_secs).await;
     }
 
-    // Print logo to stderr for all commands except completions (purely programmatic output).
-    let is_completions = matches!(&cli.command, Some(Commands::Completions { .. }));
-    if !is_completions {
+    // Print logo only for plain-text informational commands where it adds context
+    // without interfering with TUI rendering or piped output.
+    let show_logo = matches!(
+        &cli.command,
+        Some(Commands::ListDevices) | Some(Commands::Logs) | Some(Commands::Auth { .. })
+    );
+    let show_logo = show_logo
+        || matches!(
+            &cli.command,
+            Some(Commands::Daemon {
+                command: DaemonCommand::Start
+                    | DaemonCommand::Stop
+                    | DaemonCommand::Restart
+                    | DaemonCommand::Status
+                    | DaemonCommand::Install
+                    | DaemonCommand::Uninstall,
+            })
+        );
+    if show_logo {
         eprintln!("\n ┏┓┏╋╋ \n ┗┛┛┗┗\n");
     }
 
@@ -583,7 +586,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
             commands::handle_launch(full_args).await?;
         }
-        #[cfg(unix)]
         Some(Commands::Daemon { command }) => match command {
             DaemonCommand::Start => commands::daemon::handle_daemon_start().await?,
             DaemonCommand::Stop => commands::daemon::handle_daemon_stop().await?,
@@ -591,9 +593,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
             DaemonCommand::Status => commands::daemon::handle_daemon_status().await?,
             DaemonCommand::Install => commands::daemon::handle_daemon_install()?,
             DaemonCommand::Uninstall => commands::daemon::handle_daemon_uninstall()?,
-            DaemonCommand::Logs { follow, lines } => {
-                commands::daemon::handle_daemon_logs(follow, lines).await?
-            }
             DaemonCommand::Run { .. } => {
                 unreachable!("daemon run is handled before logging init")
             }

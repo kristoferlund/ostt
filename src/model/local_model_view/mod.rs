@@ -54,12 +54,9 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
     let selected_model = crate::config::get_selected_model_entry()?;
 
     // Probe daemon once at open to show initial loaded status.
-    #[cfg(unix)]
     let daemon_model_id = crate::transcription::daemon_client::probe_daemon()
         .await
         .map(|d| d.model_id);
-    #[cfg(not(unix))]
-    let daemon_model_id: Option<String> = None;
 
     let entries = build_local_model_entries(
         &local_state,
@@ -95,7 +92,6 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
         finish_completed_download(&mut tui, &registry, &mut running_download).await?;
 
         // Re-probe daemon every 2 seconds to pick up background daemon startup.
-        #[cfg(unix)]
         if last_daemon_probe.elapsed() >= Duration::from_secs(2) {
             let info = crate::transcription::daemon_client::probe_daemon().await;
             tui.update_daemon_status(info.as_ref().map(|d| d.model_id.as_str()));
@@ -457,24 +453,19 @@ fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
 /// Spawn the local model daemon in the background if daemon mode is enabled.
 /// Fire-and-forget: failures are logged but do not propagate.
 fn spawn_daemon_if_enabled(model_id: &str) {
-    #[cfg(unix)]
-    {
-        let Ok(config) = config::OsttConfig::load() else {
-            return;
-        };
-        let effective = config.providers.local.effective_for_model(model_id);
-        if !effective.daemon {
-            return;
-        }
-        let model_id = model_id.to_string();
-        tokio::spawn(async move {
-            if let Err(e) =
-                crate::transcription::daemon_client::ensure_daemon(&model_id, None).await
-            {
-                tracing::warn!("could not pre-warm daemon for model '{model_id}': {e}");
-            }
-        });
+    let Ok(config) = config::OsttConfig::load() else {
+        return;
+    };
+    let effective = config.providers.local.effective_for_model(model_id);
+    if !effective.daemon {
+        return;
     }
+    let model_id = model_id.to_string();
+    tokio::spawn(async move {
+        if let Err(e) = crate::transcription::daemon_client::ensure_daemon(&model_id, None).await {
+            tracing::warn!("could not pre-warm daemon for model '{model_id}': {e}");
+        }
+    });
 }
 
 fn update_audio_config_and_activate(

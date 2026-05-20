@@ -8,6 +8,21 @@ pub(super) async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
 ) -> anyhow::Result<String> {
+    // ── Daemon path ───────────────────────────────────────────────────────────
+    // When daemon mode is enabled (default: true), ensure the model is kept
+    // loaded in a background process and route the request through it.
+    // Any failure falls through to direct (in-process) transcription.
+    if let Some(lc) = config.local_config() {
+        let effective = lc.effective_for_model(&config.model_id);
+        if effective.daemon {
+            match try_daemon_transcription(&config.model_id, audio_path, effective.daemon_idle_timeout_secs).await {
+                Some(result) => return result,
+                None => tracing::debug!("daemon unavailable, falling back to direct transcription"),
+            }
+        }
+    }
+
+    // ── Direct (in-process) path ──────────────────────────────────────────────
     let model_path = resolve_installed_model_path(&config.model_id)?;
     validate_local_audio_format(audio_path)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
@@ -65,7 +80,31 @@ pub(super) async fn transcribe(
     Ok(filter_obvious_hallucination(&text).unwrap_or_default())
 }
 
-fn filter_obvious_hallucination(text: &str) -> Option<String> {
+/// Try to route transcription through the daemon. Returns `Some(result)` when
+/// the daemon handled the request (successfully or with an error), `None` when
+/// the daemon is unavailable and the caller should fall back to direct transcription.
+async fn try_daemon_transcription(
+    model_id: &str,
+    audio_path: &Path,
+    idle_timeout_secs: u64,
+) -> Option<anyhow::Result<String>> {
+    use crate::transcription::daemon_client;
+
+    if let Err(e) = daemon_client::ensure_daemon(model_id, Some(idle_timeout_secs)).await {
+        tracing::warn!("could not ensure daemon for model '{model_id}': {e}");
+        return None;
+    }
+
+    match daemon_client::request_transcription(audio_path).await {
+        Ok(raw) => Some(Ok(filter_obvious_hallucination(&raw).unwrap_or_default())),
+        Err(e) => {
+            tracing::warn!("daemon transcription failed: {e}");
+            None
+        }
+    }
+}
+
+pub(crate) fn filter_obvious_hallucination(text: &str) -> Option<String> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return None;
@@ -90,7 +129,7 @@ fn filter_obvious_hallucination(text: &str) -> Option<String> {
     Some(trimmed.to_string())
 }
 
-fn load_audio_for_whisper(audio_path: &Path) -> anyhow::Result<Vec<f32>> {
+pub(crate) fn load_audio_for_whisper(audio_path: &Path) -> anyhow::Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(audio_path)?;
     let mut samples = Vec::new();
 
@@ -101,7 +140,7 @@ fn load_audio_for_whisper(audio_path: &Path) -> anyhow::Result<Vec<f32>> {
     Ok(samples)
 }
 
-fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<()> {
+pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<()> {
     let reader = hound::WavReader::open(audio_path).map_err(|err| {
         anyhow::anyhow!(
             "Local transcription requires WAV audio: {err}. Configure [audio] with output_format = \"pcm_s16le -ar 16000\" and sample_rate = 16000."
