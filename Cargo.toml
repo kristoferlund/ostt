@@ -64,6 +64,12 @@ signal-hook = "0.3.18"
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 
+# Metal GPU acceleration for macOS (Apple Silicon and Intel).
+# Shaders are embedded at build time (GGML_METAL_EMBED_LIBRARY=ON),
+# so the binary is self-contained and works on all macOS machines.
+[target.'cfg(target_os = "macos")'.dependencies]
+whisper-rs = { version = "0.14", features = ["metal"] }
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"

@@ -13,8 +13,15 @@ pub(super) async fn transcribe(
     let audio_samples = load_audio_for_whisper(audio_path)?;
     whisper_rs::install_logging_hooks();
 
+    #[cfg(target_os = "macos")]
+    tracing::debug!("local transcription: Metal GPU acceleration enabled");
+    #[cfg(not(target_os = "macos"))]
+    tracing::debug!("local transcription: CPU inference");
+
     let text = tokio::task::spawn_blocking(move || {
         let model_path = model_path.to_string_lossy().into_owned();
+        // WhisperContextParameters::default() sets use_gpu: cfg!(feature = "_gpu").
+        // On macOS the binary is built with the metal feature, so GPU is used automatically.
         let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
             .map_err(|err| ModelError::LoadFailed(err.to_string()))?;
         let mut state = ctx
