@@ -4,6 +4,7 @@
 //! mouse support, selection, and inline editing.
 
 use crate::keywords::KeywordsManager;
+use crate::ui::{render_footer, render_title};
 use anyhow::Result;
 use ratatui::crossterm::{
     event::{
@@ -229,31 +230,16 @@ impl KeywordsViewer {
             // Split into header and content
             let layout = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(3),
-                    Constraint::Length(2),
-                    Constraint::Min(0),
-                ])
+                .constraints([Constraint::Length(3), Constraint::Min(0)])
                 .split(inner_area);
 
             let header_area = layout[0];
-            let title_area = layout[1];
-            let content_area = layout[2];
+            let content_area = render_title(frame, layout[1], "Keywords");
 
             // Header
             let header_text = "┏┓┏╋╋ \n┗┛┛┗┗ \n";
             let header_paragraph = Paragraph::new(header_text).alignment(Alignment::Left);
             frame.render_widget(header_paragraph, header_area);
-
-            let title = " Keywords ";
-            frame.render_widget(
-                Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
-                Rect {
-                    width: title.len() as u16,
-                    height: 1,
-                    ..title_area
-                },
-            );
 
             if input_mode {
                 Self::draw_with_input(
@@ -284,11 +270,7 @@ impl KeywordsViewer {
 
         Self::render_keywords_list(frame, list_area, keywords, list_state);
 
-        let help_text = "↑↓ select, x/del remove, a add, esc/q exit";
-        let help_paragraph = Paragraph::new(help_text)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White).bg(Color::DarkGray));
-        frame.render_widget(help_paragraph, help_area);
+        render_footer(frame, help_area, "↑↓ select, x/del delete, a add, esc/q exit");
     }
 
     /// Draws the UI when in input mode.

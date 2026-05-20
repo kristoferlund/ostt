@@ -207,7 +207,7 @@ pub(crate) async fn handle_key(
         (LocalModelsMode::ErrorDialog { .. }, KeyCode::Enter | KeyCode::Esc) => {
             tui.close_error_dialog()
         }
-        (LocalModelsMode::Browse, KeyCode::Char('d')) => tui.confirm_delete(),
+        (LocalModelsMode::Browse, KeyCode::Char('x') | KeyCode::Delete) => tui.confirm_delete(),
         (LocalModelsMode::Info { .. }, KeyCode::Esc | KeyCode::Char('q')) => tui.back_to_browse(),
         (LocalModelsMode::Downloading(_), KeyCode::Enter | KeyCode::Tab | KeyCode::Esc) => {
             cancel_download(running_download)

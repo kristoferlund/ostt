@@ -1,7 +1,7 @@
 use crate::config::{self, SelectedModel};
 use crate::model::UserQuit;
 use crate::transcription::{TranscriptionModel, TranscriptionProvider};
-use crate::ui::{render_toast, Toast};
+use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
@@ -13,7 +13,7 @@ use std::collections::HashSet;
 use std::io::Stdout;
 use std::time::Duration;
 
-use super::{is_ctrl_c, render_footer, render_shell, render_title};
+use super::is_ctrl_c;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CloudModelEntry {
@@ -68,10 +68,10 @@ pub(crate) async fn run_cloud_model_selector(
         }
 
         terminal.draw(|frame| {
-            let [body_area, footer_area, _] = render_shell(frame);
+            let layout = render_app_layout(frame, frame.area());
             match mode {
                 CloudModelMode::Browse => {
-                    let list_area = render_title(frame, body_area, "Cloud Model");
+                    let list_area = render_title(frame, layout.body, "Cloud Model");
                     let (items, selected_display_index) =
                         cloud_model_list_items(&sections, selected);
                     let mut state = ListState::default().with_selected(selected_display_index);
@@ -83,15 +83,15 @@ pub(crate) async fn run_cloud_model_selector(
                     );
                     render_footer(
                         frame,
-                        footer_area,
+                        layout.footer,
                         "↑↓ select, ↵ activate, i info, esc/q back",
                     );
                 }
                 CloudModelMode::Info => {
                     if let Some(entry) = cloud_model_at(&sections, selected) {
-                        render_cloud_model_info(frame, body_area, entry);
+                        render_cloud_model_info(frame, layout.body, entry);
                     }
-                    render_footer(frame, footer_area, "esc/q back");
+                    render_footer(frame, layout.footer, "esc/q back");
                 }
             }
 
@@ -140,8 +140,8 @@ async fn show_no_cloud_providers_screen(
 ) -> anyhow::Result<()> {
     loop {
         terminal.draw(|frame| {
-            let [body_area, footer_area, _] = render_shell(frame);
-            let content_area = render_title(frame, body_area, "Cloud Provider");
+            let layout = render_app_layout(frame, frame.area());
+            let content_area = render_title(frame, layout.body, "Cloud Provider");
 
             frame.render_widget(
                 Paragraph::new(vec![
@@ -156,7 +156,7 @@ async fn show_no_cloud_providers_screen(
                 content_area,
             );
 
-            render_footer(frame, footer_area, "esc/q back");
+            render_footer(frame, layout.footer, "esc/q back");
         })?;
 
         if event::poll(Duration::from_millis(100))? {

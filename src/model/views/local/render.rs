@@ -1,61 +1,52 @@
-use ratatui::layout::{Alignment, Constraint, Layout, Position, Rect};
+use ratatui::layout::{Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, List, ListItem, ListState, Padding, Paragraph, Wrap};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
 use ratatui::Frame;
 use std::fs;
 use std::time::SystemTime;
 use tui_input::Input;
 
 use crate::transcription::local_models::{model_destination, RegistryEntry};
-use crate::ui::{dialog_content_area, render_dialog, render_dialog_content, render_error_dialog, render_toast, DialogAction};
+use crate::ui::{
+    dialog_content_area, render_app_layout, render_dialog, render_dialog_content,
+    render_error_dialog, render_footer, render_title, render_toast, DialogAction,
+};
 
 use super::types::{CustomModelDetailsFocus, LocalModelEntry, LocalModelsMode, LocalModelsTui};
 
-const LOGO: &str = "┏┓┏╋╋ \n┗┛┛┗┗ \n";
-
 pub(crate) fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
-    let area = frame.area();
-
-    let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
-    frame.render_widget(&padding_block, area);
-    let padded_area = padding_block.inner(area);
-
-    let main_block = Block::default();
-    frame.render_widget(&main_block, padded_area);
-    let inner_area = main_block.inner(padded_area);
-
     match &tui.mode {
-        LocalModelsMode::Browse => render_browse(frame, inner_area, tui),
+        LocalModelsMode::Browse => render_browse(frame, tui),
         LocalModelsMode::Info { entry } => {
-            render_info(frame, inner_area, entry);
+            render_info(frame, entry);
         }
         LocalModelsMode::ConfirmDelete {
             entry,
             selected_action,
         } => {
-            render_browse(frame, inner_area, tui);
+            render_browse(frame, tui);
             render_confirm_delete(frame, entry, *selected_action);
         }
         LocalModelsMode::ConfirmDownload {
             entry,
             selected_action,
         } => {
-            render_browse(frame, inner_area, tui);
+            render_browse(frame, tui);
             render_confirm_download(frame, entry, *selected_action);
         }
         LocalModelsMode::ConfirmAudioConfig {
             entry,
             selected_action,
         } => {
-            render_browse(frame, inner_area, tui);
+            render_browse(frame, tui);
             render_confirm_audio_config(frame, entry, *selected_action);
         }
         LocalModelsMode::CustomModelInput {
             input,
             selected_action,
         } => {
-            render_browse(frame, inner_area, tui);
+            render_browse(frame, tui);
             render_custom_input(frame, input, *selected_action);
             set_custom_input_cursor(frame, input, 10, 5);
         }
@@ -66,7 +57,7 @@ pub(crate) fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
             selected_action,
             ..
         } => {
-            render_browse(frame, inner_area, tui);
+            render_browse(frame, tui);
             render_custom_details(frame, id_input, name_input, *focus, *selected_action);
             match focus {
                 CustomModelDetailsFocus::Id => set_custom_input_cursor(frame, id_input, 13, 5),
@@ -74,7 +65,7 @@ pub(crate) fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
             }
         }
         LocalModelsMode::Downloading(state) => {
-            render_browse(frame, inner_area, tui);
+            render_browse(frame, tui);
             render_download(frame, state);
         }
         LocalModelsMode::ErrorDialog {
@@ -86,11 +77,11 @@ pub(crate) fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
                     input,
                     selected_action,
                 } => {
-                    render_browse(frame, inner_area, tui);
+                    render_browse(frame, tui);
                     render_custom_input(frame, input, *selected_action);
                     set_custom_input_cursor(frame, input, 10, 5);
                 }
-                _ => render_browse(frame, inner_area, tui),
+                _ => render_browse(frame, tui),
             }
             render_error_dialog(frame, "Error", message.clone());
         }
@@ -101,27 +92,9 @@ pub(crate) fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
     }
 }
 
-fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) {
-    let [header_area, title_area, list_area, footer_area] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(2),
-        Constraint::Min(5),
-        Constraint::Length(1),
-    ])
-    .areas(inner_area);
-
-    let header = Paragraph::new(LOGO).alignment(Alignment::Left);
-    frame.render_widget(header, header_area);
-
-    let title_label_area = Rect {
-        width: " Local Models ".len() as u16,
-        height: 1,
-        ..title_area
-    };
-    frame.render_widget(
-        Paragraph::new(" Local Models ").style(Style::default().fg(Color::White).bg(Color::Blue)),
-        title_label_area,
-    );
+fn render_browse(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
+    let layout = render_app_layout(frame, frame.area());
+    let list_area = render_title(frame, layout.body, "Local Models");
 
     let mut items = Vec::new();
     push_grouped_model_items(&mut items, tui.entries.iter().collect());
@@ -134,34 +107,16 @@ fn render_browse(frame: &mut Frame<'_>, inner_area: Rect, tui: &LocalModelsTui) 
         &mut state,
     );
 
-    let footer_text = "↑↓ nav, ↵ activate/download, d delete, i info, c custom, esc/q back";
-    frame.render_widget(
-        Paragraph::new(footer_text)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-        footer_area,
+    render_footer(
+        frame,
+        layout.footer,
+        "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back",
     );
 }
 
-fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry) {
-    let [header_area, title_area, content_area, footer_area] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(2),
-        Constraint::Min(5),
-        Constraint::Length(1),
-    ])
-    .areas(inner_area);
-    frame.render_widget(Paragraph::new(LOGO).alignment(Alignment::Left), header_area);
-
-    let title = format!(" {} ", entry.name);
-    frame.render_widget(
-        Paragraph::new(title.clone()).style(Style::default().fg(Color::White).bg(Color::Blue)),
-        Rect {
-            width: title.len() as u16,
-            height: 1,
-            ..title_area
-        },
-    );
+fn render_info(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
+    let layout = render_app_layout(frame, frame.area());
+    let content_area = render_title(frame, layout.body, &entry.name);
 
     let (_, path) = downloaded_details(entry);
     let mut lines = vec![
@@ -205,12 +160,7 @@ fn render_info(frame: &mut Frame<'_>, inner_area: Rect, entry: &LocalModelEntry)
         Paragraph::new(lines).wrap(Wrap { trim: false }),
         content_area,
     );
-    frame.render_widget(
-        Paragraph::new("esc/q back")
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-        footer_area,
-    );
+    render_footer(frame, layout.footer, "esc/q back");
 }
 
 fn render_confirm_delete(

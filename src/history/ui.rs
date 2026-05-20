@@ -4,7 +4,7 @@
 //! mouse support, selection, and clipboard integration.
 
 use crate::history::TranscriptionEntry;
-use crate::ui::{render_toast, Toast};
+use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
 use anyhow::Result;
 use crossterm::{
     event::{
@@ -16,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{List, ListItem, ListState},
 };
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
@@ -192,41 +192,11 @@ impl HistoryViewer {
         let selected_index = self.list_state.selected();
 
         self.terminal.draw(|frame| {
-            let area = frame.area();
-
-            let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default();
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            // Split into header, list, and footer areas
-            let [header_area, title_area, list_area, footer_area] = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Length(2),
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
-            .areas(inner_area);
+            let layout = render_app_layout(frame, frame.area());
+            let list_area = render_title(frame, layout.body, "History");
 
             // Store list_area for mouse hit-testing
             self.list_area = list_area;
-
-            // Render ostt logo header
-            let header = Paragraph::new("┏┓┏╋╋ \n┗┛┛┗┗ \n").alignment(Alignment::Left);
-            frame.render_widget(header, header_area);
-
-            let title = " History ";
-            frame.render_widget(
-                Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
-                Rect {
-                    width: title.len() as u16,
-                    height: 1,
-                    ..title_area
-                },
-            );
 
             // Build list items with styled timestamp and text
             let items: Vec<ListItem> = self
@@ -253,12 +223,7 @@ impl HistoryViewer {
 
             frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
-            // Render help footer
-            let help_text = "↑↓ select, ↵ copy, esc/q exit";
-            let help_paragraph = Paragraph::new(help_text)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(Color::White).bg(Color::DarkGray));
-            frame.render_widget(help_paragraph, footer_area);
+            render_footer(frame, layout.footer, "↑↓ select, ↵ copy, esc/q exit");
 
             // Render notification modal if active
             if let Some(toast) = &notification {

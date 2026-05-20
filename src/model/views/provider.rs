@@ -7,7 +7,9 @@ use ratatui::Terminal;
 use std::io::Stdout;
 use std::time::Duration;
 
-use super::{is_ctrl_c, render_footer, render_shell, render_title};
+use crate::ui::{render_app_layout, render_footer, render_title};
+
+use super::is_ctrl_c;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ModelProviderChoice {
@@ -24,8 +26,8 @@ pub(crate) async fn choose_model_provider(
 
     loop {
         terminal.draw(|frame| {
-            let [body_area, footer_area, _] = render_shell(frame);
-            let list_area = render_title(frame, body_area, "Provider");
+            let layout = render_app_layout(frame, frame.area());
+            let list_area = render_title(frame, layout.body, "Provider");
 
             let items: Vec<ListItem> = choices
                 .iter()
@@ -40,7 +42,7 @@ pub(crate) async fn choose_model_provider(
                 &mut state,
             );
 
-            render_footer(frame, footer_area, "↑↓ select, ↵ confirm, esc/q quit");
+            render_footer(frame, layout.footer, "↑↓ select, ↵ confirm, esc/q quit");
         })?;
 
         if event::poll(Duration::from_millis(100))? {

@@ -4,6 +4,7 @@
 //! and lets the user select one via keyboard navigation.
 
 use crate::config::file::ProcessAction;
+use crate::ui::{render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use crossterm::{
     event::{
@@ -15,7 +16,7 @@ use crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{List, ListItem, ListState},
 };
 use std::io::{self, Stdout};
 
@@ -30,36 +31,8 @@ pub fn render_picker_frame(
     list_state: &mut ListState,
     hovered_index: Option<usize>,
 ) -> Rect {
-    let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
-    frame.render_widget(&padding_block, area);
-    let padded_area = padding_block.inner(area);
-
-    let main_block = Block::default();
-    frame.render_widget(&main_block, padded_area);
-    let inner_area = main_block.inner(padded_area);
-
-    // Split into header, list, and footer areas
-    let [header_area, title_area, list_area, footer_area] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Length(2),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(inner_area);
-
-    // Render ostt logo header
-    let header = Paragraph::new("┏┓┏╋╋ \n┗┛┛┗┗ \n").alignment(Alignment::Left);
-    frame.render_widget(header, header_area);
-
-    let title = " Process action ";
-    frame.render_widget(
-        Paragraph::new(title).style(Style::default().fg(Color::White).bg(Color::Blue)),
-        Rect {
-            width: title.len() as u16,
-            height: 1,
-            ..title_area
-        },
-    );
+    let layout = render_app_layout(frame, area);
+    let list_area = render_title(frame, layout.body, "Process action");
 
     // Build list items from action names
     let selected_index = list_state.selected();
@@ -81,12 +54,7 @@ pub fn render_picker_frame(
 
     frame.render_stateful_widget(list, list_area, list_state);
 
-    // Render help footer
-    let help_text = "↑/↓ select, ↵ confirm, esc/q cancel";
-    let help_paragraph = Paragraph::new(help_text)
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(Color::White).bg(Color::DarkGray));
-    frame.render_widget(help_paragraph, footer_area);
+    render_footer(frame, layout.footer, "↑/↓ select, ↵ confirm, esc/q cancel");
 
     list_area
 }
