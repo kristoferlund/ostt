@@ -4,30 +4,26 @@
 //! mouse support, selection, and inline editing.
 
 use crate::keywords::KeywordsManager;
+use crate::ui::{render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use ratatui::crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use std::io::{self, Stdout};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-/// Common colors/styles.
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
-const HELP_FG: Color = Color::Rgb(100, 100, 100);
-
-/// Interactive keywords viewer for managing keywords.
-pub struct KeywordsViewer {
+/// Interactive keywords view for managing keywords.
+pub struct KeywordsView {
     /// Terminal interface
     terminal: Terminal<CrosstermBackend<Stdout>>,
     /// List state for managing selection and scroll
@@ -42,8 +38,8 @@ pub struct KeywordsViewer {
     cleaned_up: bool,
 }
 
-impl KeywordsViewer {
-    /// Creates a new keywords viewer with the given keywords.
+impl KeywordsView {
+    /// Creates a new keywords view with the given keywords.
     ///
     /// # Arguments
     /// * `keywords` - List of keywords to display
@@ -73,7 +69,7 @@ impl KeywordsViewer {
         })
     }
 
-    /// Runs the interactive keywords viewer loop.
+    /// Runs the interactive keywords view loop.
     pub fn run(&mut self, manager: &mut KeywordsManager) -> Result<()> {
         loop {
             self.draw()?;
@@ -117,6 +113,9 @@ impl KeywordsViewer {
         manager: &mut KeywordsManager,
         key: KeyEvent,
     ) -> Result<bool> {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Ok(true);
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
             KeyCode::Up => {
@@ -208,7 +207,7 @@ impl KeywordsViewer {
         Ok(())
     }
 
-    /// Renders the current state of the keywords viewer.
+    /// Renders the current state of the keywords view.
     fn draw(&mut self) -> Result<()> {
         // Extract data before the closure to avoid borrow conflicts
         let input_mode = self.input_mode;
@@ -218,45 +217,26 @@ impl KeywordsViewer {
         let list_state = &mut self.list_state;
 
         self.terminal.draw(|frame| {
-            let area = frame.area();
-
-            let padding_block = Block::default()
-                .padding(Padding::uniform(1))
-                .style(Style::default().bg(BG));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            // Split into header and content
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Min(0)])
-                .split(inner_area);
-
-            let header_area = layout[0];
-            let content_area = layout[1];
-
-            // Header
-            let header_text = " ┏┓┏╋╋ \n ┗┛┛┗┗ \n";
-            let header_paragraph = Paragraph::new(header_text)
-                .style(Style::default().fg(FG))
-                .alignment(Alignment::Left);
-            frame.render_widget(header_paragraph, header_area);
+            let layout = render_app_layout(frame, frame.area());
+            render_title(frame, layout.title, "Keywords");
 
             if input_mode {
                 Self::draw_with_input(
                     frame,
-                    content_area,
+                    layout.body,
                     &keywords,
                     &input_value,
                     input_cursor,
                     list_state,
                 );
+                render_footer(frame, layout.footer, "↵ add, esc cancel");
             } else {
-                Self::draw_normal(frame, content_area, &keywords, list_state);
+                Self::draw_normal(frame, layout.body, &keywords, list_state);
+                render_footer(
+                    frame,
+                    layout.footer,
+                    "↑↓ select, x/del delete, a add, esc/q exit",
+                );
             }
         })?;
 
@@ -265,21 +245,7 @@ impl KeywordsViewer {
 
     /// Draws the UI when *not* in input mode.
     fn draw_normal(frame: &mut Frame, area: Rect, keywords: &[String], list_state: &mut ListState) {
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(area);
-
-        let list_area = layout[0];
-        let help_area = layout[1];
-
-        Self::render_keywords_list(frame, list_area, keywords, list_state);
-
-        let help_text = "↑↓ select, x/del remove, a add, esc/q exit";
-        let help_paragraph = Paragraph::new(help_text)
-            .alignment(Alignment::Center)
-            .style(Style::default().fg(HELP_FG));
-        frame.render_widget(help_paragraph, help_area);
+        Self::render_keywords_list(frame, area, keywords, list_state);
     }
 
     /// Draws the UI when in input mode.
@@ -293,7 +259,7 @@ impl KeywordsViewer {
     ) {
         let layout = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(3)])
+            .constraints([Constraint::Min(1), Constraint::Length(5)])
             .split(area);
 
         let list_area = layout[0];
@@ -301,17 +267,44 @@ impl KeywordsViewer {
 
         Self::render_keywords_list(frame, list_area, keywords, list_state);
 
-        let input_block = Block::default().title("New Keyword").borders(Borders::ALL);
-        frame.render_widget(&input_block, input_area);
-        let input_inner = input_block.inner(input_area);
+        frame.render_widget(
+            Block::default().style(Style::default().bg(Color::DarkGray)),
+            input_area,
+        );
+        let input_inner = Rect {
+            x: input_area.x.saturating_add(2),
+            y: input_area.y.saturating_add(1),
+            width: input_area.width.saturating_sub(4),
+            height: input_area.height.saturating_sub(2),
+        };
 
-        let input_widget =
-            Paragraph::new(input_value).style(Style::default().fg(Color::Rgb(255, 255, 255)));
-        frame.render_widget(input_widget, input_inner);
+        let title = "New Keyword";
+        let escape = "esc";
+        let spacer_width = input_inner
+            .width
+            .saturating_sub((title.len() + escape.len()) as u16);
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
+                Span::raw(" ".repeat(spacer_width as usize)),
+                Span::styled(escape, Style::default().fg(Color::White)),
+            ])),
+            input_inner,
+        );
+
+        let input_value_area = Rect {
+            y: input_inner.y.saturating_add(2),
+            height: 1,
+            ..input_inner
+        };
+        frame.render_widget(
+            Paragraph::new(input_value).style(Style::default().fg(Color::DarkGray).bg(Color::Gray)),
+            input_value_area,
+        );
 
         // Cursor position based on tui_input cursor
-        let cursor_x = input_area.x + input_cursor as u16 + 1;
-        let cursor_y = input_area.y + 1;
+        let cursor_x = input_value_area.x + input_cursor as u16;
+        let cursor_y = input_value_area.y;
         frame.set_cursor_position(Position::new(cursor_x, cursor_y));
     }
 
@@ -327,9 +320,8 @@ impl KeywordsViewer {
             .map(|keyword| ListItem::new(keyword.clone()))
             .collect();
 
-        let list = List::new(items)
-            .block(Block::default().title(" Keywords ").borders(Borders::ALL))
-            .highlight_style(Style::default().bg(HIGHLIGHT_BG).fg(FG));
+        let list =
+            List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
         frame.render_stateful_widget(list, area, list_state);
     }
@@ -353,7 +345,7 @@ impl KeywordsViewer {
     }
 }
 
-impl Drop for KeywordsViewer {
+impl Drop for KeywordsView {
     fn drop(&mut self) {
         let _ = self.cleanup();
     }

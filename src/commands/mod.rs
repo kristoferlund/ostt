@@ -6,7 +6,7 @@
 //! # Commands
 //! - `auth`: Provider + model selection and API key management (unified flow)
 //! - `record`: Audio recording with optional transcription
-//! - `history`: Transcription history viewer
+//! - `history`: Transcription history view
 //! - `keywords`: Keyword management for transcription
 //! - `config`: Open configuration file in user's preferred editor
 //! - `list_devices`: List available audio input devices
@@ -21,6 +21,7 @@ pub mod keywords;
 pub mod launch;
 pub mod list_devices;
 pub mod logs;
+pub mod model;
 pub mod process;
 pub mod record;
 pub mod replay;
@@ -34,6 +35,7 @@ pub use keywords::handle_keywords;
 pub use launch::handle_launch;
 pub use list_devices::handle_list_devices;
 pub use logs::handle_logs;
+pub use model::handle_model;
 pub use process::handle_process;
 pub use record::handle_record;
 pub use replay::handle_replay;

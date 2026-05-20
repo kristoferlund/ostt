@@ -53,6 +53,11 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
                 })?;
             }
 
+            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
+                tracing::error!("Config migration failed: {e}");
+                anyhow!("Config migration failed: {e}")
+            })?;
+
             crate::setup::version::update_config_version(&config_path).map_err(|e| {
                 tracing::error!("Failed to update config version: {e}");
                 anyhow!("Failed to update config version: {e}")
@@ -64,6 +69,10 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
         }
         None => {
             // Config exists and version matches, no setup needed
+            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
+                tracing::error!("Config migration failed: {e}");
+                anyhow!("Config migration failed: {e}")
+            })?;
             tracing::debug!("Config version up to date ({})", env!("CARGO_PKG_VERSION"));
         }
     }
@@ -77,7 +86,7 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
 #[command(version)]
 #[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
 #[command(
-    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
+    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication for cloud providers\n    $ ostt auth\n    \n    # Choose cloud or local transcription model\n    $ ostt model\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
 )]
 #[command(
     after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
@@ -182,12 +191,21 @@ enum Commands {
         index: Option<usize>,
     },
 
-    /// Authenticate with a transcription provider and select model
+    /// Manage cloud provider credentials
     ///
-    /// Configure your AI provider credentials and choose which model to use.
-    /// Handles both provider selection and API key management in one flow.
+    /// Configure or remove AI provider credentials.
     #[command(visible_alias = "a")]
-    Auth,
+    Auth {
+        #[command(subcommand)]
+        command: Option<AuthCommand>,
+    },
+
+    /// Choose and manage cloud or local transcription models
+    ///
+    /// Opens an interactive model picker. Choose a cloud model from authenticated
+    /// providers, download and activate local models, or add a custom local model.
+    #[command(name = "model")]
+    Model,
 
     /// View and browse transcription history
     ///
@@ -291,6 +309,14 @@ enum Commands {
         #[arg(long, short)]
         install: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AuthCommand {
+    /// Add or update a cloud provider credential
+    Login,
+    /// Remove a cloud provider credential
+    Logout,
 }
 
 fn resolve_process_args(
@@ -420,8 +446,13 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;
         }
-        Some(Commands::Auth) => {
-            if let Err(e) = commands::handle_auth().await {
+        Some(Commands::Auth { command }) => {
+            let result = match command.unwrap_or(AuthCommand::Login) {
+                AuthCommand::Login => commands::handle_auth().await,
+                AuthCommand::Logout => commands::auth::handle_logout().await,
+            };
+
+            if let Err(e) = result {
                 // Check if it's a cancellation error (cliclack already displayed the message)
                 let err_msg = e.to_string();
                 if err_msg.contains("cancelled") || err_msg.contains("interrupted") {
@@ -431,6 +462,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
                     return Err(e);
                 }
             }
+        }
+        Some(Commands::Model) => {
+            commands::handle_model().await?;
         }
         Some(Commands::History) => {
             commands::handle_history().await?;

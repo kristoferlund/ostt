@@ -4,60 +4,36 @@
 //! and lets the user select one via keyboard navigation.
 
 use crate::config::file::ProcessAction;
+use crate::ui::{render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{List, ListItem, ListState},
 };
 use std::io::{self, Stdout};
 
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
-const HELP_FG: Color = Color::Rgb(100, 100, 100);
-const HOVER_BG: Color = Color::Rgb(10, 10, 10);
-
 /// Renders the action picker UI into the given frame area.
 ///
-/// Shared rendering logic used by both the standalone `ActionPicker`
+/// Shared rendering logic used by both the standalone `ProcessView`
 /// and `OsttTui::render_action_picker()`.
-pub fn render_picker_frame(
+pub fn render_process_view(
     frame: &mut Frame,
     area: Rect,
     actions: &[ProcessAction],
     list_state: &mut ListState,
     hovered_index: Option<usize>,
 ) -> Rect {
-    let padding_block = Block::default()
-        .padding(Padding::uniform(1))
-        .style(Style::default().bg(BG));
-    frame.render_widget(&padding_block, area);
-    let padded_area = padding_block.inner(area);
-
-    let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-    frame.render_widget(&main_block, padded_area);
-    let inner_area = main_block.inner(padded_area);
-
-    // Split into header, list, and footer areas
-    let [header_area, list_area, footer_area] = Layout::vertical([
-        Constraint::Length(3),
-        Constraint::Min(0),
-        Constraint::Length(1),
-    ])
-    .areas(inner_area);
-
-    // Render ostt logo header
-    let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-        .style(Style::default().fg(FG))
-        .alignment(Alignment::Left);
-    frame.render_widget(header, header_area);
+    let layout = render_app_layout(frame, area);
+    render_title(frame, layout.title, "Process action");
+    let list_area = layout.body;
 
     // Build list items from action names
     let selected_index = list_state.selected();
@@ -67,31 +43,19 @@ pub fn render_picker_frame(
         .map(|(i, action)| {
             let mut item = ListItem::new(action.name.clone());
             if Some(i) == hovered_index && Some(i) != selected_index {
-                item = item.style(Style::default().bg(HOVER_BG));
+                item = item.style(Style::default().fg(Color::White).bg(Color::DarkGray));
             }
             item
         })
         .collect();
 
     // Render list with title
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .title(" Process action ")
-                .borders(Borders::ALL),
-        )
-        .highlight_style(Style::default().bg(HIGHLIGHT_BG))
-        .highlight_symbol("> ")
-        .highlight_spacing(HighlightSpacing::Always);
+    let list =
+        List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
     frame.render_stateful_widget(list, list_area, list_state);
 
-    // Render help footer
-    let help_text = "↑/↓ select, ↵ confirm, esc/q cancel";
-    let help_paragraph = Paragraph::new(help_text)
-        .alignment(Alignment::Center)
-        .style(Style::default().fg(HELP_FG));
-    frame.render_widget(help_paragraph, footer_area);
+    render_footer(frame, layout.footer, "↑/↓ select, ↵ confirm, esc/q cancel");
 
     list_area
 }
@@ -104,8 +68,8 @@ pub enum PickerResult {
     Cancelled,
 }
 
-/// Interactive action picker for selecting a processing action.
-struct ActionPicker {
+/// Interactive process-action view for selecting a processing action.
+struct ProcessView {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     actions: Vec<ProcessAction>,
     list_state: ListState,
@@ -114,8 +78,8 @@ struct ActionPicker {
     list_area: Rect,
 }
 
-impl ActionPicker {
-    /// Creates a new action picker with the given actions.
+impl ProcessView {
+    /// Creates a new process-action view with the given actions.
     ///
     /// Sets up the terminal in raw mode with an alternate screen.
     /// The initial selection is set to the first item.
@@ -149,7 +113,7 @@ impl ActionPicker {
         self.terminal.draw(|frame| {
             let area = frame.area();
             computed_list_area =
-                render_picker_frame(frame, area, actions, list_state, hovered_index);
+                render_process_view(frame, area, actions, list_state, hovered_index);
         })?;
 
         self.list_area = computed_list_area;
@@ -206,9 +170,8 @@ impl ActionPicker {
                         self.list_state.select_next();
                     }
                     MouseEventKind::Moved => {
-                        let inner_top = self.list_area.y + 1; // top border
-                        let inner_bottom =
-                            self.list_area.y + self.list_area.height.saturating_sub(1); // bottom border
+                        let inner_top = self.list_area.y;
+                        let inner_bottom = self.list_area.y + self.list_area.height;
                         if mouse.row < inner_top || mouse.row >= inner_bottom {
                             self.hovered_index = None;
                         } else {
@@ -236,6 +199,9 @@ impl ActionPicker {
     fn handle_key(&mut self, key: KeyEvent) -> Option<PickerAction> {
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => Some(PickerAction::Exit),
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                Some(PickerAction::Exit)
+            }
             KeyCode::Up | KeyCode::Char('k') => {
                 self.list_state.select_previous();
                 None
@@ -264,7 +230,7 @@ enum PickerAction {
     Select(String),
 }
 
-impl Drop for ActionPicker {
+impl Drop for ProcessView {
     fn drop(&mut self) {
         let _ = self.cleanup();
     }
@@ -299,6 +265,6 @@ pub fn show_action_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
         return Ok(PickerResult::Selected(actions[0].id.clone()));
     }
 
-    let mut picker = ActionPicker::new(actions.to_vec())?;
-    picker.run()
+    let mut view = ProcessView::new(actions.to_vec())?;
+    view.run()
 }

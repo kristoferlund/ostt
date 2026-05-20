@@ -1,20 +1,13 @@
-//! Provider and model authentication.
-//!
-//! Unified authentication flow: select a provider/model combination and optionally enter an API key.
-//! Users can keep existing API keys by pressing Enter without entering anything.
+//! Provider credential authentication.
 
 use crate::config;
 use crate::transcription;
-use cliclack::note;
 use cliclack::outro;
-use cliclack::{intro, password, select};
+use cliclack::{confirm, intro, note, password, select};
 use console::style;
+use std::collections::HashSet;
 
-/// Handles provider + model selection and API key management.
-///
-/// Shows all available provider/model combinations for the user to choose from.
-/// If a provider already has an API key saved, the user can press Enter to keep it.
-/// Supports switching between models of the same provider without re-entering the API key.
+/// Handles cloud provider API key management.
 pub async fn handle_auth() -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Authentication ===");
 
@@ -24,48 +17,14 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
 
     intro(style(" auth ").on_white().black())?;
 
-    // Get all available provider/model combinations
-    let providers = transcription::TranscriptionProvider::all();
-    let mut provider_model_options: Vec<(
-        transcription::TranscriptionProvider,
-        transcription::TranscriptionModel,
-    )> = Vec::new();
-    let mut display_options: Vec<String> = Vec::new();
-
-    // Get the currently selected model from secrets (not from config file)
-    let maybe_current_model_id = config::get_selected_model().ok().flatten();
-
-    if let Some(current_model_id) = maybe_current_model_id {
-        note("current model", current_model_id)?;
+    let providers = cloud_providers();
+    if providers.is_empty() {
+        return Err(anyhow::anyhow!("No cloud providers available"));
     }
 
-    // Build list of all provider/model combinations
-    for provider in providers.iter() {
-        let models = transcription::TranscriptionModel::models_for_provider(provider);
-        for model in models {
-            display_options.push(format!("{} / {}", provider.name(), model.description()));
-            provider_model_options.push((provider.clone(), model));
-        }
-    }
-
-    if provider_model_options.is_empty() {
-        return Err(anyhow::anyhow!("No provider/model combinations available"));
-    }
-
-    let mut select_prompt = select("Select provider and model:");
-    for (i, option) in display_options.iter().enumerate() {
-        select_prompt = select_prompt.item(i, option, "");
-    }
-    let selected_idx: usize = select_prompt
-        .interact()
-        .map_err(|e| anyhow::anyhow!("Selection cancelled: {e}"))?;
-
-    let (selected_provider, selected_model) = &provider_model_options[selected_idx];
-
-    // Check if we already have an API key for this provider
+    let selected_provider = select_provider("Select provider:", &providers)?;
     let current_api_key = config::get_api_key(selected_provider.id()).ok().flatten();
 
-    // Prompt for API key with optional entry (keep current if just pressing Enter)
     let api_key = if current_api_key.is_some() {
         let api_key_prompt = format!(
             "Enter API key for {} (press Enter to keep current):",
@@ -82,7 +41,6 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
             .map_err(|e| anyhow::anyhow!("API key input cancelled: {e}"))?
     };
 
-    // If empty input and we have a current key, keep the current one
     let api_key_to_save = if api_key.is_empty() {
         if let Some(key) = current_api_key {
             key
@@ -93,21 +51,209 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
         api_key
     };
 
-    // Save the API key for this provider
     config::save_api_key(selected_provider.id(), &api_key_to_save)?;
 
-    // Save the selected model to secrets (not to config file)
-    config::save_selected_model(selected_provider.id(), selected_model.id())?;
-    // Note: save_selected_model ignores provider_id and stores only the model_id
-    // since only one model selection is active globally
-
-    outro("✅ Configuration saved.")?;
+    outro("Credential saved. Run `ostt model` to choose a transcription model.")?;
 
     tracing::info!(
-        "Authentication completed: provider={}, model={}",
-        selected_provider.id(),
-        selected_model.id()
+        "Authentication completed: provider={}",
+        selected_provider.id()
     );
 
     Ok(())
+}
+
+pub async fn handle_logout() -> Result<(), anyhow::Error> {
+    tracing::info!("=== ostt Logout ===");
+
+    ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
+
+    println!("\n ┏┓┏╋╋ \n ┗┛┛┗┗ \n");
+
+    intro(style(" auth logout ").on_white().black())?;
+
+    let authorized = config::get_authorized_providers()?;
+    let providers = authorized_cloud_providers(&authorized);
+    if providers.is_empty() {
+        note(
+            "No cloud credentials found",
+            "Run `ostt auth login` to add credentials.",
+        )?;
+        return Ok(());
+    }
+
+    let selected_provider = select_provider("Select provider to log out:", &providers)?;
+    let confirmed = confirm(format!(
+        "Remove stored credential for {}?",
+        selected_provider.name()
+    ))
+    .interact()
+    .map_err(|e| anyhow::anyhow!("Confirmation cancelled: {e}"))?;
+
+    if !confirmed {
+        outro("Logout cancelled.")?;
+        return Ok(());
+    }
+
+    config::clear_api_key(selected_provider.id())?;
+    let cleared_selection = clear_selected_model_if_provider_matches(selected_provider.id())?;
+
+    if cleared_selection {
+        outro("Credential removed. Active model cleared; run `ostt model` to choose a model.")?;
+    } else {
+        outro("Credential removed.")?;
+    }
+
+    tracing::info!("Logged out provider={}", selected_provider.id());
+
+    Ok(())
+}
+
+fn select_provider(
+    prompt: &str,
+    providers: &[transcription::TranscriptionProvider],
+) -> Result<transcription::TranscriptionProvider, anyhow::Error> {
+    let mut select_prompt = select(prompt);
+    for (i, provider) in providers.iter().enumerate() {
+        select_prompt = select_prompt.item(i, provider.name(), "");
+    }
+    let selected_idx: usize = select_prompt
+        .interact()
+        .map_err(|e| anyhow::anyhow!("Selection cancelled: {e}"))?;
+
+    Ok(providers[selected_idx].clone())
+}
+
+fn cloud_providers() -> Vec<transcription::TranscriptionProvider> {
+    transcription::TranscriptionProvider::all()
+        .iter()
+        .filter(|provider| **provider != transcription::TranscriptionProvider::Local)
+        .cloned()
+        .collect()
+}
+
+fn authorized_cloud_providers(
+    authorized_provider_ids: &[String],
+) -> Vec<transcription::TranscriptionProvider> {
+    let authorized: HashSet<&str> = authorized_provider_ids.iter().map(String::as_str).collect();
+    cloud_providers()
+        .into_iter()
+        .filter(|provider| authorized.contains(provider.id()))
+        .collect()
+}
+
+fn clear_selected_model_if_provider_matches(provider_id: &str) -> anyhow::Result<bool> {
+    if config::get_selected_model_entry()?
+        .is_some_and(|selected| selected.provider_id == provider_id)
+    {
+        config::clear_selected_model()?;
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    struct TestHome {
+        previous_home: Option<std::ffi::OsString>,
+        dir: std::path::PathBuf,
+    }
+
+    impl TestHome {
+        fn new() -> Self {
+            let previous_home = std::env::var_os("HOME");
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time")
+                .as_nanos();
+            let dir = std::env::temp_dir().join(format!("ostt-auth-test-{unique}"));
+            fs::create_dir_all(&dir).expect("create temp home");
+            std::env::set_var("HOME", &dir);
+
+            Self { previous_home, dir }
+        }
+    }
+
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            if let Some(previous_home) = self.previous_home.take() {
+                std::env::set_var("HOME", previous_home);
+            } else {
+                std::env::remove_var("HOME");
+            }
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn login_provider_options_exclude_local() {
+        let providers = cloud_providers();
+
+        assert!(!providers.contains(&transcription::TranscriptionProvider::Local));
+        assert!(providers.contains(&transcription::TranscriptionProvider::OpenAI));
+    }
+
+    #[test]
+    fn logout_provider_options_include_only_authorized_cloud_providers() {
+        let authorized = vec![
+            "local".to_string(),
+            "openai".to_string(),
+            "unknown".to_string(),
+        ];
+
+        let providers = authorized_cloud_providers(&authorized);
+
+        assert_eq!(
+            providers,
+            vec![transcription::TranscriptionProvider::OpenAI]
+        );
+    }
+
+    #[test]
+    fn saving_api_key_preserves_unrelated_credentials() {
+        let _guard = test_env_lock();
+        let _home = TestHome::new();
+
+        config::save_api_key("openai", "old-openai").expect("save openai");
+        config::save_api_key("groq", "groq-key").expect("save groq");
+        config::save_api_key("openai", "new-openai").expect("update openai");
+
+        assert_eq!(
+            config::get_api_key("openai").expect("get openai"),
+            Some("new-openai".to_string())
+        );
+        assert_eq!(
+            config::get_api_key("groq").expect("get groq"),
+            Some("groq-key".to_string())
+        );
+    }
+
+    #[test]
+    fn logout_clears_selected_model_only_for_matching_provider() {
+        let _guard = test_env_lock();
+        let _home = TestHome::new();
+
+        config::save_selected_model("openai", "whisper").expect("save selected model");
+
+        assert!(!clear_selected_model_if_provider_matches("groq").expect("clear groq"));
+        assert!(config::get_selected_model_entry()
+            .expect("load selected model")
+            .is_some());
+
+        assert!(clear_selected_model_if_provider_matches("openai").expect("clear openai"));
+        assert!(config::get_selected_model_entry()
+            .expect("load selected model")
+            .is_none());
+    }
 }

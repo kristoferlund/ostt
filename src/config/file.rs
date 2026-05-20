@@ -5,8 +5,13 @@
 
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+fn current_config_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
 
 /// Visualization type for recording display.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -54,6 +59,14 @@ pub struct AudioConfig {
 
 fn default_output_format() -> String {
     "mp3 -ab 16k -ar 12000".to_string()
+}
+
+const LOCAL_TRANSCRIPTION_OUTPUT_FORMAT: &str = "pcm_s16le -ar 16000";
+const LOCAL_TRANSCRIPTION_SAMPLE_RATE: u32 = 16000;
+
+pub fn is_local_transcription_audio_compatible(audio: &AudioConfig) -> bool {
+    audio.sample_rate == LOCAL_TRANSCRIPTION_SAMPLE_RATE
+        && audio.output_format == LOCAL_TRANSCRIPTION_OUTPUT_FORMAT
 }
 
 fn default_peak_volume_threshold() -> u8 {
@@ -199,6 +212,189 @@ pub struct ElevenLabsConfig {
     pub language_code: Option<String>,
 }
 
+/// Local transcription provider configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalTranscriptionConfig {
+    /// Language hint: "auto" or ISO code (e.g. "sv", "en")
+    pub language: String,
+    /// Suppress timestamp output
+    pub no_timestamps: bool,
+    /// Suppress text context from previous segments
+    pub no_context: bool,
+    /// Sampling temperature (0.0 = greedy/deterministic)
+    pub temperature: f32,
+    /// Entropy threshold for fallback (2.4 = default)
+    pub entropy_thold: f32,
+    /// No-speech probability threshold (0.6 = default)
+    pub no_speech_thold: f32,
+    /// Optional override for model storage directory
+    pub models_path: Option<String>,
+    /// Auto-start a local daemon and keep the model warm between transcriptions
+    pub daemon: bool,
+    /// Idle timeout before the daemon unloads the model and exits
+    pub daemon_idle_timeout_secs: u64,
+    /// Per-model overrides keyed by local model ID.
+    #[serde(default)]
+    pub models: HashMap<String, LocalModelOverride>,
+}
+
+/// Optional overrides for one local model.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct LocalModelOverride {
+    pub language: Option<String>,
+    pub no_timestamps: Option<bool>,
+    pub no_context: Option<bool>,
+    pub temperature: Option<f32>,
+    pub entropy_thold: Option<f32>,
+    pub no_speech_thold: Option<f32>,
+    pub daemon: Option<bool>,
+    pub daemon_idle_timeout_secs: Option<u64>,
+}
+
+/// Local transcription settings after applying any matching model override.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EffectiveLocalConfig {
+    pub language: String,
+    pub no_timestamps: bool,
+    pub no_context: bool,
+    pub temperature: f32,
+    pub entropy_thold: f32,
+    pub no_speech_thold: f32,
+    pub daemon: bool,
+    pub daemon_idle_timeout_secs: u64,
+}
+
+impl Default for LocalTranscriptionConfig {
+    fn default() -> Self {
+        Self {
+            language: "auto".to_string(),
+            no_timestamps: true,
+            no_context: true,
+            temperature: 0.0,
+            entropy_thold: 2.4,
+            no_speech_thold: 0.6,
+            models_path: None,
+            daemon: true,
+            daemon_idle_timeout_secs: 300,
+            models: HashMap::new(),
+        }
+    }
+}
+
+impl LocalTranscriptionConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_local_values(
+            self.temperature,
+            self.entropy_thold,
+            self.no_speech_thold,
+            self.daemon_idle_timeout_secs,
+        )?;
+
+        if let Some(path) = &self.models_path {
+            if !Path::new(path).exists() {
+                anyhow::bail!("models_path '{}' does not exist", path);
+            }
+        }
+
+        for (model_id, override_config) in &self.models {
+            if !is_safe_local_model_id(model_id) {
+                anyhow::bail!(
+                    "local model override key '{}' is not a safe model ID",
+                    model_id
+                );
+            }
+            override_config.validate()?;
+        }
+
+        Ok(())
+    }
+
+    pub fn effective_for_model(&self, model_id: &str) -> EffectiveLocalConfig {
+        let override_config = self.models.get(model_id);
+        EffectiveLocalConfig {
+            language: override_config
+                .and_then(|model| model.language.clone())
+                .unwrap_or_else(|| self.language.clone()),
+            no_timestamps: override_config
+                .and_then(|model| model.no_timestamps)
+                .unwrap_or(self.no_timestamps),
+            no_context: override_config
+                .and_then(|model| model.no_context)
+                .unwrap_or(self.no_context),
+            temperature: override_config
+                .and_then(|model| model.temperature)
+                .unwrap_or(self.temperature),
+            entropy_thold: override_config
+                .and_then(|model| model.entropy_thold)
+                .unwrap_or(self.entropy_thold),
+            no_speech_thold: override_config
+                .and_then(|model| model.no_speech_thold)
+                .unwrap_or(self.no_speech_thold),
+            daemon: override_config
+                .and_then(|model| model.daemon)
+                .unwrap_or(self.daemon),
+            daemon_idle_timeout_secs: override_config
+                .and_then(|model| model.daemon_idle_timeout_secs)
+                .unwrap_or(self.daemon_idle_timeout_secs),
+        }
+    }
+}
+
+impl LocalModelOverride {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        if let Some(temperature) = self.temperature {
+            if !(0.0..=1.0).contains(&temperature) {
+                anyhow::bail!("temperature must be between 0.0 and 1.0");
+            }
+        }
+        if let Some(entropy_thold) = self.entropy_thold {
+            if entropy_thold < 0.0 {
+                anyhow::bail!("entropy_thold must be >= 0.0");
+            }
+        }
+        if let Some(no_speech_thold) = self.no_speech_thold {
+            if !(0.0..=1.0).contains(&no_speech_thold) {
+                anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
+            }
+        }
+        if let Some(daemon_idle_timeout_secs) = self.daemon_idle_timeout_secs {
+            if daemon_idle_timeout_secs < 30 {
+                anyhow::bail!("daemon_idle_timeout_secs must be at least 30 seconds");
+            }
+        }
+        Ok(())
+    }
+}
+
+fn is_safe_local_model_id(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .bytes()
+            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+}
+
+fn validate_local_values(
+    temperature: f32,
+    entropy_thold: f32,
+    no_speech_thold: f32,
+    daemon_idle_timeout_secs: u64,
+) -> anyhow::Result<()> {
+    if !(0.0..=1.0).contains(&temperature) {
+        anyhow::bail!("temperature must be between 0.0 and 1.0");
+    }
+    if entropy_thold < 0.0 {
+        anyhow::bail!("entropy_thold must be >= 0.0");
+    }
+    if !(0.0..=1.0).contains(&no_speech_thold) {
+        anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
+    }
+    if daemon_idle_timeout_secs < 30 {
+        anyhow::bail!("daemon_idle_timeout_secs must be at least 30 seconds");
+    }
+    Ok(())
+}
+
 /// Provider-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProviderConfig {
@@ -221,6 +417,8 @@ pub struct ProvidersConfig {
     pub assemblyai: AssemblyAIConfig,
     #[serde(default)]
     pub elevenlabs: ElevenLabsConfig,
+    #[serde(default)]
+    pub local: LocalTranscriptionConfig,
 }
 
 /// Popup window configuration for the `launch` subcommand.
@@ -591,10 +789,23 @@ impl ProcessConfig {
     }
 }
 
+/// Active transcription provider/model selection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptionSelectionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 /// Complete application configuration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OsttConfig {
+    #[serde(default = "current_config_version")]
+    pub config_version: String,
     pub audio: AudioConfig,
+    #[serde(default)]
+    pub transcription: TranscriptionSelectionConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
     #[serde(default)]
@@ -614,6 +825,7 @@ impl OsttConfig {
         let config_path = get_config_path()?;
         let config_content = fs::read_to_string(&config_path)?;
         let config: OsttConfig = toml::from_str(&config_content)?;
+        config.providers.local.validate()?;
         for action in &config.process.actions {
             action.validate()?;
         }
@@ -637,6 +849,7 @@ impl OsttConfig {
     #[allow(dead_code)]
     pub(crate) fn default() -> Self {
         OsttConfig {
+            config_version: current_config_version(),
             audio: AudioConfig {
                 device: "default".to_string(),
                 sample_rate: 16000,
@@ -645,6 +858,7 @@ impl OsttConfig {
                 output_format: default_output_format(),
                 visualization: VisualizationType::default(),
             },
+            transcription: TranscriptionSelectionConfig::default(),
             providers: ProvidersConfig::default(),
             process: ProcessConfig::default(),
             popup: PopupConfig::default(),
@@ -659,7 +873,7 @@ impl OsttConfig {
 /// # Errors
 /// - If the config directory cannot be determined
 /// - If the config directory cannot be created
-fn get_config_path() -> Result<PathBuf, std::io::Error> {
+pub(crate) fn get_config_path() -> Result<PathBuf, std::io::Error> {
     let config_dir = dirs::home_dir().ok_or_else(|| {
         std::io::Error::new(
             std::io::ErrorKind::NotFound,
@@ -682,6 +896,78 @@ pub fn save_config(config: &OsttConfig) -> anyhow::Result<()> {
     config.save()
 }
 
+pub fn ensure_local_transcription_audio_config() -> anyhow::Result<()> {
+    let config_path = get_config_path()?;
+    let content = fs::read_to_string(&config_path)?;
+    let updated = ensure_local_transcription_audio_config_content(&content);
+    fs::write(config_path, updated)?;
+    Ok(())
+}
+
+fn ensure_local_transcription_audio_config_content(content: &str) -> String {
+    let mut output = Vec::new();
+    let mut in_audio = false;
+    let mut saw_audio = false;
+    let mut wrote_sample_rate = false;
+    let mut wrote_output_format = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[audio]" {
+            in_audio = true;
+            saw_audio = true;
+            wrote_sample_rate = false;
+            wrote_output_format = false;
+            output.push(line.to_string());
+            continue;
+        }
+
+        if in_audio && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if !wrote_sample_rate {
+                output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+            }
+            if !wrote_output_format {
+                output.push(format!(
+                    "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+                ));
+            }
+            in_audio = false;
+        }
+
+        if in_audio && trimmed.starts_with("sample_rate") {
+            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+            wrote_sample_rate = true;
+        } else if in_audio && trimmed.starts_with("output_format") {
+            output.push(format!(
+                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+            ));
+            wrote_output_format = true;
+        } else {
+            output.push(line.to_string());
+        }
+    }
+
+    if in_audio {
+        if !wrote_sample_rate {
+            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+        }
+        if !wrote_output_format {
+            output.push(format!(
+                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+            ));
+        }
+    } else if !saw_audio {
+        output.push(String::new());
+        output.push("[audio]".to_string());
+        output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+        output.push(format!(
+            "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+        ));
+    }
+
+    format!("{}\n", output.join("\n").trim())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -700,11 +986,71 @@ mod tests {
         toml::from_str(toml_str)
     }
 
+    #[test]
+    fn local_transcription_audio_requires_wav_16khz() {
+        let mut audio = AudioConfig {
+            device: "default".to_string(),
+            sample_rate: 16000,
+            peak_volume_threshold: default_peak_volume_threshold(),
+            reference_level_db: default_reference_level_db(),
+            output_format: "pcm_s16le -ar 16000".to_string(),
+            visualization: VisualizationType::default(),
+        };
+
+        assert!(is_local_transcription_audio_compatible(&audio));
+
+        audio.output_format = default_output_format();
+        assert!(!is_local_transcription_audio_compatible(&audio));
+
+        audio.output_format = "pcm_s16le -ar 16000".to_string();
+        audio.sample_rate = 12000;
+        assert!(!is_local_transcription_audio_compatible(&audio));
+    }
+
+    #[test]
+    fn local_transcription_audio_update_preserves_other_config() {
+        let content = r#"# ostt
+[audio]
+device = "default"
+sample_rate = 12000
+peak_volume_threshold = 90
+output_format = "mp3 -ab 16k -ar 12000"
+visualization = "spectrum"
+
+[transcription]
+provider = "openai"
+model = "whisper"
+"#;
+
+        let updated = ensure_local_transcription_audio_config_content(content);
+
+        assert!(updated.contains("device = \"default\""));
+        assert!(updated.contains("sample_rate = 16000"));
+        assert!(updated.contains("peak_volume_threshold = 90"));
+        assert!(updated.contains("output_format = \"pcm_s16le -ar 16000\""));
+        assert!(updated.contains("[transcription]"));
+        assert!(updated.contains("provider = \"openai\""));
+    }
+
     fn validate_process_config(config: &ProcessConfig) -> Result<(), Box<dyn std::error::Error>> {
         for action in &config.actions {
             action.validate()?;
         }
         Ok(())
+    }
+
+    fn validate_ostt_config(config: &OsttConfig) -> anyhow::Result<()> {
+        config.providers.local.validate()?;
+        for action in &config.process.actions {
+            action
+                .validate()
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn parse_ostt_config(toml_str: &str) -> Result<OsttConfig, toml::de::Error> {
+        toml::from_str(toml_str)
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -798,6 +1144,288 @@ mod tests {
         "#;
         let config: OsttConfig = toml::from_str(toml_str).unwrap();
         assert!(config.process.actions.is_empty());
+    }
+
+    #[test]
+    fn missing_local_provider_defaults_to_standard_local_params() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let local = &config.providers.local;
+        assert_eq!(local.language, "auto");
+        assert!(local.no_timestamps);
+        assert!(local.no_context);
+        assert_eq!(local.temperature, 0.0);
+        assert_eq!(local.entropy_thold, 2.4);
+        assert_eq!(local.no_speech_thold, 0.6);
+        assert_eq!(local.models_path, None);
+        assert!(local.daemon);
+        assert_eq!(local.daemon_idle_timeout_secs, 300);
+    }
+
+    #[test]
+    fn full_local_provider_deserializes() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            language = "sv"
+            no_timestamps = false
+            no_context = false
+            temperature = 0.2
+            entropy_thold = 3.0
+            no_speech_thold = 0.4
+            models_path = "/tmp/ostt-models"
+            daemon = false
+            daemon_idle_timeout_secs = 600
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let local = &config.providers.local;
+        assert_eq!(local.language, "sv");
+        assert!(!local.no_timestamps);
+        assert!(!local.no_context);
+        assert_eq!(local.temperature, 0.2);
+        assert_eq!(local.entropy_thold, 3.0);
+        assert_eq!(local.no_speech_thold, 0.4);
+        assert_eq!(local.models_path.as_deref(), Some("/tmp/ostt-models"));
+        assert!(!local.daemon);
+        assert_eq!(local.daemon_idle_timeout_secs, 600);
+    }
+
+    #[test]
+    fn local_models_path_is_optional() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            language = "en"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        assert_eq!(config.providers.local.models_path, None);
+    }
+
+    #[test]
+    fn local_daemon_and_language_defaults_apply() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            no_context = false
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let local = &config.providers.local;
+        assert_eq!(local.language, "auto");
+        assert!(local.daemon);
+        assert_eq!(local.daemon_idle_timeout_secs, 300);
+    }
+
+    #[test]
+    fn local_per_model_overrides_deserialize() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local.models."kb-whisper-large"]
+            language = "sv"
+            no_context = false
+            temperature = 0.1
+            daemon_idle_timeout_secs = 900
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let override_config = config
+            .providers
+            .local
+            .models
+            .get("kb-whisper-large")
+            .unwrap();
+        assert_eq!(override_config.language.as_deref(), Some("sv"));
+        assert_eq!(override_config.no_context, Some(false));
+        assert_eq!(override_config.temperature, Some(0.1));
+        assert_eq!(override_config.daemon_idle_timeout_secs, Some(900));
+        assert_eq!(override_config.no_timestamps, None);
+    }
+
+    #[test]
+    fn effective_local_config_merges_global_and_model_override() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            language = "en"
+            no_timestamps = true
+            no_context = true
+            temperature = 0.2
+            entropy_thold = 2.8
+            no_speech_thold = 0.5
+            daemon = true
+            daemon_idle_timeout_secs = 300
+
+            [providers.local.models."turbo"]
+            language = "auto"
+            no_context = false
+            daemon_idle_timeout_secs = 120
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let effective = config.providers.local.effective_for_model("turbo");
+
+        assert_eq!(effective.language, "auto");
+        assert!(effective.no_timestamps);
+        assert!(!effective.no_context);
+        assert_eq!(effective.temperature, 0.2);
+        assert_eq!(effective.entropy_thold, 2.8);
+        assert_eq!(effective.no_speech_thold, 0.5);
+        assert!(effective.daemon);
+        assert_eq!(effective.daemon_idle_timeout_secs, 120);
+    }
+
+    #[test]
+    fn effective_local_config_uses_global_values_without_override() {
+        let local = LocalTranscriptionConfig::default();
+        let effective = local.effective_for_model("missing");
+
+        assert_eq!(effective.language, "auto");
+        assert!(effective.no_timestamps);
+        assert!(effective.no_context);
+        assert_eq!(effective.temperature, 0.0);
+        assert_eq!(effective.entropy_thold, 2.4);
+        assert_eq!(effective.no_speech_thold, 0.6);
+        assert!(effective.daemon);
+        assert_eq!(effective.daemon_idle_timeout_secs, 300);
+    }
+
+    #[test]
+    fn local_validation_rejects_invalid_global_values() {
+        let cases = [
+            ("temperature = 1.1", "temperature"),
+            ("temperature = -0.1", "temperature"),
+            ("entropy_thold = -0.1", "entropy_thold"),
+            ("no_speech_thold = 1.1", "no_speech_thold"),
+            ("daemon_idle_timeout_secs = 29", "daemon_idle_timeout_secs"),
+        ];
+
+        for (local_setting, expected_error) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+                    sample_rate = 16000
+
+                    [providers.local]
+                    {local_setting}
+                "#
+            );
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(
+                err.contains(expected_error),
+                "expected '{err}' to contain '{expected_error}'"
+            );
+        }
+    }
+
+    #[test]
+    fn local_validation_accepts_valid_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            temperature = 1.0
+            entropy_thold = 0.0
+            no_speech_thold = 0.0
+            daemon_idle_timeout_secs = 30
+
+            [providers.local.models."kb-whisper.large_v3"]
+            temperature = 0.5
+            entropy_thold = 1.5
+            no_speech_thold = 1.0
+            daemon_idle_timeout_secs = 31
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn local_validation_rejects_missing_models_path() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            models_path = "/definitely/missing/ostt/models/path"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("models_path"));
+    }
+
+    #[test]
+    fn local_validation_rejects_unsafe_override_keys() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local.models."Model With Spaces"]
+            language = "en"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("safe model ID"));
+    }
+
+    #[test]
+    fn local_validation_rejects_invalid_override_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local.models."turbo"]
+            no_speech_thold = -0.1
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("no_speech_thold"));
+    }
+
+    #[test]
+    fn local_config_validation_does_not_validate_active_model_id() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            language = "auto"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
     }
 
     #[test]

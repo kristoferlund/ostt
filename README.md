@@ -36,7 +36,8 @@ OSTT is built for people who treat the terminal as a normal place for voice inpu
 ## Features
 
 - **Linux-first voice input** - Global hotkey setup for Omarchy/Hyprland, GNOME, KDE, and other Linux desktops, with macOS support too.
-- **Provider choice** - Bring your own API key and switch between OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, and ElevenLabs.
+- **Provider choice** - Bring your own API key and switch between OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, and local Whisper-compatible models.
+- **Local transcription models** - Download curated local models or add custom Hugging Face/direct model files for offline transcription.
 - **Terminal-native workflow** - Use stdout, clipboard, files, aliases, shell completions, logs, and pipes.
 - **Scriptable post-processing** - Transform transcripts with AI prompts or bash commands using `ostt -p` and `ostt process`.
 - **Retry without re-recording** - Save recordings locally, then re-transcribe them with a different provider or model.
@@ -73,6 +74,7 @@ If you prefer platform package managers, see the docs for Homebrew, AUR, `.deb`,
 
 ```bash
 ostt auth           # Choose provider/model and save API key
+ostt model          # Choose cloud or local transcription model
 ostt                # Record, transcribe, print to stdout
 ostt -c             # Record, transcribe, copy to clipboard
 ostt launch -c      # Popup workflow for global hotkeys
@@ -105,6 +107,7 @@ ostt launch -c               # Open popup recorder
 ostt transcribe file.mp3     # Transcribe existing audio
 ostt retry 2 -c              # Re-transcribe recording #2 and copy
 ostt replay                  # Play most recent recording
+ostt model                   # Choose cloud or local transcription model
 ostt history                 # Browse transcription history
 ostt keywords                # Manage transcription keywords
 ostt config                  # Open config file
@@ -123,6 +126,8 @@ Common aliases: `r` for `record`, `t` for `transcribe`, `l` for `launch`, `p` fo
 OSTT is bring-your-own-API-key and currently supports OpenAI, Deepgram, DeepInfra, Groq, AssemblyAI, Berget, and ElevenLabs transcription models.
 
 Run `ostt auth` to select your provider/model and save credentials securely.
+
+Run `ostt model` to switch between authenticated cloud models and local models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs.
 
 ## Platform Setup
 

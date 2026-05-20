@@ -188,14 +188,14 @@ pub async fn handle_record(
     }
 
     let transcription_text = if should_transcribe {
-        let selected_model_id = config::get_selected_model().ok().flatten();
+        let selected_model = config::get_selected_model_entry().ok().flatten();
 
-        if let Some(model_id) = selected_model_id {
+        if let Some(selected_model) = selected_model {
             let filepath_str = filepath.to_string_lossy().to_string();
             match transcribe_recording_with_animation(
                 &mut tui,
                 &config_data,
-                &model_id,
+                &selected_model,
                 &filepath_str,
             )
             .await
@@ -501,54 +501,67 @@ pub async fn handle_record(
 async fn transcribe_recording_with_animation(
     tui: &mut OsttTui,
     config_data: &config::OsttConfig,
-    model_id: &str,
+    selected_model: &config::SelectedModel,
     audio_filename: &str,
 ) -> anyhow::Result<String> {
     use crate::transcription;
 
-    let model = match transcription::TranscriptionModel::from_id(model_id) {
-        Some(m) => m,
-        None => {
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&format!("Error: Unknown model '{model_id}'"))?;
-            error_screen.cleanup()?;
-            return Err(anyhow::anyhow!("Unknown model: {model_id}"));
-        }
-    };
+    let model_id = selected_model.model_id.as_str();
+    let transcription_config = if selected_model.provider_id == "local" {
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
+            .join("ostt");
+        let keywords_manager = KeywordsManager::new(&config_dir)?;
+        let keywords = keywords_manager.load_keywords()?;
+        transcription::TranscriptionConfig::new_local(
+            selected_model.model_id.clone(),
+            keywords,
+            config_data.providers.clone(),
+        )
+    } else {
+        let model = match transcription::TranscriptionModel::from_id(model_id) {
+            Some(m) => m,
+            None => {
+                tui.cleanup().ok();
+                let mut error_screen = ErrorScreen::new()?;
+                error_screen.show_error(&format!("Error: Unknown model '{model_id}'"))?;
+                error_screen.cleanup()?;
+                return Err(anyhow::anyhow!("Unknown model: {model_id}"));
+            }
+        };
 
-    let provider = model.provider();
+        let provider = model.provider();
 
-    let api_key = match config::get_api_key(provider.id())? {
-        Some(key) => key,
-        None => {
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&format!(
-                "Error: No API key for {}. Please run 'ostt auth'",
-                provider.name()
-            ))?;
-            error_screen.cleanup()?;
-            return Err(anyhow::anyhow!(
+        let api_key = match config::get_api_key(provider.id())? {
+            Some(key) => key,
+            None => {
+                tui.cleanup().ok();
+                let mut error_screen = ErrorScreen::new()?;
+                error_screen.show_error(&format!(
+                    "Error: No API key for {}. Please run 'ostt auth'",
+                    provider.name()
+                ))?;
+                error_screen.cleanup()?;
+                return Err(anyhow::anyhow!(
                 "No API key found for provider '{}'. Please run 'ostt auth' to authorize this provider.",
                 provider.id()
             ));
-        }
+            }
+        };
+
+        let config_dir = dirs::config_dir()
+            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
+            .join("ostt");
+        let keywords_manager = KeywordsManager::new(&config_dir)?;
+        let keywords = keywords_manager.load_keywords()?;
+
+        transcription::TranscriptionConfig::new(
+            model,
+            api_key,
+            keywords,
+            config_data.providers.clone(),
+        )
     };
-
-    // Load keywords
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
-        .join("ostt");
-    let keywords_manager = KeywordsManager::new(&config_dir)?;
-    let keywords = keywords_manager.load_keywords()?;
-
-    let transcription_config = transcription::TranscriptionConfig::new(
-        model,
-        api_key,
-        keywords,
-        config_data.providers.clone(),
-    );
 
     tracing::debug!(
         "Starting transcription with model '{}' for file '{}'",

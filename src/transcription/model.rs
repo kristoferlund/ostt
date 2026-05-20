@@ -89,6 +89,11 @@ impl TranscriptionModel {
 
     /// Returns a human-readable description of the model
     pub fn description(&self) -> &'static str {
+        self.name()
+    }
+
+    /// Returns the display name for this model.
+    pub fn name(&self) -> &'static str {
         match self {
             TranscriptionModel::Gpt4oTranscribe => "GPT-4o Transcribe (latest, best accuracy)",
             TranscriptionModel::Gpt4oMiniTranscribe => "GPT-4o Mini Transcribe (faster, lighter)",
@@ -105,6 +110,53 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperLargeV3 => "Whisper Large V3 (general-purpose)",
             TranscriptionModel::ElevenLabsScribeV2 => "Scribe v2 (highest accuracy, 99 languages)",
             TranscriptionModel::ElevenLabsScribeV1 => "Scribe v1 (previous generation)",
+        }
+    }
+
+    /// Returns a longer model description for information screens.
+    pub fn detailed_description(&self) -> &'static str {
+        match self {
+            TranscriptionModel::Gpt4oTranscribe => "OpenAI's higher-quality speech-to-text model for transcribing audio in the source language. Supports prompting for domain terms, names, and preferred writing style.",
+            TranscriptionModel::Gpt4oMiniTranscribe => "OpenAI's smaller GPT-4o transcription model, intended for faster and lower-cost speech-to-text while retaining support for prompts and plain text or JSON output.",
+            TranscriptionModel::Whisper => "OpenAI's hosted Whisper model. Supports transcription in the source language, translation to English, verbose JSON, SRT/VTT output, and segment or word timestamps.",
+            TranscriptionModel::DeepgramNova3 => "Deepgram's highest-performing general-purpose ASR model for batch or streaming use cases including meetings, event captioning, multi-speaker audio, noisy audio, far-field audio, and multilingual transcription.",
+            TranscriptionModel::DeepgramNova2 => "Deepgram's previous-generation Nova model. Useful when a language or feature is better covered by Nova 2, including filler word identification and broad multilingual speech recognition.",
+            TranscriptionModel::DeepInfraWhisperLargeV3 => "OpenAI Whisper Large V3 hosted through DeepInfra. A general-purpose multilingual Whisper model suited for high-accuracy transcription and translation workloads.",
+            TranscriptionModel::DeepInfraWhisperBase => "OpenAI Whisper Base hosted through DeepInfra. A smaller Whisper model option for lighter and faster multilingual transcription workloads.",
+            TranscriptionModel::GroqWhisperLargeV3 => "Groq-hosted Whisper Large V3 for error-sensitive multilingual transcription and translation. Groq documents this option as the higher-accuracy choice among its Whisper models.",
+            TranscriptionModel::GroqWhisperLargeV3Turbo => "Groq-hosted Whisper Large V3 Turbo, a fine-tuned and pruned Large V3 variant designed for fast multilingual transcription with strong price/performance tradeoffs.",
+            TranscriptionModel::AssemblyAIUniversal3Pro => "AssemblyAI's Universal-3 Pro speech-to-text model for high-accuracy transcription and audio understanding in cloud workflows.",
+            TranscriptionModel::BergetWhisperKBLarge => "KBLab's Swedish-optimized Whisper Large model from the National Library of Sweden, trained on more than 50,000 hours of Swedish speech. KBLab reports substantially lower Swedish WER than OpenAI Whisper Large V3 across FLEURS, CommonVoice, and NST evaluations.",
+            TranscriptionModel::BergetWhisperNBLarge => "NbAiLab's Norwegian NB-Whisper Large model from the National Library of Norway. It is trained on about 66,000 hours of speech and targets Norwegian ASR, including Bokmal, Nynorsk, English, and varied regional Norwegian speech.",
+            TranscriptionModel::BergetWhisperLargeV3 => "General-purpose OpenAI Whisper Large V3 hosted through Berget for multilingual transcription and translation when no Swedish- or Norwegian-specialized model is preferred.",
+            TranscriptionModel::ElevenLabsScribeV2 => "ElevenLabs' latest Scribe speech-to-text model for high-accuracy transcription with broad multilingual support, including support for many languages beyond English.",
+            TranscriptionModel::ElevenLabsScribeV1 => "ElevenLabs' previous-generation Scribe speech-to-text model for multilingual transcription workloads.",
+        }
+    }
+
+    /// Returns language coverage information for this model.
+    pub fn languages(&self) -> &'static [&'static str] {
+        match self {
+            TranscriptionModel::Gpt4oTranscribe | TranscriptionModel::Gpt4oMiniTranscribe => {
+                &["Multilingual"]
+            }
+            TranscriptionModel::Whisper => &["Multilingual", "translation to English"],
+            TranscriptionModel::DeepgramNova3 | TranscriptionModel::DeepgramNova2 => {
+                &["Multilingual", "Swedish", "Norwegian", "English"]
+            }
+            TranscriptionModel::BergetWhisperKBLarge => &["Swedish"],
+            TranscriptionModel::BergetWhisperNBLarge => {
+                &["Norwegian", "Bokmal", "Nynorsk", "English"]
+            }
+            TranscriptionModel::ElevenLabsScribeV2 | TranscriptionModel::ElevenLabsScribeV1 => {
+                &["Multilingual", "99 languages"]
+            }
+            TranscriptionModel::DeepInfraWhisperLargeV3
+            | TranscriptionModel::DeepInfraWhisperBase
+            | TranscriptionModel::GroqWhisperLargeV3
+            | TranscriptionModel::GroqWhisperLargeV3Turbo
+            | TranscriptionModel::AssemblyAIUniversal3Pro
+            | TranscriptionModel::BergetWhisperLargeV3 => &["Multilingual"],
         }
     }
 
@@ -211,5 +263,62 @@ impl TranscriptionModel {
             .filter(|m| m.provider() == *provider)
             .cloned()
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn all_models_have_complete_metadata() {
+        for model in TranscriptionModel::all() {
+            assert!(!model.id().trim().is_empty(), "missing id for {model:?}");
+            assert!(
+                TranscriptionModel::from_id(model.id()).is_some(),
+                "id is not parseable for {model:?}"
+            );
+            assert!(
+                TranscriptionModel::models_for_provider(&model.provider()).contains(model),
+                "provider mapping omits {model:?}"
+            );
+            assert!(
+                !model.name().trim().is_empty(),
+                "missing name for {model:?}"
+            );
+            assert!(
+                !model.detailed_description().trim().is_empty(),
+                "missing detailed description for {model:?}"
+            );
+            assert!(
+                !model.languages().is_empty(),
+                "missing languages for {model:?}"
+            );
+            assert!(
+                model
+                    .languages()
+                    .iter()
+                    .all(|language| !language.trim().is_empty()),
+                "blank language entry for {model:?}"
+            );
+            assert!(
+                !model.endpoint().trim().is_empty(),
+                "missing endpoint for {model:?}"
+            );
+            assert!(
+                !model.api_model_name().trim().is_empty(),
+                "missing API model name for {model:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn all_models_are_listed_once() {
+        let mut ids = HashSet::new();
+        for model in TranscriptionModel::all() {
+            assert!(ids.insert(model.id()), "duplicate model id: {}", model.id());
+        }
+        assert_eq!(ids.len(), 15, "update this count when adding a model");
     }
 }

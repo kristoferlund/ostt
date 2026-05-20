@@ -86,8 +86,8 @@ pub async fn handle_process(
         (a, false)
     } else {
         // Show action picker
-        match process::picker::show_action_picker(&config_data.process.actions)? {
-            process::picker::PickerResult::Selected(selected_id) => {
+        match process::process_view::show_action_picker(&config_data.process.actions)? {
+            process::process_view::PickerResult::Selected(selected_id) => {
                 let a = config_data
                     .process
                     .get_action(&selected_id)
@@ -95,7 +95,7 @@ pub async fn handle_process(
                     .clone();
                 (a, true)
             }
-            process::picker::PickerResult::Cancelled => {
+            process::process_view::PickerResult::Cancelled => {
                 return Ok(());
             }
         }

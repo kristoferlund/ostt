@@ -43,19 +43,8 @@ pub async fn handle_transcribe(
         anyhow::anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
     })?;
 
-    // Get the selected model from config
-    let selected_model_id = config::get_selected_model().ok().flatten();
-
-    let model_id = selected_model_id.ok_or_else(|| {
+    let selected_model = config::get_selected_model_entry()?.ok_or_else(|| {
         anyhow::anyhow!("No model selected. Please run 'ostt auth' to select a transcription model")
-    })?;
-
-    let model = transcription::TranscriptionModel::from_id(&model_id)
-        .ok_or_else(|| anyhow::anyhow!("Unknown model: {model_id}"))?;
-    let provider = model.provider();
-
-    let api_key = config::get_api_key(provider.id())?.ok_or_else(|| {
-        anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
     })?;
 
     // Load keywords
@@ -64,13 +53,26 @@ pub async fn handle_transcribe(
     let keywords_manager = KeywordsManager::new(&config_dir)?;
     let keywords = keywords_manager.load_keywords()?;
 
-    // Prepare transcription config
-    let transcription_config = transcription::TranscriptionConfig::new(
-        model,
-        api_key,
-        keywords,
-        config_data.providers.clone(),
-    );
+    let transcription_config = if selected_model.provider_id == "local" {
+        transcription::TranscriptionConfig::new_local(
+            selected_model.model_id.clone(),
+            keywords,
+            config_data.providers.clone(),
+        )
+    } else {
+        let model = transcription::TranscriptionModel::from_id(&selected_model.model_id)
+            .ok_or_else(|| anyhow::anyhow!("Unknown model: {}", selected_model.model_id))?;
+        let provider = model.provider();
+        let api_key = config::get_api_key(provider.id())?.ok_or_else(|| {
+            anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
+        })?;
+        transcription::TranscriptionConfig::new(
+            model,
+            api_key,
+            keywords,
+            config_data.providers.clone(),
+        )
+    };
 
     // Transcribe
     tracing::debug!("Starting transcription...");
@@ -114,8 +116,8 @@ pub async fn handle_transcribe(
                 ));
             }
 
-            match process::picker::show_action_picker(&config_data.process.actions)? {
-                process::picker::PickerResult::Selected(selected_id) => {
+            match process::process_view::show_action_picker(&config_data.process.actions)? {
+                process::process_view::PickerResult::Selected(selected_id) => {
                     let action = config_data
                         .process
                         .get_action(&selected_id)
@@ -137,7 +139,7 @@ pub async fn handle_transcribe(
                         }
                     }
                 }
-                process::picker::PickerResult::Cancelled => {
+                process::process_view::PickerResult::Cancelled => {
                     // Cancelled — fall through to output raw transcription
                     trimmed_text
                 }

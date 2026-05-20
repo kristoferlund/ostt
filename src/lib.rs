@@ -1,3 +1,5 @@
+#![warn(unreachable_pub)]
+
 //! ostt - Open Speech-to-Text
 //!
 //! An interactive terminal-based audio recording and speech-to-text transcription tool.
@@ -19,6 +21,7 @@ pub mod config;
 pub mod history;
 pub mod keywords;
 pub mod logging;
+pub mod model;
 pub mod process;
 pub mod recording;
 pub mod setup;

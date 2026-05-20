@@ -4,9 +4,19 @@
 //! Credentials are stored in the user's local data directory (~/.local/share/ostt).
 
 use anyhow::Context;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
+
+use crate::config::file::{get_config_path, OsttConfig};
+use crate::transcription::model::TranscriptionModel;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SelectedModel {
+    pub provider_id: String,
+    pub model_id: String,
+}
 
 /// Returns the path to the secrets directory (~/.local/share/ostt).
 ///
@@ -125,29 +135,153 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
 
 /// Saves the selected model globally (only ONE model is selected at a time).
 ///
-/// Stores the model selection in ~/.local/share/ostt/model with restricted permissions (0600).
-/// This keeps the user's ostt.toml config file unmodified.
-/// Only the model_id is stored (the provider can be inferred from the model_id).
+/// Stores provider/model selection in the main config file under `[transcription]`.
+/// The legacy `~/.local/share/ostt/model` file is still read as a fallback.
 ///
 /// # Errors
 /// - If the secrets directory cannot be determined or created
 /// - If the model file cannot be written
-pub fn save_selected_model(_provider_id: &str, model_id: &str) -> anyhow::Result<()> {
-    let secrets_dir = get_secrets_dir()?;
-    let model_file = secrets_dir.join("model");
-
-    // Simply write the model ID as plain text (only one model selection at a time)
-    fs::write(&model_file, model_id)?;
-
-    #[cfg(unix)]
-    {
-        use std::fs::Permissions;
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&model_file, Permissions::from_mode(0o600))?;
-    }
+pub fn save_selected_model(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
+    save_transcription_selection(Some(provider_id), Some(model_id))?;
 
     tracing::info!("Model selected: {}", model_id);
     Ok(())
+}
+
+pub fn clear_selected_model() -> anyhow::Result<()> {
+    save_transcription_selection(None, None)?;
+
+    Ok(())
+}
+
+pub fn get_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
+    if let Ok(config) = OsttConfig::load() {
+        if let (Some(provider_id), Some(model_id)) = (
+            config.transcription.provider.as_deref(),
+            config.transcription.model.as_deref(),
+        ) {
+            return Ok(Some(SelectedModel {
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+            }));
+        }
+    }
+
+    legacy_selected_model_entry()
+}
+
+pub(crate) fn legacy_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
+    let secrets_dir = get_secrets_dir()?;
+    let model_file = secrets_dir.join("model");
+
+    if !model_file.exists() {
+        return Ok(None);
+    }
+
+    let content = fs::read_to_string(&model_file)?;
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    if let Ok(selected_model) = serde_json::from_str::<SelectedModel>(trimmed) {
+        return Ok(Some(selected_model));
+    }
+
+    let provider_id = TranscriptionModel::from_id(trimmed)
+        .map(|model| model.provider().id().to_string())
+        .unwrap_or_else(|| "local".to_string());
+
+    Ok(Some(SelectedModel {
+        provider_id,
+        model_id: trimmed.to_string(),
+    }))
+}
+
+fn save_transcription_selection(
+    provider_id: Option<&str>,
+    model_id: Option<&str>,
+) -> anyhow::Result<()> {
+    let config_path = get_config_path()?;
+    if !config_path.exists() {
+        let mut config = OsttConfig::default();
+        config.transcription.provider = provider_id.map(ToString::to_string);
+        config.transcription.model = model_id.map(ToString::to_string);
+        return config.save();
+    }
+
+    let content = fs::read_to_string(&config_path)?;
+    let without_transcription = remove_toml_section(&content, "transcription");
+    let updated = match (provider_id, model_id) {
+        (Some(provider_id), Some(model_id)) => insert_transcription_section(
+            &without_transcription,
+            &format!(
+                "[transcription]\nprovider = {}\nmodel = {}\n",
+                toml_basic_string(provider_id),
+                toml_basic_string(model_id)
+            ),
+        ),
+        _ => without_transcription,
+    };
+    fs::write(config_path, updated)?;
+    Ok(())
+}
+
+fn remove_toml_section(content: &str, section: &str) -> String {
+    let header = format!("[{section}]");
+    let mut output = Vec::new();
+    let mut skipping = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == header {
+            skipping = true;
+            continue;
+        }
+        if skipping && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            // Stop skipping only at top-level sections, not subsections like
+            // [transcription.local] which belong to the section being removed.
+            let is_subsection = trimmed.starts_with(&format!("[{section}."));
+            if !is_subsection {
+                skipping = false;
+            }
+        }
+        if !skipping {
+            output.push(line);
+        }
+    }
+
+    trim_extra_blank_lines(&output.join("\n"))
+}
+
+fn insert_transcription_section(content: &str, section: &str) -> String {
+    let mut lines: Vec<&str> = content.lines().collect();
+    let insert_at = lines
+        .iter()
+        .position(|line| line.trim_start().starts_with('['))
+        .unwrap_or(lines.len());
+    let mut section_lines: Vec<&str> = section.trim_end().lines().collect();
+    section_lines.push("");
+    lines.splice(insert_at..insert_at, section_lines);
+    format!("{}\n", trim_extra_blank_lines(&lines.join("\n")))
+}
+
+fn trim_extra_blank_lines(content: &str) -> String {
+    let mut output = Vec::new();
+    let mut previous_blank = false;
+    for line in content.lines() {
+        let blank = line.trim().is_empty();
+        if blank && previous_blank {
+            continue;
+        }
+        output.push(line);
+        previous_blank = blank;
+    }
+    output.join("\n").trim().to_string()
+}
+
+fn toml_basic_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
 /// Retrieves the currently selected model.
@@ -159,18 +293,5 @@ pub fn save_selected_model(_provider_id: &str, model_id: &str) -> anyhow::Result
 /// - If the secrets directory cannot be determined
 /// - If the model file cannot be read
 pub fn get_selected_model() -> anyhow::Result<Option<String>> {
-    let secrets_dir = get_secrets_dir()?;
-    let model_file = secrets_dir.join("model");
-
-    if !model_file.exists() {
-        return Ok(None);
-    }
-
-    let model_id = fs::read_to_string(&model_file)?.trim().to_string();
-
-    if model_id.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(model_id))
-    }
+    Ok(get_selected_model_entry()?.map(|selected| selected.model_id))
 }

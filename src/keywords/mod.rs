@@ -6,9 +6,9 @@ use anyhow::Result;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub mod ui;
+pub mod keywords_view;
 
-pub use ui::KeywordsViewer;
+pub use keywords_view::KeywordsView;
 
 /// Manages the keywords list stored in the config directory.
 pub struct KeywordsManager {

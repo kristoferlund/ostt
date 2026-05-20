@@ -4,42 +4,37 @@
 //! mouse support, selection, and clipboard integration.
 
 use crate::history::TranscriptionEntry;
+use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEvent, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEvent,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, HighlightSpacing, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{List, ListItem, ListState},
 };
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
 
-const BG: Color = Color::Rgb(0, 0, 0);
-const FG: Color = Color::Rgb(255, 255, 255);
-const TIMESTAMP_FG: Color = Color::Rgb(100, 100, 100);
-const HIGHLIGHT_BG: Color = Color::Rgb(20, 20, 20);
-const HELP_FG: Color = Color::Rgb(100, 100, 100);
-const HOVER_BG: Color = Color::Rgb(10, 10, 10);
-
-/// Interactive history viewer for transcription entries.
-pub struct HistoryViewer {
+/// Interactive history view for transcription entries.
+pub struct HistoryView {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     entries: Vec<TranscriptionEntry>,
     list_state: ListState,
-    notification: Option<(String, Instant)>,
+    notification: Option<Toast>,
     pending_click: Option<(usize, Instant)>,
     cleaned_up: bool,
     hovered_index: Option<usize>,
     list_area: Rect,
 }
 
-impl HistoryViewer {
-    /// Creates a new history viewer with the given entries.
+impl HistoryView {
+    /// Creates a new history view with the given entries.
     pub fn new(entries: Vec<TranscriptionEntry>) -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -65,14 +60,14 @@ impl HistoryViewer {
         })
     }
 
-    /// Runs the interactive history viewer loop.
+    /// Runs the interactive history view loop.
     pub fn run(&mut self) -> Result<Option<String>> {
         if self.entries.is_empty() {
             self.cleanup()?;
             return Ok(None);
         }
 
-        tracing::debug!("History viewer started with {} entries", self.entries.len());
+        tracing::debug!("History view started with {} entries", self.entries.len());
 
         let mut selected_text: Option<String> = None;
 
@@ -80,8 +75,8 @@ impl HistoryViewer {
             self.draw()?;
 
             // Check if notification has expired
-            if let Some((_, start_time)) = self.notification {
-                if start_time.elapsed() >= Duration::from_millis(500) {
+            if let Some(notification) = &self.notification {
+                if notification.is_expired() {
                     self.notification = None;
                     if selected_text.is_some() {
                         break; // Exit after showing notification
@@ -94,7 +89,7 @@ impl HistoryViewer {
                 if click_time.elapsed() >= Duration::from_millis(200) {
                     selected_text = Some(self.entries[entry_index].text.clone());
                     self.pending_click = None;
-                    self.notification = Some(("Copied to clipboard!".to_string(), Instant::now()));
+                    self.notification = Some(Toast::success("Copied to clipboard!"));
                     tracing::info!("Clicked item copied to clipboard");
                 }
             }
@@ -108,7 +103,7 @@ impl HistoryViewer {
                                 InputAction::Select(text) => {
                                     selected_text = Some(text);
                                     self.notification =
-                                        Some(("Copied to clipboard!".to_string(), Instant::now()));
+                                        Some(Toast::success("Copied to clipboard!"));
                                 }
                             }
                         }
@@ -127,9 +122,12 @@ impl HistoryViewer {
 
     /// Handles keyboard input.
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> Option<InputAction> {
+        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+            return Some(InputAction::Exit);
+        }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
-                tracing::debug!("History viewer exited via Escape/q");
+                tracing::debug!("History view exited via Escape/q");
                 Some(InputAction::Exit)
             }
             KeyCode::Up => {
@@ -168,8 +166,8 @@ impl HistoryViewer {
                 }
             }
             MouseEventKind::Moved => {
-                let inner_top = self.list_area.y + 1; // top border
-                let inner_bottom = self.list_area.y + self.list_area.height.saturating_sub(1); // bottom border
+                let inner_top = self.list_area.y;
+                let inner_bottom = self.list_area.y + self.list_area.height;
                 if mouse.row < inner_top || mouse.row >= inner_bottom {
                     self.hovered_index = None;
                 } else {
@@ -187,41 +185,19 @@ impl HistoryViewer {
         }
     }
 
-    /// Renders the current state of the history viewer.
+    /// Renders the current state of the history view.
     fn draw(&mut self) -> Result<()> {
         let notification = self.notification.clone();
         let hovered_index = self.hovered_index;
         let selected_index = self.list_state.selected();
 
         self.terminal.draw(|frame| {
-            let area = frame.area();
-
-            let padding_block = Block::default()
-                .padding(Padding::uniform(1))
-                .style(Style::default().bg(BG));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default().style(Style::default().fg(FG).bg(BG));
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            // Split into header, list, and footer areas
-            let [header_area, list_area, footer_area] = Layout::vertical([
-                Constraint::Length(3),
-                Constraint::Min(0),
-                Constraint::Length(1),
-            ])
-            .areas(inner_area);
+            let layout = render_app_layout(frame, frame.area());
+            render_title(frame, layout.title, "History");
+            let list_area = layout.body;
 
             // Store list_area for mouse hit-testing
             self.list_area = list_area;
-
-            // Render ostt logo header
-            let header = Paragraph::new(" ┏┓┏╋╋ \n ┗┛┛┗┗ \n")
-                .style(Style::default().fg(FG))
-                .alignment(Alignment::Left);
-            frame.render_widget(header, header_area);
 
             // Build list items with styled timestamp and text
             let items: Vec<ListItem> = self
@@ -231,12 +207,12 @@ impl HistoryViewer {
                 .map(|(i, entry)| {
                     let timestamp = Line::styled(
                         entry.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-                        Style::default().fg(TIMESTAMP_FG),
+                        Style::default().fg(Color::DarkGray),
                     );
-                    let text = Line::styled(entry.text.clone(), Style::default().fg(FG));
+                    let text = Line::from(entry.text.clone());
                     let mut item = ListItem::new(vec![timestamp, text]);
                     if Some(i) == hovered_index && Some(i) != selected_index {
-                        item = item.style(Style::default().bg(HOVER_BG));
+                        item = item.style(Style::default().fg(Color::White).bg(Color::DarkGray));
                     }
                     item
                 })
@@ -244,61 +220,19 @@ impl HistoryViewer {
 
             // Render list with History title
             let list = List::new(items)
-                .block(
-                    Block::default()
-                        .title(" History ")
-                        .borders(Borders::ALL)
-                        .padding(Padding::bottom(1)),
-                )
-                .highlight_style(Style::default().bg(HIGHLIGHT_BG))
-                .highlight_symbol("> ")
-                .highlight_spacing(HighlightSpacing::Always);
+                .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
             frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
-            // Render help footer
-            let help_text = "↑↓ select, ↵ copy, esc/q exit";
-            let help_paragraph = Paragraph::new(help_text)
-                .alignment(Alignment::Center)
-                .style(Style::default().fg(HELP_FG));
-            frame.render_widget(help_paragraph, footer_area);
+            render_footer(frame, layout.footer, "↑↓ select, ↵ copy, esc/q exit");
 
             // Render notification modal if active
-            if let Some((message, _)) = notification {
-                Self::render_notification(frame, area, &message);
+            if let Some(toast) = &notification {
+                render_toast(frame, toast);
             }
         })?;
 
         Ok(())
-    }
-
-    /// Renders a centered notification modal.
-    fn render_notification(frame: &mut Frame, screen_area: Rect, message: &str) {
-        let modal_width = (message.len() as u16).saturating_add(4);
-        let modal_height = 3;
-
-        let modal_x = screen_area.x + (screen_area.width.saturating_sub(modal_width)) / 2;
-        let modal_y = screen_area.y + (screen_area.height.saturating_sub(modal_height)) / 2;
-
-        let modal_area = Rect {
-            x: modal_x,
-            y: modal_y,
-            width: modal_width.min(screen_area.width),
-            height: modal_height,
-        };
-
-        let modal_block = Block::default()
-            .borders(Borders::ALL)
-            .style(Style::default().bg(Color::Green).fg(Color::Black));
-
-        frame.render_widget(&modal_block, modal_area);
-
-        let inner_area = modal_block.inner(modal_area);
-        let notification_text = Paragraph::new(message)
-            .style(Style::default().bg(Color::Green).fg(Color::Black))
-            .alignment(Alignment::Center);
-
-        frame.render_widget(notification_text, inner_area);
     }
 
     /// Cleans up terminal and restores normal mode.
@@ -315,7 +249,7 @@ impl HistoryViewer {
             DisableMouseCapture
         )?;
         self.terminal.show_cursor()?;
-        tracing::debug!("History viewer terminal cleanup complete");
+        tracing::debug!("History view terminal cleanup complete");
         Ok(())
     }
 }
@@ -326,7 +260,7 @@ enum InputAction {
     Select(String),
 }
 
-impl Drop for HistoryViewer {
+impl Drop for HistoryView {
     fn drop(&mut self) {
         let _ = self.cleanup();
     }
