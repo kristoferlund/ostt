@@ -65,7 +65,7 @@ tracing-appender = "0.2.3"
 reqwest = { version = "0.12.24", features = ["json", "multipart", "stream"] }
 futures-util = "0.3.31"
 urlencoding = "2.1.3"
-whisper-rs = "0.14"
+whisper-rs = "0.16"
 
 # Database for history
 rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
@@ -80,7 +80,7 @@ libc = "0.2"
 # Shaders are embedded at build time (GGML_METAL_EMBED_LIBRARY=ON),
 # so the binary is self-contained and works on all macOS machines.
 [target.'cfg(target_os = "macos")'.dependencies]
-whisper-rs = { version = "0.14", features = ["metal"] }
+whisper-rs = { version = "0.16", features = ["metal"] }
 
 # The profile that 'dist' will build with
 [profile.dist]

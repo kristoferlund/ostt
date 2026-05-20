@@ -60,15 +60,13 @@ pub(super) async fn transcribe(
             .full(params, &audio_samples)
             .map_err(|err| anyhow::anyhow!("Transcription failed: {err}"))?;
 
-        let num_segments = state
-            .full_n_segments()
-            .map_err(|err| anyhow::anyhow!("Failed to get whisper segments: {err}"))?;
+        let num_segments = state.full_n_segments();
         let mut text = String::new();
         for i in 0..num_segments {
             let segment = state
-                .full_get_segment_text(i)
-                .map_err(|err| anyhow::anyhow!("Failed to get whisper segment {i}: {err}"))?;
-            text.push_str(&segment);
+                .get_segment(i)
+                .ok_or_else(|| anyhow::anyhow!("Failed to get whisper segment {i}"))?;
+            text.push_str(&segment.to_string());
             text.push(' ');
         }
 

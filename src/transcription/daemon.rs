@@ -236,15 +236,13 @@ async fn run_inference(audio_path: &std::path::Path, ctx: Arc<WhisperContext>) -
         state
             .full(params, &audio_samples)
             .map_err(|e| anyhow::anyhow!("Transcription failed: {e}"))?;
-        let n = state
-            .full_n_segments()
-            .map_err(|e| anyhow::anyhow!("Failed to get segments: {e}"))?;
+        let n = state.full_n_segments();
         let mut text = String::new();
         for i in 0..n {
             let seg = state
-                .full_get_segment_text(i)
-                .map_err(|e| anyhow::anyhow!("Failed to get segment {i}: {e}"))?;
-            text.push_str(&seg);
+                .get_segment(i)
+                .ok_or_else(|| anyhow::anyhow!("Failed to get segment {i}"))?;
+            text.push_str(&seg.to_string());
             text.push(' ');
         }
         Ok::<String, anyhow::Error>(text.trim().to_string())
