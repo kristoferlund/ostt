@@ -84,7 +84,10 @@ pub(crate) struct LocalModelsTui {
 }
 
 impl LocalModelsTui {
-    pub(crate) fn new(entries: Vec<LocalModelEntry>, downloaded_model_disk_usage_bytes: u64) -> Self {
+    pub(crate) fn new(
+        entries: Vec<LocalModelEntry>,
+        downloaded_model_disk_usage_bytes: u64,
+    ) -> Self {
         Self {
             entries,
             selected: 0,
@@ -163,8 +166,10 @@ impl LocalModelsTui {
         registry: &[RegistryEntry],
     ) -> anyhow::Result<()> {
         let selected_model = crate::config::get_selected_model_entry()?;
-        self.entries = super::build_local_model_entries(local_state, registry, selected_model.as_ref());
-        self.downloaded_model_disk_usage_bytes = super::downloaded_model_disk_usage_bytes(&self.entries);
+        self.entries =
+            super::build_local_model_entries(local_state, registry, selected_model.as_ref());
+        self.downloaded_model_disk_usage_bytes =
+            super::downloaded_model_disk_usage_bytes(&self.entries);
         let display_len = self.display_entries().len();
         if self.selected >= display_len {
             self.selected = display_len.saturating_sub(1);

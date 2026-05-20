@@ -18,6 +18,7 @@ impl NoCloudProvidersView {
     pub(crate) async fn run(
         terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     ) -> anyhow::Result<()> {
+        tracing::debug!("No-cloud-providers view opened");
         loop {
             terminal.draw(|frame| {
                 let layout = render_app_layout(frame, frame.area());

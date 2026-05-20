@@ -12,11 +12,7 @@ use super::local_model_view_helpers::{padded_line, wizard_button};
 pub(super) struct CustomModelUrlInputDialog;
 
 impl CustomModelUrlInputDialog {
-    pub(super) fn render(
-        frame: &mut Frame<'_>,
-        input: &Input,
-        selected_action: DialogAction,
-    ) {
+    pub(super) fn render(frame: &mut Frame<'_>, input: &Input, selected_action: DialogAction) {
         let lines = vec![
             padded_line("Paste a Hugging Face model page or a direct model file URL."),
             padded_line("Supported files: .gguf and ggml-*.bin."),
@@ -42,7 +38,11 @@ pub(super) fn set_custom_input_cursor(
         .x
         .saturating_add(1)
         .saturating_add(input.cursor() as u16)
-        .min(inner_area.x.saturating_add(inner_area.width.saturating_sub(1)));
+        .min(
+            inner_area
+                .x
+                .saturating_add(inner_area.width.saturating_sub(1)),
+        );
     frame.set_cursor_position(Position::new(cursor_x, inner_area.y.saturating_add(line)));
 }
 

@@ -232,7 +232,11 @@ impl KeywordsView {
                 render_footer(frame, layout.footer, "↵ add, esc cancel");
             } else {
                 Self::draw_normal(frame, layout.body, &keywords, list_state);
-                render_footer(frame, layout.footer, "↑↓ select, x/del delete, a add, esc/q exit");
+                render_footer(
+                    frame,
+                    layout.footer,
+                    "↑↓ select, x/del delete, a add, esc/q exit",
+                );
             }
         })?;
 
@@ -294,8 +298,7 @@ impl KeywordsView {
             ..input_inner
         };
         frame.render_widget(
-            Paragraph::new(input_value)
-                .style(Style::default().fg(Color::DarkGray).bg(Color::Gray)),
+            Paragraph::new(input_value).style(Style::default().fg(Color::DarkGray).bg(Color::Gray)),
             input_value_area,
         );
 

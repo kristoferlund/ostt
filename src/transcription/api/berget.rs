@@ -20,7 +20,10 @@ struct BergetResponse {
 ///
 /// Keywords are passed as the `hotwords` parameter (Berget's dedicated keyword boosting)
 /// and as the `prompt` parameter (Whisper-compatible context hint).
-pub(super) async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(
+    config: &TranscriptionConfig,
+    audio_path: &Path,
+) -> anyhow::Result<String> {
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 

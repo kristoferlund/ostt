@@ -4,7 +4,10 @@ use super::TranscriptionConfig;
 use crate::transcription::local_models::{resolve_installed_model_path, ModelError};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-pub(super) async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(
+    config: &TranscriptionConfig,
+    audio_path: &Path,
+) -> anyhow::Result<String> {
     let model_path = resolve_installed_model_path(&config.model_id)?;
     validate_local_audio_format(audio_path)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;

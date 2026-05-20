@@ -1,5 +1,7 @@
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
@@ -12,6 +14,7 @@ pub struct ModelView {
 }
 
 impl ModelView {
+    /// Creates the top-level model view and owns terminal cleanup for child views.
     pub fn new() -> anyhow::Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -22,15 +25,26 @@ impl ModelView {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
+        tracing::debug!("Model view started");
         loop {
             let choice = super::model_provider_view::run(&mut self.terminal).await?;
             let result = match choice {
-                ModelProviderChoice::Quit => break,
-                ModelProviderChoice::Local => super::local_model_view::run(&mut self.terminal).await,
-                ModelProviderChoice::Cloud => super::cloud_model_view::run(&mut self.terminal).await,
+                ModelProviderChoice::Quit => {
+                    tracing::debug!("Model view exited from provider picker");
+                    break;
+                }
+                ModelProviderChoice::Local => {
+                    tracing::debug!("Opening local model view");
+                    super::local_model_view::run(&mut self.terminal).await
+                }
+                ModelProviderChoice::Cloud => {
+                    tracing::debug!("Opening cloud model view");
+                    super::cloud_model_view::run(&mut self.terminal).await
+                }
             };
             if let Err(e) = result {
                 if e.downcast_ref::<UserQuit>().is_some() {
+                    tracing::debug!("Model view exited via Ctrl+C");
                     break;
                 }
                 return Err(e);

@@ -39,12 +39,15 @@ enum CloudModelMode {
     Info,
 }
 
-pub(crate) async fn run(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-) -> anyhow::Result<()> {
+pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let authorized_provider_ids = config::get_authorized_providers()?;
+    tracing::debug!(
+        "Cloud model view opened with {} authorized providers",
+        authorized_provider_ids.len()
+    );
 
     if authorized_provider_ids.is_empty() {
+        tracing::debug!("No authorized cloud providers available");
         NoCloudProvidersView::run(terminal).await?;
         return Ok(());
     }
@@ -53,8 +56,10 @@ pub(crate) async fn run(
     let mut sections =
         build_cloud_provider_sections(&authorized_provider_ids, selected_model.as_ref());
     let model_count = cloud_model_count(&sections);
+    tracing::debug!("Cloud model view loaded {model_count} models");
 
     if model_count == 0 {
+        tracing::debug!("No cloud models available for authorized providers");
         NoCloudProvidersView::run(terminal).await?;
         return Ok(());
     }
@@ -69,6 +74,7 @@ pub(crate) async fn run(
         }
 
         terminal.draw(|frame| {
+            // The info screen temporarily takes over rendering, while browse keeps list state.
             match mode {
                 CloudModelMode::Browse => {
                     let layout = render_app_layout(frame, frame.area());
@@ -122,11 +128,22 @@ pub(crate) async fn run(
                                 &entry.provider_id,
                                 &entry.model_id,
                             );
+                            tracing::info!(
+                                "Activated cloud model '{}' for provider '{}'",
+                                entry.model_id,
+                                entry.provider_id
+                            );
                             toast = Some(Toast::success(format!("Activated {}", entry.name)));
                         }
                     }
-                    KeyCode::Char('i') => mode = CloudModelMode::Info,
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
+                    KeyCode::Char('i') => {
+                        tracing::debug!("Opening cloud model info view");
+                        mode = CloudModelMode::Info;
+                    }
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        tracing::debug!("Cloud model view exited");
+                        return Ok(());
+                    }
                     _ if is_ctrl_c(&key) => return Err(UserQuit.into()),
                     _ => {}
                 }

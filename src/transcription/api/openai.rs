@@ -19,7 +19,10 @@ struct OpenAiResponse {
 ///
 /// Keywords are passed as the `prompt` parameter to guide transcription context.
 /// OpenAI's Whisper API uses the prompt to improve accuracy for domain-specific terms.
-pub(super) async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(
+    config: &TranscriptionConfig,
+    audio_path: &Path,
+) -> anyhow::Result<String> {
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 

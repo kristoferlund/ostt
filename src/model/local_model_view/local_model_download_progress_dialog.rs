@@ -12,7 +12,8 @@ pub(super) struct LocalModelDownloadProgressDialog;
 impl LocalModelDownloadProgressDialog {
     pub(super) fn render(frame: &mut Frame<'_>, state: &DownloadState) {
         let eta = if state.speed_mbps > 0.0 && state.total_bytes > state.downloaded_bytes {
-            let remaining_mb = (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
+            let remaining_mb =
+                (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
             format!("ETA: {:.0}s", remaining_mb / state.speed_mbps)
         } else {
             "ETA: unknown".to_string()

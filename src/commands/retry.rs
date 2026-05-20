@@ -129,7 +129,9 @@ pub async fn handle_retry(
                             ));
                         }
 
-                        match process::process_view::show_action_picker(&config_data.process.actions)? {
+                        match process::process_view::show_action_picker(
+                            &config_data.process.actions,
+                        )? {
                             process::process_view::PickerResult::Selected(selected_id) => {
                                 let action = config_data
                                     .process

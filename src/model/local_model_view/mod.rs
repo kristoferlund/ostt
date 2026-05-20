@@ -12,10 +12,10 @@ pub(crate) mod types;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Frame;
+use ratatui::Terminal;
 use std::io::Stdout;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use ratatui::Terminal;
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
@@ -37,17 +37,31 @@ use local_model_download_confirmation_dialog::LocalModelDownloadConfirmationDial
 use local_model_download_progress_dialog::LocalModelDownloadProgressDialog;
 use local_model_info_view::LocalModelInfoView;
 use local_model_list_view::LocalModelListView;
-use types::{CustomModelDetailsFocus, DownloadState, LocalModelEntry, LocalModelsMode, LocalModelsTui, RunningDownload};
+use types::{
+    CustomModelDetailsFocus, DownloadState, LocalModelEntry, LocalModelsMode, LocalModelsTui,
+    RunningDownload,
+};
 
-pub(crate) async fn run(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-) -> anyhow::Result<()> {
+pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let local_state = load_state();
-    let registry = fetch_registry().await.unwrap_or_default();
+    let registry = match fetch_registry().await {
+        Ok(registry) => registry,
+        Err(error) => {
+            tracing::error!("Failed to fetch local model registry: {}", error);
+            Vec::new()
+        }
+    };
     let selected_model = crate::config::get_selected_model_entry()?;
     let entries = build_local_model_entries(&local_state, &registry, selected_model.as_ref());
-    let mut tui = types::LocalModelsTui::new(entries.clone(), downloaded_model_disk_usage_bytes(&entries));
+    let mut tui =
+        types::LocalModelsTui::new(entries.clone(), downloaded_model_disk_usage_bytes(&entries));
+    tracing::debug!(
+        "Local model view opened with {} registry models and {} custom models",
+        registry.len(),
+        local_state.custom_models.len()
+    );
     if registry.is_empty() {
+        tracing::debug!("Local model registry unavailable; custom model entry remains enabled");
         tui.show_error_dialog(
             "Could not load remote registry; custom URL entry is still available with [c]"
                 .to_string(),
@@ -76,6 +90,7 @@ pub(crate) async fn run(
 }
 
 fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
+    // Dialog modes render over the browse list so users keep their place.
     match &tui.mode {
         LocalModelsMode::Browse => LocalModelListView::render(frame, tui),
         LocalModelsMode::Info { entry } => {
@@ -151,6 +166,7 @@ fn build_local_model_entries(
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
 ) -> Vec<LocalModelEntry> {
+    // Custom entries are appended to the remote registry and marked as non-registry models.
     registry
         .iter()
         .chain(local_state.custom_models.iter())
@@ -185,7 +201,11 @@ fn downloaded_model_disk_usage_bytes(entries: &[LocalModelEntry]) -> u64 {
     entries
         .iter()
         .filter(|entry| entry.is_downloaded)
-        .filter_map(|entry| model_destination(&registry_entry_from_model(entry)).metadata().ok())
+        .filter_map(|entry| {
+            model_destination(&registry_entry_from_model(entry))
+                .metadata()
+                .ok()
+        })
         .map(|metadata| metadata.len())
         .sum()
 }
@@ -210,8 +230,12 @@ async fn handle_key(
         (LocalModelsMode::Browse, KeyCode::Down) => tui.move_selection_down(),
         (LocalModelsMode::Browse, KeyCode::Up) => tui.move_selection_up(),
         (LocalModelsMode::Browse, KeyCode::Enter) => handle_selected_entry(tui, registry)?,
-        (LocalModelsMode::Browse, KeyCode::Char('i')) => tui.show_info(),
+        (LocalModelsMode::Browse, KeyCode::Char('i')) => {
+            tracing::debug!("Opening local model info view");
+            tui.show_info();
+        }
         (LocalModelsMode::Browse, KeyCode::Char('c')) => {
+            tracing::debug!("Opening custom local model input dialog");
             tui.toast = None;
             tui.show_custom_input();
         }
@@ -342,9 +366,11 @@ fn handle_selected_entry(
     let Some(entry) = tui.selected_entry().cloned() else {
         return Ok(());
     };
+    tracing::debug!("Selected local model '{}'", entry.id);
 
     if !entry.is_downloaded {
         if entry.is_available_in_registry {
+            tracing::debug!("Confirming download for local model '{}'", entry.id);
             tui.mode = LocalModelsMode::ConfirmDownload {
                 entry,
                 selected_action: DialogAction::Ok,
@@ -357,6 +383,10 @@ fn handle_selected_entry(
 
     let config = config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
     if !config::is_local_transcription_audio_compatible(&config.audio) {
+        tracing::debug!(
+            "Confirming audio config update before activating local model '{}'",
+            entry.id
+        );
         tui.mode = LocalModelsMode::ConfirmAudioConfig {
             entry,
             selected_action: DialogAction::Ok,
@@ -366,10 +396,14 @@ fn handle_selected_entry(
 
     match activate_entry(&entry) {
         Ok(()) => {
+            tracing::info!("Activated local model '{}'", entry.id);
             tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
             tui.refresh(&load_state(), registry)?;
         }
-        Err(error) => tui.toast = Some(Toast::error(error.to_string())),
+        Err(error) => {
+            tracing::error!("Failed to activate local model '{}': {}", entry.id, error);
+            tui.toast = Some(Toast::error(error.to_string()));
+        }
     }
     Ok(())
 }
@@ -392,11 +426,22 @@ fn update_audio_config_and_activate(
 ) -> anyhow::Result<()> {
     match config::ensure_local_transcription_audio_config().and_then(|()| activate_entry(entry)) {
         Ok(()) => {
+            tracing::info!(
+                "Updated audio config and activated local model '{}'",
+                entry.id
+            );
             tui.back_to_browse();
             tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
             tui.refresh(&load_state(), registry)?;
         }
-        Err(error) => tui.toast = Some(Toast::error(error.to_string())),
+        Err(error) => {
+            tracing::error!(
+                "Failed to update audio config for local model '{}': {}",
+                entry.id,
+                error
+            );
+            tui.toast = Some(Toast::error(error.to_string()));
+        }
     }
     Ok(())
 }
@@ -406,6 +451,7 @@ fn start_confirmed_download(
     running_download: &mut Option<RunningDownload>,
     entry: &LocalModelEntry,
 ) {
+    tracing::info!("Starting download for local model '{}'", entry.id);
     let running = start_download(registry_entry_from_model(entry), false);
     sync_download_progress(tui, &running);
     *running_download = Some(running);
@@ -417,9 +463,11 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
     let handle = DownloadHandle::new();
     let task_handle = handle.clone();
     let task_entry = entry.clone();
+    tracing::debug!("Spawning local model download task for '{}'", entry.id);
     let task = tokio::spawn(async move {
         let destination = model_destination(&task_entry);
-        download_model_with_handle(
+        // Progress is shared with the TUI loop through a small mutex-protected snapshot.
+        if let Err(error) = download_model_with_handle(
             &task_entry.url,
             &destination,
             Some(Box::new(
@@ -439,11 +487,22 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
             )),
             Some(task_handle),
         )
-        .await?;
+        .await
+        {
+            tracing::error!(
+                "Failed to download local model '{}' from '{}': {}",
+                task_entry.id,
+                task_entry.url,
+                error
+            );
+            return Err(error);
+        }
         validate_downloaded_model(&task_entry)?;
         if is_custom {
+            tracing::info!("Registered downloaded custom model '{}'", task_entry.id);
             register_downloaded_custom_model(task_entry)?;
         } else {
+            tracing::info!("Marked registry model '{}' as downloaded", task_entry.id);
             mark_downloaded_registry_model(&task_entry)?;
         }
         Ok(())
@@ -471,6 +530,7 @@ fn initial_download_state(entry: &RegistryEntry, is_custom: bool) -> DownloadSta
 
 fn cancel_download(running_download: &mut Option<RunningDownload>) {
     if let Some(running) = running_download.as_ref() {
+        tracing::info!("Cancelling local model download");
         running.handle.cancel();
         if let Ok(mut state) = running.state.lock() {
             state.status = "Cancelling download".to_string();
@@ -479,8 +539,10 @@ fn cancel_download(running_download: &mut Option<RunningDownload>) {
 }
 
 async fn resolve_custom_input(tui: &mut LocalModelsTui, value: &str) {
+    tracing::debug!("Resolving custom local model input");
     match resolve_custom_model(value).await {
         Ok(entry) => {
+            tracing::debug!("Resolved custom local model '{}'", entry.id);
             tui.toast = None;
             tui.mode = LocalModelsMode::CustomModelDetails {
                 id_input: Input::new(entry.id.clone()),
@@ -490,7 +552,10 @@ async fn resolve_custom_input(tui: &mut LocalModelsTui, value: &str) {
                 selected_action: DialogAction::Ok,
             };
         }
-        Err(error) => tui.toast = Some(Toast::error(error.to_string())),
+        Err(error) => {
+            tracing::error!("Failed to resolve custom local model input: {}", error);
+            tui.toast = Some(Toast::error(error.to_string()));
+        }
     }
 }
 
@@ -551,6 +616,7 @@ fn start_custom_details_download(
         tui.toast = Some(Toast::error(error.to_string()));
         return;
     }
+    tracing::info!("Starting download for custom local model '{id}'");
     let running = start_download(resolved_entry, true);
     sync_download_progress(tui, &running);
     *running_download = Some(running);
@@ -563,11 +629,13 @@ fn delete_confirmed_entry(
 ) -> anyhow::Result<()> {
     match delete_entry(entry) {
         Ok(()) => {
+            tracing::info!("Deleted local model '{}'", entry.id);
             tui.toast = Some(Toast::success(format!("Deleted {}", entry.name)));
             tui.back_to_browse();
             tui.refresh(&load_state(), registry)?;
         }
         Err(error) => {
+            tracing::error!("Failed to delete local model '{}': {}", entry.id, error);
             tui.back_to_browse();
             tui.show_error_dialog(error.to_string());
         }
@@ -607,15 +675,18 @@ async fn finish_completed_download(
     let running = running_download.take().expect("running download");
     match running.task.await? {
         Ok(()) => {
+            tracing::info!("Local model download completed");
             tui.back_to_browse();
             tui.refresh(&load_state(), registry)?;
             tui.toast = Some(Toast::success("Download complete"));
         }
         Err(error) => {
             if error.to_string() != "model download cancelled" {
+                tracing::error!("Local model download failed: {}", error);
                 tui.back_to_browse();
                 tui.show_error_dialog(error.to_string());
             } else {
+                tracing::debug!("Local model download cancelled");
                 tui.back_to_browse();
             }
         }
@@ -646,10 +717,12 @@ fn registry_entry_from_model(entry: &LocalModelEntry) -> RegistryEntry {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::types::LocalModelEntry;
-    use crate::transcription::local_models::{model_files_dir, set_test_models_dir, LocalModelState, RegistryEntry, TEST_ENV_LOCK};
+    use super::*;
     use crate::config::SelectedModel;
+    use crate::transcription::local_models::{
+        model_files_dir, set_test_models_dir, LocalModelState, RegistryEntry, TEST_ENV_LOCK,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};

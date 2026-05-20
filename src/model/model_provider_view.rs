@@ -22,6 +22,7 @@ pub(crate) enum ModelProviderChoice {
 pub(crate) async fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<ModelProviderChoice> {
+    tracing::debug!("Model provider picker opened");
     let choices = ["Local provider", "Cloud provider"];
     let mut selected = 0_usize;
 
@@ -52,13 +53,21 @@ pub(crate) async fn run(
                     KeyCode::Up => selected = selected.saturating_sub(1),
                     KeyCode::Down => selected = (selected + 1).min(1),
                     KeyCode::Enter => {
-                        return Ok(match selected {
+                        let choice = match selected {
                             0 => ModelProviderChoice::Local,
                             _ => ModelProviderChoice::Cloud,
-                        })
+                        };
+                        tracing::debug!("Selected model provider: {:?}", choice);
+                        return Ok(choice);
                     }
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(ModelProviderChoice::Quit),
-                    _ if is_ctrl_c(&key) => return Ok(ModelProviderChoice::Quit),
+                    KeyCode::Char('q') | KeyCode::Esc => {
+                        tracing::debug!("Model provider picker cancelled");
+                        return Ok(ModelProviderChoice::Quit);
+                    }
+                    _ if is_ctrl_c(&key) => {
+                        tracing::debug!("Model provider picker cancelled via Ctrl+C");
+                        return Ok(ModelProviderChoice::Quit);
+                    }
                     _ => {}
                 }
             }

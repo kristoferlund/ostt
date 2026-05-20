@@ -30,10 +30,8 @@ mod tests {
 
     #[test]
     fn cloud_sections_include_only_authenticated_providers() {
-        let sections = build_cloud_provider_sections(
-            &["openai".to_string(), "local".to_string()],
-            None,
-        );
+        let sections =
+            build_cloud_provider_sections(&["openai".to_string(), "local".to_string()], None);
 
         assert_eq!(sections.len(), 1);
         assert_eq!(sections[0].title, "OpenAI");

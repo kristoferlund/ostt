@@ -50,8 +50,8 @@ pub fn render_process_view(
         .collect();
 
     // Render list with title
-    let list = List::new(items)
-        .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
+    let list =
+        List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
     frame.render_stateful_widget(list, list_area, list_state);
 
