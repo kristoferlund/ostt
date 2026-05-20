@@ -83,8 +83,7 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
                         cloud_model_list_items(&sections, selected);
                     let mut state = ListState::default().with_selected(selected_display_index);
                     frame.render_stateful_widget(
-                        List::new(items)
-                            .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
+                        List::new(items).highlight_style(Style::default()),
                         layout.body,
                         &mut state,
                     );
@@ -199,9 +198,17 @@ pub(crate) fn save_cloud_selection(
     config::save_selected_model(provider_id, model.id())
 }
 
-fn cloud_model_list_item(entry: &CloudModelEntry) -> ListItem<'static> {
+fn cloud_model_list_item(entry: &CloudModelEntry, is_selected: bool) -> ListItem<'static> {
     let marker = if entry.is_active { "◉" } else { "○" };
-    ListItem::new(Line::from(format!("{marker} {}", entry.name)))
+    let style = if is_selected {
+        Style::default().fg(Color::White).bg(Color::DarkGray)
+    } else {
+        Style::default()
+    };
+    ListItem::new(Line::from(Span::styled(
+        format!("{marker} {}", entry.name),
+        style,
+    )))
 }
 
 fn cloud_model_list_items(
@@ -221,10 +228,11 @@ fn cloud_model_list_items(
         display_index += 1;
 
         for entry in &section.models {
-            if model_index == selected {
+            let is_selected = model_index == selected;
+            if is_selected {
                 selected_display_index = Some(display_index);
             }
-            items.push(cloud_model_list_item(entry));
+            items.push(cloud_model_list_item(entry, is_selected));
             display_index += 1;
             model_index += 1;
         }

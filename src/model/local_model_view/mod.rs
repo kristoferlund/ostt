@@ -52,9 +52,25 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
         }
     };
     let selected_model = crate::config::get_selected_model_entry()?;
-    let entries = build_local_model_entries(&local_state, &registry, selected_model.as_ref());
+
+    // Probe daemon once at open to show initial loaded status.
+    #[cfg(unix)]
+    let daemon_model_id = crate::transcription::daemon_client::probe_daemon()
+        .await
+        .map(|d| d.model_id);
+    #[cfg(not(unix))]
+    let daemon_model_id: Option<String> = None;
+
+    let entries = build_local_model_entries(
+        &local_state,
+        &registry,
+        selected_model.as_ref(),
+        daemon_model_id.as_deref(),
+    );
     let mut tui =
         types::LocalModelsTui::new(entries.clone(), downloaded_model_disk_usage_bytes(&entries));
+    tui.daemon_model_id = daemon_model_id;
+
     tracing::debug!(
         "Local model view opened with {} registry models and {} custom models",
         registry.len(),
@@ -68,12 +84,24 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
         );
     }
     let mut running_download: Option<types::RunningDownload> = None;
+    let mut last_daemon_probe = std::time::Instant::now()
+        .checked_sub(Duration::from_secs(5))
+        .unwrap_or_else(std::time::Instant::now);
 
     loop {
         if tui.toast.as_ref().is_some_and(Toast::is_expired) {
             tui.toast = None;
         }
         finish_completed_download(&mut tui, &registry, &mut running_download).await?;
+
+        // Re-probe daemon every 2 seconds to pick up background daemon startup.
+        #[cfg(unix)]
+        if last_daemon_probe.elapsed() >= Duration::from_secs(2) {
+            let info = crate::transcription::daemon_client::probe_daemon().await;
+            tui.update_daemon_status(info.as_ref().map(|d| d.model_id.as_str()));
+            last_daemon_probe = std::time::Instant::now();
+        }
+
         terminal.draw(|frame| render_local_models(frame, &tui))?;
 
         if !event::poll(Duration::from_millis(100))? {
@@ -165,6 +193,7 @@ fn build_local_model_entries(
     local_state: &LocalModelState,
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
+    daemon_model_id: Option<&str>,
 ) -> Vec<LocalModelEntry> {
     // Custom entries are appended to the remote registry and marked as non-registry models.
     registry
@@ -175,6 +204,7 @@ fn build_local_model_entries(
             let is_active = selected_model
                 .map(|selected| selected.provider_id == "local" && selected.model_id == entry.id)
                 .unwrap_or(false);
+            let is_daemon_loaded = daemon_model_id == Some(entry.id.as_str());
 
             LocalModelEntry {
                 id: entry.id.clone(),
@@ -183,6 +213,7 @@ fn build_local_model_entries(
                 size_mb: entry.size_mb,
                 is_downloaded,
                 is_active,
+                is_daemon_loaded,
                 is_available_in_registry: registry
                     .iter()
                     .any(|registry_entry| registry_entry.id == entry.id),
@@ -416,7 +447,34 @@ fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     if !path.exists() {
         anyhow::bail!("Download first with [d]");
     }
-    config::save_selected_model("local", &entry.id)
+    config::save_selected_model("local", &entry.id)?;
+    // Pre-warm the daemon in the background so the model is ready for the
+    // first transcription. The TUI's periodic probe will show the loaded badge.
+    spawn_daemon_if_enabled(&entry.id);
+    Ok(())
+}
+
+/// Spawn the local model daemon in the background if daemon mode is enabled.
+/// Fire-and-forget: failures are logged but do not propagate.
+fn spawn_daemon_if_enabled(model_id: &str) {
+    #[cfg(unix)]
+    {
+        let Ok(config) = config::OsttConfig::load() else {
+            return;
+        };
+        let effective = config.providers.local.effective_for_model(model_id);
+        if !effective.daemon {
+            return;
+        }
+        let model_id = model_id.to_string();
+        tokio::spawn(async move {
+            if let Err(e) =
+                crate::transcription::daemon_client::ensure_daemon(&model_id, None).await
+            {
+                tracing::warn!("could not pre-warm daemon for model '{model_id}': {e}");
+            }
+        });
+    }
 }
 
 fn update_audio_config_and_activate(
@@ -630,6 +688,9 @@ fn delete_confirmed_entry(
     match delete_entry(entry) {
         Ok(()) => {
             tracing::info!("Deleted local model '{}'", entry.id);
+            if entry.is_daemon_loaded {
+                stop_daemon_for_deleted_model(&entry.id);
+            }
             tui.toast = Some(Toast::success(format!("Deleted {}", entry.name)));
             tui.back_to_browse();
             tui.refresh(&load_state(), registry)?;
@@ -641,6 +702,20 @@ fn delete_confirmed_entry(
         }
     }
     Ok(())
+}
+
+fn stop_daemon_for_deleted_model(model_id: &str) {
+    #[cfg(unix)]
+    {
+        let model_id = model_id.to_string();
+        tokio::spawn(async move {
+            if let Err(e) = crate::transcription::daemon_client::shutdown_daemon().await {
+                tracing::warn!("could not stop daemon after deleting model '{model_id}': {e}");
+            } else {
+                tracing::info!("daemon stopped after deleting model '{model_id}'");
+            }
+        });
+    }
 }
 
 fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
@@ -784,7 +859,7 @@ mod tests {
                 }],
             };
 
-            let entries = build_local_model_entries(&state, &registry, None);
+            let entries = build_local_model_entries(&state, &registry, None, None);
 
             assert_eq!(entries.len(), 2);
             assert!(entries.iter().any(|entry| {
@@ -810,7 +885,7 @@ mod tests {
             };
 
             let entries =
-                build_local_model_entries(&LocalModelState::default(), &registry, Some(&selected));
+                build_local_model_entries(&LocalModelState::default(), &registry, Some(&selected), None);
 
             assert_eq!(entries.len(), 1);
             assert!(entries[0].is_downloaded);
@@ -824,7 +899,7 @@ mod tests {
             let registry = vec![registry_entry("turbo"), registry_entry("base")];
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             fs::write(model_files_dir().join("turbo.bin"), [1, 2, 3]).expect("write model");
-            let entries = build_local_model_entries(&LocalModelState::default(), &registry, None);
+            let entries = build_local_model_entries(&LocalModelState::default(), &registry, None, None);
 
             assert_eq!(downloaded_model_disk_usage_bytes(&entries), 3);
         });
@@ -839,6 +914,7 @@ mod tests {
             size_mb: 1,
             is_downloaded: false,
             is_active: false,
+            is_daemon_loaded: false,
             is_available_in_registry: true,
             languages: Vec::new(),
             url: "https://example.com/missing.bin".to_string(),
@@ -871,6 +947,7 @@ mod tests {
                 size_mb: 1,
                 is_downloaded: false,
                 is_active: false,
+                is_daemon_loaded: false,
                 is_available_in_registry: true,
                 languages: Vec::new(),
                 url: "https://example.com/a.bin".to_string(),
@@ -886,6 +963,7 @@ mod tests {
                 size_mb: 1,
                 is_downloaded: false,
                 is_active: false,
+                is_daemon_loaded: false,
                 is_available_in_registry: true,
                 languages: Vec::new(),
                 url: "https://example.com/b.bin".to_string(),
@@ -916,6 +994,7 @@ mod tests {
                 size_mb: 1,
                 is_downloaded: false,
                 is_active: false,
+                is_daemon_loaded: false,
                 is_available_in_registry: true,
                 languages: Vec::new(),
                 url: "https://example.com/tiny.bin".to_string(),
@@ -931,6 +1010,7 @@ mod tests {
                 size_mb: 1,
                 is_downloaded: true,
                 is_active: false,
+                is_daemon_loaded: false,
                 is_available_in_registry: true,
                 languages: Vec::new(),
                 url: "https://example.com/large.bin".to_string(),

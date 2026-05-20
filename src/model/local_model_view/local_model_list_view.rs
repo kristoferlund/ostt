@@ -15,13 +15,16 @@ impl LocalModelListView {
         let layout = render_app_layout(frame, frame.area());
         render_title(frame, layout.title, "Local Models");
 
+        let selected_id = tui.selected_entry().map(|e| e.id.as_str());
         let mut items = Vec::new();
-        push_grouped_model_items(&mut items, tui.entries.iter().collect());
+        push_grouped_model_items(&mut items, tui.entries.iter().collect(), selected_id);
 
         let selected_display_index = display_index_for_selected_model(tui);
         let mut state = ListState::default().with_selected(selected_display_index);
+        // highlight_style is intentionally blank — selection bg is applied per-span below
+        // so pill background colours are preserved on the selected row.
         frame.render_stateful_widget(
-            List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
+            List::new(items).highlight_style(Style::default()),
             layout.body,
             &mut state,
         );
@@ -41,7 +44,11 @@ fn section_header(label: impl Into<String>) -> ListItem<'static> {
     )))
 }
 
-fn push_grouped_model_items(items: &mut Vec<ListItem<'static>>, entries: Vec<&LocalModelEntry>) {
+fn push_grouped_model_items(
+    items: &mut Vec<ListItem<'static>>,
+    entries: Vec<&LocalModelEntry>,
+    selected_id: Option<&str>,
+) {
     let mut current_group: Option<&str> = None;
     for entry in entries {
         let group = entry.group_id.as_deref().unwrap_or("Custom");
@@ -52,23 +59,55 @@ fn push_grouped_model_items(items: &mut Vec<ListItem<'static>>, entries: Vec<&Lo
             items.push(section_header(group.to_string()));
             current_group = Some(group);
         }
-        items.push(local_model_list_item(entry));
+        let is_selected = selected_id == Some(entry.id.as_str());
+        items.push(local_model_list_item(entry, is_selected));
     }
 }
 
-fn local_model_list_item(entry: &LocalModelEntry) -> ListItem<'static> {
+fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
     let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
     let description = entry.description.trim();
 
-    let mut spans = vec![Span::raw(format!("{active_marker} "))];
+    let row_bg = if is_selected {
+        Color::DarkGray
+    } else {
+        Color::Reset
+    };
+    let row_style = Style::default().bg(row_bg);
+
+    let mut spans = vec![Span::styled(format!("{active_marker} "), row_style)];
+
     if entry.is_downloaded {
-        spans.push(Span::raw("✅ "));
+        let (pill_fg, pill_bg) = if is_selected {
+            (Color::White, Color::LightGreen)
+        } else {
+            (Color::White, Color::Green)
+        };
+        spans.push(Span::styled(
+            " dl ",
+            Style::default().fg(pill_fg).bg(pill_bg),
+        ));
+        spans.push(Span::styled(" ", row_style));
     }
-    spans.push(Span::raw(format!(
-        "{}, {}, {}",
-        entry.name, size, description,
-    )));
+
+    if entry.is_daemon_loaded {
+        let (pill_fg, pill_bg) = if is_selected {
+            (Color::White, Color::LightMagenta)
+        } else {
+            (Color::White, Color::Magenta)
+        };
+        spans.push(Span::styled(
+            " run ",
+            Style::default().fg(pill_fg).bg(pill_bg),
+        ));
+        spans.push(Span::styled(" ", row_style));
+    }
+
+    spans.push(Span::styled(
+        format!("{}, {}, {}", entry.name, size, description),
+        row_style,
+    ));
 
     ListItem::new(Line::from(spans))
 }

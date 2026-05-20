@@ -309,6 +309,64 @@ enum Commands {
         #[arg(long, short)]
         install: bool,
     },
+
+    /// Manage the local model daemon
+    ///
+    /// The daemon keeps a local Whisper model loaded in memory so transcriptions
+    /// start instantly instead of reloading the model on every call. It always
+    /// serves the currently active model (configured with `ostt model`).
+    ///
+    /// Examples:
+    ///   ostt daemon start            # start the daemon for the active model
+    ///   ostt daemon stop             # stop the running daemon
+    ///   ostt daemon restart          # restart with the current active model
+    ///   ostt daemon status           # show running status and service info
+    ///   ostt daemon install          # install as a login service (auto-start)
+    ///   ostt daemon uninstall        # remove the login service
+    ///   ostt daemon logs             # show recent daemon log entries
+    ///   ostt daemon logs -f          # follow the log live
+    #[cfg(unix)]
+    #[command(visible_alias = "d")]
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
+}
+
+#[cfg(unix)]
+#[derive(clap::Subcommand)]
+enum DaemonCommand {
+    /// Start the daemon for the active local model
+    Start,
+    /// Stop the running daemon
+    Stop,
+    /// Restart the daemon with the currently active local model
+    Restart,
+    /// Show daemon status (running, model, PID, service)
+    Status,
+    /// Install daemon as a login service (auto-start on login)
+    Install,
+    /// Remove the daemon login service
+    Uninstall,
+    /// Show daemon log entries
+    Logs {
+        /// Follow the log as it grows (like tail -f)
+        #[arg(short, long)]
+        follow: bool,
+        /// Number of lines to show
+        #[arg(short = 'n', long, default_value = "50")]
+        lines: usize,
+    },
+    /// [Internal] Run the daemon process — used by the service manager and daemon start
+    #[command(hide = true)]
+    Run {
+        /// Model ID to load (defaults to the currently active local model)
+        #[arg(long)]
+        model_id: Option<String>,
+        /// Exit after this many seconds of inactivity (omit for no timeout)
+        #[arg(long)]
+        idle_timeout_secs: Option<u64>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -356,6 +414,26 @@ pub async fn run() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
     // Handle commands that don't need logging or config setup
+    // The `daemon run` subcommand is the long-running daemon process itself.
+    // It must use daemon-specific logging and skip the normal setup flow.
+    #[cfg(unix)]
+    if let Some(Commands::Daemon {
+        command: DaemonCommand::Run {
+            ref model_id,
+            idle_timeout_secs,
+        },
+    }) = cli.command
+    {
+        logging::init_daemon_logging()?;
+        return commands::daemon::handle_daemon_run(model_id.clone(), idle_timeout_secs).await;
+    }
+
+    // Print logo to stderr for all commands except completions (purely programmatic output).
+    let is_completions = matches!(&cli.command, Some(Commands::Completions { .. }));
+    if !is_completions {
+        eprintln!("\n ┏┓┏╋╋ \n ┗┛┛┗┗\n");
+    }
+
     match &cli.command {
         Some(Commands::Completions {
             shell,
@@ -505,6 +583,21 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
             commands::handle_launch(full_args).await?;
         }
+        #[cfg(unix)]
+        Some(Commands::Daemon { command }) => match command {
+            DaemonCommand::Start => commands::daemon::handle_daemon_start().await?,
+            DaemonCommand::Stop => commands::daemon::handle_daemon_stop().await?,
+            DaemonCommand::Restart => commands::daemon::handle_daemon_restart().await?,
+            DaemonCommand::Status => commands::daemon::handle_daemon_status().await?,
+            DaemonCommand::Install => commands::daemon::handle_daemon_install()?,
+            DaemonCommand::Uninstall => commands::daemon::handle_daemon_uninstall()?,
+            DaemonCommand::Logs { follow, lines } => {
+                commands::daemon::handle_daemon_logs(follow, lines).await?
+            }
+            DaemonCommand::Run { .. } => {
+                unreachable!("daemon run is handled before logging init")
+            }
+        },
         Some(Commands::Completions { .. }) | Some(Commands::ListDevices) | Some(Commands::Logs) => {
             unreachable!("These commands are handled earlier")
         }

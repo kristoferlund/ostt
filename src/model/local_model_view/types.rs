@@ -11,6 +11,8 @@ pub(crate) struct LocalModelEntry {
     pub size_mb: u32,
     pub is_downloaded: bool,
     pub is_active: bool,
+    /// True when the local model daemon is running and has this model loaded.
+    pub is_daemon_loaded: bool,
     pub is_available_in_registry: bool,
     pub languages: Vec<String>,
     pub url: String,
@@ -81,6 +83,8 @@ pub(crate) struct LocalModelsTui {
     pub mode: LocalModelsMode,
     pub downloaded_model_disk_usage_bytes: u64,
     pub toast: Option<crate::ui::Toast>,
+    /// Model ID currently loaded in the daemon, if any.
+    pub daemon_model_id: Option<String>,
 }
 
 impl LocalModelsTui {
@@ -94,6 +98,15 @@ impl LocalModelsTui {
             mode: LocalModelsMode::Browse,
             downloaded_model_disk_usage_bytes,
             toast: None,
+            daemon_model_id: None,
+        }
+    }
+
+    /// Update cached daemon status and reflect it on each entry's `is_daemon_loaded`.
+    pub(crate) fn update_daemon_status(&mut self, loaded_model_id: Option<&str>) {
+        self.daemon_model_id = loaded_model_id.map(str::to_owned);
+        for entry in &mut self.entries {
+            entry.is_daemon_loaded = loaded_model_id == Some(entry.id.as_str());
         }
     }
 
@@ -166,8 +179,13 @@ impl LocalModelsTui {
         registry: &[RegistryEntry],
     ) -> anyhow::Result<()> {
         let selected_model = crate::config::get_selected_model_entry()?;
-        self.entries =
-            super::build_local_model_entries(local_state, registry, selected_model.as_ref());
+        let daemon_model_id = self.daemon_model_id.as_deref();
+        self.entries = super::build_local_model_entries(
+            local_state,
+            registry,
+            selected_model.as_ref(),
+            daemon_model_id,
+        );
         self.downloaded_model_disk_usage_bytes =
             super::downloaded_model_disk_usage_bytes(&self.entries);
         let display_len = self.display_entries().len();

@@ -2,7 +2,7 @@ use crossterm::event::{self, Event, KeyCode};
 use ratatui::{
     backend::CrosstermBackend,
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
     widgets::{List, ListItem, ListState},
     Terminal,
 };
@@ -33,13 +33,20 @@ pub(crate) async fn run(
 
             let items: Vec<ListItem> = choices
                 .iter()
-                .map(|choice| ListItem::new(Line::from(choice.to_string())))
+                .enumerate()
+                .map(|(i, choice)| {
+                    let style = if i == selected {
+                        Style::default().fg(Color::White).bg(Color::DarkGray)
+                    } else {
+                        Style::default()
+                    };
+                    ListItem::new(Line::from(Span::styled(choice.to_string(), style)))
+                })
                 .collect();
 
             let mut state = ListState::default().with_selected(Some(selected));
             frame.render_stateful_widget(
-                List::new(items)
-                    .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
+                List::new(items).highlight_style(Style::default()),
                 layout.body,
                 &mut state,
             );
