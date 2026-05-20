@@ -4,7 +4,7 @@
 //! mouse support, selection, and inline editing.
 
 use crate::keywords::KeywordsManager;
-use crate::ui::{render_footer, render_title};
+use crate::ui::{render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use ratatui::crossterm::{
     event::{
@@ -16,7 +16,7 @@ use ratatui::crossterm::{
 };
 use ratatui::{
     prelude::*,
-    widgets::{Block, List, ListItem, ListState, Padding, Paragraph},
+    widgets::{Block, List, ListItem, ListState, Paragraph},
 };
 use std::io::{self, Stdout};
 use tui_input::backend::crossterm::EventHandler;
@@ -217,41 +217,22 @@ impl KeywordsViewer {
         let list_state = &mut self.list_state;
 
         self.terminal.draw(|frame| {
-            let area = frame.area();
-
-            let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
-            frame.render_widget(&padding_block, area);
-            let padded_area = padding_block.inner(area);
-
-            let main_block = Block::default();
-            frame.render_widget(&main_block, padded_area);
-            let inner_area = main_block.inner(padded_area);
-
-            // Split into header and content
-            let layout = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints([Constraint::Length(3), Constraint::Min(0)])
-                .split(inner_area);
-
-            let header_area = layout[0];
-            let content_area = render_title(frame, layout[1], "Keywords");
-
-            // Header
-            let header_text = "┏┓┏╋╋ \n┗┛┛┗┗ \n";
-            let header_paragraph = Paragraph::new(header_text).alignment(Alignment::Left);
-            frame.render_widget(header_paragraph, header_area);
+            let layout = render_app_layout(frame, frame.area());
+            render_title(frame, layout.title, "Keywords");
 
             if input_mode {
                 Self::draw_with_input(
                     frame,
-                    content_area,
+                    layout.body,
                     &keywords,
                     &input_value,
                     input_cursor,
                     list_state,
                 );
+                render_footer(frame, layout.footer, "↵ add, esc cancel");
             } else {
-                Self::draw_normal(frame, content_area, &keywords, list_state);
+                Self::draw_normal(frame, layout.body, &keywords, list_state);
+                render_footer(frame, layout.footer, "↑↓ select, x/del delete, a add, esc/q exit");
             }
         })?;
 
@@ -260,17 +241,7 @@ impl KeywordsViewer {
 
     /// Draws the UI when *not* in input mode.
     fn draw_normal(frame: &mut Frame, area: Rect, keywords: &[String], list_state: &mut ListState) {
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(1)])
-            .split(area);
-
-        let list_area = layout[0];
-        let help_area = layout[1];
-
-        Self::render_keywords_list(frame, list_area, keywords, list_state);
-
-        render_footer(frame, help_area, "↑↓ select, x/del delete, a add, esc/q exit");
+        Self::render_keywords_list(frame, area, keywords, list_state);
     }
 
     /// Draws the UI when in input mode.

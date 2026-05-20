@@ -71,14 +71,14 @@ pub(crate) async fn run_cloud_model_selector(
             let layout = render_app_layout(frame, frame.area());
             match mode {
                 CloudModelMode::Browse => {
-                    let list_area = render_title(frame, layout.body, "Cloud Model");
+                    render_title(frame, layout.title, "Cloud Model");
                     let (items, selected_display_index) =
                         cloud_model_list_items(&sections, selected);
                     let mut state = ListState::default().with_selected(selected_display_index);
                     frame.render_stateful_widget(
                         List::new(items)
                             .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-                        list_area,
+                        layout.body,
                         &mut state,
                     );
                     render_footer(
@@ -88,6 +88,7 @@ pub(crate) async fn run_cloud_model_selector(
                     );
                 }
                 CloudModelMode::Info => {
+                    render_title(frame, layout.title, "Cloud Model Info");
                     if let Some(entry) = cloud_model_at(&sections, selected) {
                         render_cloud_model_info(frame, layout.body, entry);
                     }
@@ -141,7 +142,7 @@ async fn show_no_cloud_providers_screen(
     loop {
         terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
-            let content_area = render_title(frame, layout.body, "Cloud Provider");
+            render_title(frame, layout.title, "Cloud Provider");
 
             frame.render_widget(
                 Paragraph::new(vec![
@@ -153,7 +154,7 @@ async fn show_no_cloud_providers_screen(
                     Line::from("Run `ostt auth login` to add credentials."),
                 ])
                 .wrap(Wrap { trim: false }),
-                content_area,
+                layout.body,
             );
 
             render_footer(frame, layout.footer, "esc/q back");
@@ -219,7 +220,6 @@ pub(crate) fn save_cloud_selection(
 }
 
 fn render_cloud_model_info(frame: &mut Frame<'_>, area: Rect, entry: &CloudModelEntry) {
-    let content_area = render_title(frame, area, "Cloud Model Info");
     let lines = vec![
         Line::from(format!("ID: {}", entry.model_id)),
         Line::from(format!("Name: {}", entry.name)),
@@ -242,7 +242,7 @@ fn render_cloud_model_info(frame: &mut Frame<'_>, area: Rect, entry: &CloudModel
 
     frame.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }),
-        content_area,
+        area,
     );
 }
 

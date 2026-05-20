@@ -94,7 +94,7 @@ pub(crate) fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
 
 fn render_browse(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
     let layout = render_app_layout(frame, frame.area());
-    let list_area = render_title(frame, layout.body, "Local Models");
+    render_title(frame, layout.title, "Local Models");
 
     let mut items = Vec::new();
     push_grouped_model_items(&mut items, tui.entries.iter().collect());
@@ -103,7 +103,7 @@ fn render_browse(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
     let mut state = ListState::default().with_selected(selected_display_index);
     frame.render_stateful_widget(
         List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-        list_area,
+        layout.body,
         &mut state,
     );
 
@@ -116,7 +116,7 @@ fn render_browse(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
 
 fn render_info(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
     let layout = render_app_layout(frame, frame.area());
-    let content_area = render_title(frame, layout.body, &entry.name);
+    render_title(frame, layout.title, &entry.name);
 
     let (_, path) = downloaded_details(entry);
     let mut lines = vec![
@@ -158,7 +158,7 @@ fn render_info(frame: &mut Frame<'_>, entry: &LocalModelEntry) {
 
     frame.render_widget(
         Paragraph::new(lines).wrap(Wrap { trim: false }),
-        content_area,
+        layout.body,
     );
     render_footer(frame, layout.footer, "esc/q back");
 }

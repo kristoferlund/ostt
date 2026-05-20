@@ -193,7 +193,8 @@ impl HistoryViewer {
 
         self.terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
-            let list_area = render_title(frame, layout.body, "History");
+            render_title(frame, layout.title, "History");
+            let list_area = layout.body;
 
             // Store list_area for mouse hit-testing
             self.list_area = list_area;

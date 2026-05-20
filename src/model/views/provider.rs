@@ -1,11 +1,12 @@
 use crossterm::event::{self, Event, KeyCode};
-use ratatui::backend::CrosstermBackend;
-use ratatui::style::{Color, Style};
-use ratatui::text::Line;
-use ratatui::widgets::{List, ListItem, ListState};
-use ratatui::Terminal;
-use std::io::Stdout;
-use std::time::Duration;
+use ratatui::{
+    backend::CrosstermBackend,
+    style::{Color, Style},
+    text::Line,
+    widgets::{List, ListItem, ListState},
+    Terminal,
+};
+use std::{io::Stdout, time::Duration};
 
 use crate::ui::{render_app_layout, render_footer, render_title};
 
@@ -27,7 +28,7 @@ pub(crate) async fn choose_model_provider(
     loop {
         terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
-            let list_area = render_title(frame, layout.body, "Provider");
+            render_title(frame, layout.title, "Provider");
 
             let items: Vec<ListItem> = choices
                 .iter()
@@ -38,7 +39,7 @@ pub(crate) async fn choose_model_provider(
             frame.render_stateful_widget(
                 List::new(items)
                     .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-                list_area,
+                layout.body,
                 &mut state,
             );
 

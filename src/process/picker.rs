@@ -32,7 +32,8 @@ pub fn render_picker_frame(
     hovered_index: Option<usize>,
 ) -> Rect {
     let layout = render_app_layout(frame, area);
-    let list_area = render_title(frame, layout.body, "Process action");
+    render_title(frame, layout.title, "Process action");
+    let list_area = layout.body;
 
     // Build list items from action names
     let selected_index = list_state.selected();
