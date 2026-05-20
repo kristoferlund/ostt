@@ -362,6 +362,7 @@ jobs:
   # Build Vulkan-accelerated Linux x86_64 binary and packages.
   # Produces ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz, ostt-vulkan .deb and .rpm.
   # Only runs on publishing events and PRs (same gate as build-linux-packages).
+  #
   build-linux-vulkan:
     name: build-linux-vulkan (x86_64)
     needs:

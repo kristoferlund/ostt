@@ -82,6 +82,13 @@ libc = "0.2"
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.16", features = ["metal"] }
 
+# whisper-rs upstream (codeberg.org/tazz4843/whisper-rs) has a broken vulkan.rs
+# that imports ggml_backend_vk_* symbols renamed in ggml >=0.10. This patch
+# replaces them with the new generic ggml_backend_dev_* API.
+# Remove once upstream ships a fix.
+[patch.crates-io]
+whisper-rs = { git = "https://github.com/kristoferlund/whisper-rs", branch = "master" }
+
 # The profile that 'dist' will build with
 [profile.dist]
 inherits = "release"
