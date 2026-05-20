@@ -8,6 +8,18 @@ license = "MIT"
 repository = "https://github.com/kristoferlund/ostt"
 homepage = "https://github.com/kristoferlund/ostt"
 
+[features]
+# Enable NVIDIA CUDA GPU acceleration for local transcription.
+# Requires CUDA toolkit at build time. The resulting binary dynamically links
+# libcuda (from the NVIDIA driver) and libcublas at runtime.
+# Used to produce the ostt-cuda release artifacts.
+whisper-cuda = ["whisper-rs/cuda"]
+# Enable Vulkan GPU acceleration for local transcription (AMD, Intel, NVIDIA).
+# Requires Vulkan SDK (libvulkan-dev, glslang-tools) at build time. The resulting
+# binary dynamically links libvulkan.so.1 (from Mesa or the NVIDIA ICD) at runtime.
+# Used to produce the ostt-vulkan release artifacts.
+whisper-vulkan = ["whisper-rs/vulkan"]
+
 [dependencies]
 # Terminal UI
 ratatui = "0.29.0"
@@ -100,6 +112,32 @@ assets = [
     ["target/dist/ostt", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ostt/README.md", "644"],
     ["LICENSE", "usr/share/doc/ostt/LICENSE", "644"],
+    ["completions/ostt.bash", "usr/share/bash-completion/completions/ostt", "644"],
+    ["completions/_ostt", "usr/share/zsh/site-functions/_ostt", "644"],
+    ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
+]
+
+[package.metadata.deb.variants.cuda]
+name = "ostt-cuda"
+depends = "$auto, ffmpeg"
+recommends = "wl-clipboard | xclip"
+assets = [
+    ["target/dist/ostt", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/ostt-cuda/README.md", "644"],
+    ["LICENSE", "usr/share/doc/ostt-cuda/LICENSE", "644"],
+    ["completions/ostt.bash", "usr/share/bash-completion/completions/ostt", "644"],
+    ["completions/_ostt", "usr/share/zsh/site-functions/_ostt", "644"],
+    ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
+]
+
+[package.metadata.deb.variants.vulkan]
+name = "ostt-vulkan"
+depends = "$auto, ffmpeg"
+recommends = "wl-clipboard | xclip"
+assets = [
+    ["target/dist/ostt", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/ostt-vulkan/README.md", "644"],
+    ["LICENSE", "usr/share/doc/ostt-vulkan/LICENSE", "644"],
     ["completions/ostt.bash", "usr/share/bash-completion/completions/ostt", "644"],
     ["completions/_ostt", "usr/share/zsh/site-functions/_ostt", "644"],
     ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],

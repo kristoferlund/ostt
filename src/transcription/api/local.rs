@@ -13,9 +13,13 @@ pub(super) async fn transcribe(
     let audio_samples = load_audio_for_whisper(audio_path)?;
     whisper_rs::install_logging_hooks();
 
-    #[cfg(target_os = "macos")]
+    #[cfg(all(target_os = "macos", not(feature = "whisper-cuda"), not(feature = "whisper-vulkan")))]
     tracing::debug!("local transcription: Metal GPU acceleration enabled");
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(feature = "whisper-cuda")]
+    tracing::debug!("local transcription: CUDA GPU acceleration enabled");
+    #[cfg(feature = "whisper-vulkan")]
+    tracing::debug!("local transcription: Vulkan GPU acceleration enabled");
+    #[cfg(not(any(target_os = "macos", feature = "whisper-cuda", feature = "whisper-vulkan")))]
     tracing::debug!("local transcription: CPU inference");
 
     let text = tokio::task::spawn_blocking(move || {
