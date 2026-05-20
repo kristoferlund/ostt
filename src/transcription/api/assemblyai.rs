@@ -80,7 +80,7 @@ struct TranscriptResponse {
 /// Uses a three-step process: upload audio, submit transcription request, poll for result.
 /// Polls at 3-second intervals with a maximum timeout of 5 minutes.
 /// Implements retry logic with exponential backoff for upload failures.
-pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 

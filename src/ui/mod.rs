@@ -4,10 +4,9 @@
 //! by multiple features throughout the application.
 
 pub mod components;
-pub mod error;
 
 pub use components::{
-    centered_fixed_rect, dialog_content_area, render_dialog, render_dialog_content,
-    render_error_dialog, render_toast, DialogAction, Toast, ToastStyle,
+    centered_fixed_rect, dialog_content_area, render_dialog,
+    render_dialog_content, render_error_dialog, render_toast, DialogAction, ErrorScreen, Toast,
+    ToastStyle,
 };
-pub use error::ErrorScreen;

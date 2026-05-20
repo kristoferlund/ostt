@@ -17,7 +17,7 @@ struct DeepInfraResponse {
 ///
 /// Uses multipart form data with bearer token authentication.
 /// DeepInfra hosts OpenAI's Whisper model and compatible models.
-pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
