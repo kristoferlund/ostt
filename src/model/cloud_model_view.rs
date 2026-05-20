@@ -4,16 +4,17 @@ use crate::transcription::{TranscriptionModel, TranscriptionProvider};
 use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph, Wrap};
-use ratatui::{Frame, Terminal};
+use ratatui::widgets::{List, ListItem, ListState};
+use ratatui::Terminal;
 use std::collections::HashSet;
 use std::io::Stdout;
 use std::time::Duration;
 
+use super::cloud_model_info_view::CloudModelInfoView;
 use super::is_ctrl_c;
+use super::no_cloud_providers_view::NoCloudProvidersView;
 
 #[derive(Debug, Clone)]
 pub(crate) struct CloudModelEntry {
@@ -44,7 +45,7 @@ pub(crate) async fn run_cloud_model_selector(
     let authorized_provider_ids = config::get_authorized_providers()?;
 
     if authorized_provider_ids.is_empty() {
-        show_no_cloud_providers_screen(terminal).await?;
+        NoCloudProvidersView::run(terminal).await?;
         return Ok(());
     }
 
@@ -54,7 +55,7 @@ pub(crate) async fn run_cloud_model_selector(
     let model_count = cloud_model_count(&sections);
 
     if model_count == 0 {
-        show_no_cloud_providers_screen(terminal).await?;
+        NoCloudProvidersView::run(terminal).await?;
         return Ok(());
     }
 
@@ -68,9 +69,9 @@ pub(crate) async fn run_cloud_model_selector(
         }
 
         terminal.draw(|frame| {
-            let layout = render_app_layout(frame, frame.area());
             match mode {
                 CloudModelMode::Browse => {
+                    let layout = render_app_layout(frame, frame.area());
                     render_title(frame, layout.title, "Cloud Model");
                     let (items, selected_display_index) =
                         cloud_model_list_items(&sections, selected);
@@ -88,11 +89,9 @@ pub(crate) async fn run_cloud_model_selector(
                     );
                 }
                 CloudModelMode::Info => {
-                    render_title(frame, layout.title, "Cloud Model Info");
                     if let Some(entry) = cloud_model_at(&sections, selected) {
-                        render_cloud_model_info(frame, layout.body, entry);
+                        CloudModelInfoView::render(frame, entry);
                     }
-                    render_footer(frame, layout.footer, "esc/q back");
                 }
             }
 
@@ -127,42 +126,6 @@ pub(crate) async fn run_cloud_model_selector(
                         }
                     }
                     KeyCode::Char('i') => mode = CloudModelMode::Info,
-                    KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                    _ if is_ctrl_c(&key) => return Err(UserQuit.into()),
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
-async fn show_no_cloud_providers_screen(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-) -> anyhow::Result<()> {
-    loop {
-        terminal.draw(|frame| {
-            let layout = render_app_layout(frame, frame.area());
-            render_title(frame, layout.title, "Cloud Provider");
-
-            frame.render_widget(
-                Paragraph::new(vec![
-                    Line::from(Span::styled(
-                        "No cloud providers authenticated.",
-                        Style::default().add_modifier(Modifier::BOLD),
-                    )),
-                    Line::from(""),
-                    Line::from("Run `ostt auth login` to add credentials."),
-                ])
-                .wrap(Wrap { trim: false }),
-                layout.body,
-            );
-
-            render_footer(frame, layout.footer, "esc/q back");
-        })?;
-
-        if event::poll(Duration::from_millis(100))? {
-            if let Event::Key(key) = event::read()? {
-                match key.code {
                     KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
                     _ if is_ctrl_c(&key) => return Err(UserQuit.into()),
                     _ => {}
@@ -217,33 +180,6 @@ pub(crate) fn save_cloud_selection(
     model: &TranscriptionModel,
 ) -> anyhow::Result<()> {
     config::save_selected_model(provider_id, model.id())
-}
-
-fn render_cloud_model_info(frame: &mut Frame<'_>, area: Rect, entry: &CloudModelEntry) {
-    let lines = vec![
-        Line::from(format!("ID: {}", entry.model_id)),
-        Line::from(format!("Name: {}", entry.name)),
-        Line::from(""),
-        Line::from(entry.description.clone()),
-        Line::from(""),
-        Line::from(format!(
-            "Languages: {}",
-            if entry.languages.is_empty() {
-                "unknown".to_string()
-            } else {
-                entry.languages.join(", ")
-            }
-        )),
-        Line::from(format!(
-            "Active: {}",
-            if entry.is_active { "Yes" } else { "No" }
-        )),
-    ];
-
-    frame.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }),
-        area,
-    );
 }
 
 fn cloud_model_list_item(entry: &CloudModelEntry) -> ListItem<'static> {

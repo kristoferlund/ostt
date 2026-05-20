@@ -129,8 +129,8 @@ pub async fn handle_retry(
                             ));
                         }
 
-                        match process::picker::show_action_picker(&config_data.process.actions)? {
-                            process::picker::PickerResult::Selected(selected_id) => {
+                        match process::process_view::show_action_picker(&config_data.process.actions)? {
+                            process::process_view::PickerResult::Selected(selected_id) => {
                                 let action = config_data
                                     .process
                                     .get_action(&selected_id)
@@ -151,7 +151,7 @@ pub async fn handle_retry(
                                     }
                                 }
                             }
-                            process::picker::PickerResult::Cancelled => {
+                            process::process_view::PickerResult::Cancelled => {
                                 // Cancelled — fall through to output raw transcription
                                 trimmed_text
                             }

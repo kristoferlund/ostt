@@ -21,8 +21,8 @@ use ratatui::{
 use std::io::{self, Stdout};
 use std::time::{Duration, Instant};
 
-/// Interactive history viewer for transcription entries.
-pub struct HistoryViewer {
+/// Interactive history view for transcription entries.
+pub struct HistoryView {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     entries: Vec<TranscriptionEntry>,
     list_state: ListState,
@@ -33,8 +33,8 @@ pub struct HistoryViewer {
     list_area: Rect,
 }
 
-impl HistoryViewer {
-    /// Creates a new history viewer with the given entries.
+impl HistoryView {
+    /// Creates a new history view with the given entries.
     pub fn new(entries: Vec<TranscriptionEntry>) -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -60,14 +60,14 @@ impl HistoryViewer {
         })
     }
 
-    /// Runs the interactive history viewer loop.
+    /// Runs the interactive history view loop.
     pub fn run(&mut self) -> Result<Option<String>> {
         if self.entries.is_empty() {
             self.cleanup()?;
             return Ok(None);
         }
 
-        tracing::debug!("History viewer started with {} entries", self.entries.len());
+        tracing::debug!("History view started with {} entries", self.entries.len());
 
         let mut selected_text: Option<String> = None;
 
@@ -127,7 +127,7 @@ impl HistoryViewer {
         }
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => {
-                tracing::debug!("History viewer exited via Escape/q");
+                tracing::debug!("History view exited via Escape/q");
                 Some(InputAction::Exit)
             }
             KeyCode::Up => {
@@ -185,7 +185,7 @@ impl HistoryViewer {
         }
     }
 
-    /// Renders the current state of the history viewer.
+    /// Renders the current state of the history view.
     fn draw(&mut self) -> Result<()> {
         let notification = self.notification.clone();
         let hovered_index = self.hovered_index;
@@ -249,7 +249,7 @@ impl HistoryViewer {
             DisableMouseCapture
         )?;
         self.terminal.show_cursor()?;
-        tracing::debug!("History viewer terminal cleanup complete");
+        tracing::debug!("History view terminal cleanup complete");
         Ok(())
     }
 }
@@ -260,7 +260,7 @@ enum InputAction {
     Select(String),
 }
 
-impl Drop for HistoryViewer {
+impl Drop for HistoryView {
     fn drop(&mut self) {
         let _ = self.cleanup();
     }

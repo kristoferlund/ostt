@@ -1,5 +1,14 @@
+pub(crate) mod custom_model_details_dialog;
+pub(crate) mod custom_model_url_input_dialog;
 pub(crate) mod handlers;
-pub(crate) mod render;
+pub(crate) mod local_model_audio_config_confirmation_dialog;
+pub(crate) mod local_model_delete_confirmation_dialog;
+pub(crate) mod local_model_download_confirmation_dialog;
+pub(crate) mod local_model_download_progress_dialog;
+pub(crate) mod local_model_info_view;
+pub(crate) mod local_model_view;
+pub(crate) mod local_model_view_helpers;
+pub(crate) mod local_models_renderer;
 pub(crate) mod types;
 
 use crossterm::event::{self, Event};
@@ -34,7 +43,7 @@ pub(crate) async fn handle_local_models_with_terminal(
             tui.toast = None;
         }
         handlers::finish_completed_download(&mut tui, &registry, &mut running_download).await?;
-        terminal.draw(|frame| render::render_local_models(frame, &tui))?;
+        terminal.draw(|frame| local_models_renderer::render_local_models(frame, &tui))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
@@ -261,7 +270,7 @@ mod tests {
 
     #[test]
     fn grouped_display_index_finds_position_within_rendered_groups() {
-        use super::render::grouped_display_index;
+        use super::local_model_view::grouped_display_index;
 
         let entries = vec![
             LocalModelEntry {

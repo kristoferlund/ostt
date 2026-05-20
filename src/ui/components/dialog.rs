@@ -30,21 +30,6 @@ pub fn render_dialog(
     render_dialog_content(frame, title, lines, 70, 9);
 }
 
-pub fn render_error_dialog(frame: &mut Frame<'_>, title: &'static str, message: String) {
-    let lines = vec![
-        Line::from(message),
-        Line::from(""),
-        Line::from(Span::styled(
-            "<Close>",
-            Style::default()
-                .fg(Color::Black)
-                .bg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        )),
-    ];
-    render_dialog_content(frame, title, lines, 70, 8);
-}
-
 pub fn centered_fixed_rect(width: u16, height: u16, area: Rect) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);

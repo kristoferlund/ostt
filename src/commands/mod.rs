@@ -6,7 +6,7 @@
 //! # Commands
 //! - `auth`: Provider + model selection and API key management (unified flow)
 //! - `record`: Audio recording with optional transcription
-//! - `history`: Transcription history viewer
+//! - `history`: Transcription history view
 //! - `keywords`: Keyword management for transcription
 //! - `config`: Open configuration file in user's preferred editor
 //! - `list_devices`: List available audio input devices

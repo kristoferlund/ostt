@@ -1,11 +1,13 @@
-mod views;
+mod cloud_model_info_view;
+mod cloud_model_view;
+mod local;
+mod model_provider_view;
+mod model_view;
+mod no_cloud_providers_view;
 
-use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
-use ratatui::Terminal;
-use ratatui::backend::CrosstermBackend;
-use std::io::{self, Stdout};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+pub use model_view::ModelView;
 
 #[derive(Debug)]
 pub struct UserQuit;
@@ -18,56 +20,13 @@ impl std::fmt::Display for UserQuit {
 
 impl std::error::Error for UserQuit {}
 
-pub struct ModelSelector {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
-}
-
-impl ModelSelector {
-    pub fn new() -> anyhow::Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
-        Ok(Self { terminal })
-    }
-
-    pub async fn run(&mut self) -> anyhow::Result<()> {
-        use views::provider::ModelProviderChoice;
-
-        loop {
-            let choice = views::provider::choose_model_provider(&mut self.terminal).await?;
-            let result = match choice {
-                ModelProviderChoice::Quit => break,
-                ModelProviderChoice::Local => {
-                    views::local::handle_local_models_with_terminal(&mut self.terminal).await
-                }
-                ModelProviderChoice::Cloud => {
-                    views::cloud::run_cloud_model_selector(&mut self.terminal).await
-                }
-            };
-            if let Err(e) = result {
-                if e.downcast_ref::<UserQuit>().is_some() {
-                    break;
-                }
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-}
-
-impl Drop for ModelSelector {
-    fn drop(&mut self) {
-        let _ = disable_raw_mode();
-        let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
-        let _ = self.terminal.show_cursor();
-    }
+pub(crate) fn is_ctrl_c(key: &KeyEvent) -> bool {
+    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::views::cloud::{build_cloud_provider_sections, save_cloud_selection};
+    use super::cloud_model_view::{build_cloud_provider_sections, save_cloud_selection};
 
     #[test]
     fn cloud_sections_include_only_authenticated_providers() {

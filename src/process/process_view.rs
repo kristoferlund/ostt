@@ -22,9 +22,9 @@ use std::io::{self, Stdout};
 
 /// Renders the action picker UI into the given frame area.
 ///
-/// Shared rendering logic used by both the standalone `ActionPicker`
+/// Shared rendering logic used by both the standalone `ProcessView`
 /// and `OsttTui::render_action_picker()`.
-pub fn render_picker_frame(
+pub fn render_process_view(
     frame: &mut Frame,
     area: Rect,
     actions: &[ProcessAction],
@@ -68,8 +68,8 @@ pub enum PickerResult {
     Cancelled,
 }
 
-/// Interactive action picker for selecting a processing action.
-struct ActionPicker {
+/// Interactive process-action view for selecting a processing action.
+struct ProcessView {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     actions: Vec<ProcessAction>,
     list_state: ListState,
@@ -78,8 +78,8 @@ struct ActionPicker {
     list_area: Rect,
 }
 
-impl ActionPicker {
-    /// Creates a new action picker with the given actions.
+impl ProcessView {
+    /// Creates a new process-action view with the given actions.
     ///
     /// Sets up the terminal in raw mode with an alternate screen.
     /// The initial selection is set to the first item.
@@ -113,7 +113,7 @@ impl ActionPicker {
         self.terminal.draw(|frame| {
             let area = frame.area();
             computed_list_area =
-                render_picker_frame(frame, area, actions, list_state, hovered_index);
+                render_process_view(frame, area, actions, list_state, hovered_index);
         })?;
 
         self.list_area = computed_list_area;
@@ -230,7 +230,7 @@ enum PickerAction {
     Select(String),
 }
 
-impl Drop for ActionPicker {
+impl Drop for ProcessView {
     fn drop(&mut self) {
         let _ = self.cleanup();
     }
@@ -265,6 +265,6 @@ pub fn show_action_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
         return Ok(PickerResult::Selected(actions[0].id.clone()));
     }
 
-    let mut picker = ActionPicker::new(actions.to_vec())?;
-    picker.run()
+    let mut view = ProcessView::new(actions.to_vec())?;
+    view.run()
 }

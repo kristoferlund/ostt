@@ -22,8 +22,8 @@ use std::io::{self, Stdout};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-/// Interactive keywords viewer for managing keywords.
-pub struct KeywordsViewer {
+/// Interactive keywords view for managing keywords.
+pub struct KeywordsView {
     /// Terminal interface
     terminal: Terminal<CrosstermBackend<Stdout>>,
     /// List state for managing selection and scroll
@@ -38,8 +38,8 @@ pub struct KeywordsViewer {
     cleaned_up: bool,
 }
 
-impl KeywordsViewer {
-    /// Creates a new keywords viewer with the given keywords.
+impl KeywordsView {
+    /// Creates a new keywords view with the given keywords.
     ///
     /// # Arguments
     /// * `keywords` - List of keywords to display
@@ -69,7 +69,7 @@ impl KeywordsViewer {
         })
     }
 
-    /// Runs the interactive keywords viewer loop.
+    /// Runs the interactive keywords view loop.
     pub fn run(&mut self, manager: &mut KeywordsManager) -> Result<()> {
         loop {
             self.draw()?;
@@ -207,7 +207,7 @@ impl KeywordsViewer {
         Ok(())
     }
 
-    /// Renders the current state of the keywords viewer.
+    /// Renders the current state of the keywords view.
     fn draw(&mut self) -> Result<()> {
         // Extract data before the closure to avoid borrow conflicts
         let input_mode = self.input_mode;
@@ -342,7 +342,7 @@ impl KeywordsViewer {
     }
 }
 
-impl Drop for KeywordsViewer {
+impl Drop for KeywordsView {
     fn drop(&mut self) {
         let _ = self.cleanup();
     }

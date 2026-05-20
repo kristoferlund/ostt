@@ -5,7 +5,7 @@
 //! past transcriptions.
 
 pub mod storage;
-pub mod ui;
+pub mod history_view;
 
 pub use storage::{HistoryManager, TranscriptionEntry};
-pub use ui::HistoryViewer;
+pub use history_view::HistoryView;
