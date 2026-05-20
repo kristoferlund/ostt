@@ -19,7 +19,7 @@ pub(crate) enum ModelProviderChoice {
     Quit,
 }
 
-pub(crate) async fn choose_model_provider(
+pub(crate) async fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<ModelProviderChoice> {
     let choices = ["Local provider", "Cloud provider"];

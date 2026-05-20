@@ -39,7 +39,7 @@ enum CloudModelMode {
     Info,
 }
 
-pub(crate) async fn run_cloud_model_selector(
+pub(crate) async fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<()> {
     let authorized_provider_ids = config::get_authorized_providers()?;

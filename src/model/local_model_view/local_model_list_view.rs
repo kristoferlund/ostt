@@ -8,9 +8,9 @@ use crate::ui::{render_app_layout, render_footer, render_title};
 use super::local_model_view_helpers::format_bytes;
 use super::types::{LocalModelEntry, LocalModelsTui};
 
-pub(super) struct LocalModelView;
+pub(super) struct LocalModelListView;
 
-impl LocalModelView {
+impl LocalModelListView {
     pub(super) fn render(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
         let layout = render_app_layout(frame, frame.area());
         render_title(frame, layout.title, "Local Models");

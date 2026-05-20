@@ -1,6 +1,6 @@
 mod cloud_model_info_view;
 mod cloud_model_view;
-mod local;
+mod local_model_view;
 mod model_provider_view;
 mod model_view;
 mod no_cloud_providers_view;

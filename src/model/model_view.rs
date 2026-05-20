@@ -23,15 +23,11 @@ impl ModelView {
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
         loop {
-            let choice = super::model_provider_view::choose_model_provider(&mut self.terminal).await?;
+            let choice = super::model_provider_view::run(&mut self.terminal).await?;
             let result = match choice {
                 ModelProviderChoice::Quit => break,
-                ModelProviderChoice::Local => {
-                    super::local::handle_local_models_with_terminal(&mut self.terminal).await
-                }
-                ModelProviderChoice::Cloud => {
-                    super::cloud_model_view::run_cloud_model_selector(&mut self.terminal).await
-                }
+                ModelProviderChoice::Local => super::local_model_view::run(&mut self.terminal).await,
+                ModelProviderChoice::Cloud => super::cloud_model_view::run(&mut self.terminal).await,
             };
             if let Err(e) = result {
                 if e.downcast_ref::<UserQuit>().is_some() {
