@@ -15,6 +15,7 @@
 //! interface for recording, provider authentication, model selection, and history browsing.
 
 pub mod app;
+pub(crate) mod app_dirs;
 pub mod clipboard;
 pub mod commands;
 pub mod config;

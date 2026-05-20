@@ -7,7 +7,6 @@ use crate::keywords::KeywordsManager;
 use crate::process;
 use crate::recording::RecordingHistory;
 use crate::transcription;
-use dirs;
 
 /// Retries transcription of a previous recording.
 ///
@@ -27,11 +26,7 @@ pub async fn handle_retry(
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Retry Command ===");
 
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
+    let data_dir = crate::app_dirs::data_dir();
 
     let recording_history = RecordingHistory::new(&data_dir)?;
     let all_recordings = recording_history.get_all_recordings()?;
@@ -70,8 +65,7 @@ pub async fn handle_retry(
 
     if let Some(selected_model) = selected_model {
         // Load keywords
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+        let config_dir = crate::app_dirs::config_dir();
         let keywords_manager = KeywordsManager::new(&config_dir)?;
         let keywords = keywords_manager.load_keywords()?;
 

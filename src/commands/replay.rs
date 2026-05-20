@@ -1,7 +1,6 @@
 //! Replay a previous recording from history using the system audio player.
 
 use crate::recording::RecordingHistory;
-use dirs;
 use std::process::Command;
 
 /// Plays back a previous recording using the system's best available audio player.
@@ -15,11 +14,7 @@ use std::process::Command;
 pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Replay Command ===");
 
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
+    let data_dir = crate::app_dirs::data_dir();
 
     let history = RecordingHistory::new(&data_dir)?;
     let all_recordings = history.get_all_recordings()?;

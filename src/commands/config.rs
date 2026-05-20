@@ -14,7 +14,7 @@ use std::process::Command;
 /// # Errors
 /// - If no editor can be found or executed
 pub fn handle_config() -> anyhow::Result<()> {
-    let config_path = get_config_path()?;
+    let config_path = crate::app_dirs::config_path()?;
 
     tracing::info!("Opening config file: {}", config_path.display());
 
@@ -73,18 +73,4 @@ fn is_editor_available(editor: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Retrieves the path to the ostt configuration file.
-///
-/// # Errors
-/// - If the home directory cannot be determined
-fn get_config_path() -> anyhow::Result<std::path::PathBuf> {
-    let config_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".config")
-        .join("ostt");
 
-    std::fs::create_dir_all(&config_dir)
-        .map_err(|e| anyhow::anyhow!("Failed to create config directory: {e}"))?;
-
-    Ok(config_dir.join("ostt.toml"))
-}

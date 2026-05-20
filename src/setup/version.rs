@@ -207,10 +207,7 @@ fn migrate_selected_model_to_transcription_config(config_path: &Path) -> anyhow:
 }
 
 fn read_legacy_selected_model() -> anyhow::Result<Option<(String, String)>> {
-    let Some(home) = dirs::home_dir() else {
-        return Ok(None);
-    };
-    let model_file = home.join(".local").join("share").join("ostt").join("model");
+    let model_file = crate::app_dirs::data_dir().join("model");
     if !model_file.exists() {
         return Ok(None);
     }

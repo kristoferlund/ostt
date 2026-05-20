@@ -48,8 +48,7 @@ pub async fn handle_transcribe(
     })?;
 
     // Load keywords
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+    let config_dir = crate::app_dirs::config_dir();
     let keywords_manager = KeywordsManager::new(&config_dir)?;
     let keywords = keywords_manager.load_keywords()?;
 
@@ -87,11 +86,7 @@ pub async fn handle_transcribe(
     tracing::debug!("Transcription completed: {}", trimmed_text);
 
     // Save raw transcription to history
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
+    let data_dir = crate::app_dirs::data_dir();
     let mut history_manager = HistoryManager::new(&data_dir)?;
     if let Err(e) = history_manager.save_transcription(&trimmed_text) {
         tracing::warn!("Failed to save transcription to history: {}", e);

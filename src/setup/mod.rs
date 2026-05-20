@@ -4,8 +4,6 @@
 
 pub mod version;
 
-use anyhow::anyhow;
-
 /// Embedded default configuration template.
 const DEFAULT_CONFIG: &str = include_str!("../../environments/ostt.toml");
 
@@ -20,10 +18,7 @@ const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Returns an error if any file operations fail.
 pub fn run_setup() -> anyhow::Result<()> {
     // Create config directory
-    let config_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow!("Could not determine home directory"))?
-        .join(".config")
-        .join("ostt");
+    let config_dir = crate::app_dirs::config_dir();
     std::fs::create_dir_all(&config_dir)?;
 
     // Write main config file with version prefix

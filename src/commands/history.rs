@@ -13,11 +13,7 @@ use crate::history::{HistoryManager, HistoryView};
 pub async fn handle_history() -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt History View ===");
 
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
+    let data_dir = crate::app_dirs::data_dir();
 
     let mut history_manager = HistoryManager::new(&data_dir)?;
     let entries = history_manager.get_all_transcriptions()?;

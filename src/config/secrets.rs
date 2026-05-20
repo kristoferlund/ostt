@@ -3,7 +3,6 @@
 //! This module handles secure storage of API credentials with restricted file permissions.
 //! Credentials are stored in the user's local data directory (~/.local/share/ostt).
 
-use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
@@ -26,8 +25,7 @@ pub struct SelectedModel {
 /// - If the local data directory cannot be determined
 /// - If the secrets directory cannot be created
 fn get_secrets_dir() -> anyhow::Result<PathBuf> {
-    let data_dir = dirs::home_dir().context("Could not find home directory")?;
-    let secrets_dir = data_dir.join(".local").join("share").join("ostt");
+    let secrets_dir = crate::app_dirs::data_dir();
     fs::create_dir_all(&secrets_dir)?;
     Ok(secrets_dir)
 }

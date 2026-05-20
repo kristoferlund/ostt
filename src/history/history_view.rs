@@ -8,7 +8,7 @@ use crate::ui::{render_app_layout, render_footer, render_title, render_toast, To
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEvent,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEvent,
         MouseEventKind,
     },
     execute,
@@ -122,7 +122,7 @@ impl HistoryView {
 
     /// Handles keyboard input.
     fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> Option<InputAction> {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if crate::ui::is_ctrl_c(&key) {
             return Some(InputAction::Exit);
         }
         match key.code {

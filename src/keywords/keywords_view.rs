@@ -8,7 +8,7 @@ use crate::ui::{render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use ratatui::crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent,
         MouseEventKind,
     },
     execute,
@@ -113,7 +113,7 @@ impl KeywordsView {
         manager: &mut KeywordsManager,
         key: KeyEvent,
     ) -> Result<bool> {
-        if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
+        if crate::ui::is_ctrl_c(&key) {
             return Ok(true);
         }
         match key.code {

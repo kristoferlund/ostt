@@ -9,7 +9,8 @@ pub(crate) mod local_model_list_view;
 pub(crate) mod local_model_view_helpers;
 pub(crate) mod types;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crate::ui::is_ctrl_c;
+use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Frame;
 use ratatui::Terminal;
@@ -235,10 +236,6 @@ fn downloaded_model_disk_usage_bytes(entries: &[LocalModelEntry]) -> u64 {
         })
         .map(|metadata| metadata.len())
         .sum()
-}
-
-fn is_ctrl_c(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
 async fn handle_key(

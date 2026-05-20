@@ -77,12 +77,7 @@ pub fn models_dir() -> PathBuf {
         return path;
     }
 
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".local")
-        .join("share")
-        .join("ostt")
-        .join("models")
+    crate::app_dirs::data_dir().join("models")
 }
 
 fn state_path() -> PathBuf {
@@ -91,22 +86,12 @@ fn state_path() -> PathBuf {
 
 /// Returns the path of the Unix socket used by the local model daemon.
 pub fn daemon_socket_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".local")
-        .join("share")
-        .join("ostt")
-        .join("ostt-daemon.sock")
+    crate::app_dirs::data_dir().join("ostt-daemon.sock")
 }
 
 /// Returns the path of the PID file written by the local model daemon.
 pub fn daemon_pid_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("~"))
-        .join(".local")
-        .join("share")
-        .join("ostt")
-        .join("ostt-daemon.pid")
+    crate::app_dirs::data_dir().join("ostt-daemon.pid")
 }
 
 pub fn model_files_dir() -> PathBuf {

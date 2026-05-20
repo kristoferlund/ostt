@@ -5,8 +5,6 @@ mod model_provider_view;
 mod model_view;
 mod no_cloud_providers_view;
 
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-
 pub use model_view::ModelView;
 
 #[derive(Debug)]
@@ -20,9 +18,7 @@ impl std::fmt::Display for UserQuit {
 
 impl std::error::Error for UserQuit {}
 
-pub(crate) fn is_ctrl_c(key: &KeyEvent) -> bool {
-    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL)
-}
+pub(crate) use crate::ui::is_ctrl_c;
 
 #[cfg(test)]
 mod tests {

@@ -874,17 +874,7 @@ impl OsttConfig {
 /// - If the config directory cannot be determined
 /// - If the config directory cannot be created
 pub(crate) fn get_config_path() -> Result<PathBuf, std::io::Error> {
-    let config_dir = dirs::home_dir().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not find home directory",
-        )
-    })?;
-    let config_path = config_dir.join(".config").join("ostt").join("ostt.toml");
-
-    std::fs::create_dir_all(config_path.parent().unwrap())?;
-
-    Ok(config_path)
+    crate::app_dirs::config_path()
 }
 
 /// Saves the configuration to the config file.

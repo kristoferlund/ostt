@@ -7,7 +7,6 @@ use crate::logging;
 use anyhow::anyhow;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
-use dirs;
 use std::env;
 use std::fs;
 use std::io;
@@ -32,11 +31,7 @@ fn suppress_alsa_warnings() {
 /// 2. If config version is older than app version, preserves user config and updates version
 /// 3. If config version matches app version, does nothing
 async fn check_and_run_setup() -> Result<(), anyhow::Error> {
-    let config_path = dirs::home_dir()
-        .ok_or_else(|| anyhow!("Could not determine home directory"))?
-        .join(".config")
-        .join("ostt")
-        .join("ostt.toml");
+    let config_path = crate::app_dirs::config_path()?;
 
     match crate::setup::version::check_setup_needed(&config_path)? {
         Some(old_version) => {

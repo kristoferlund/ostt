@@ -8,7 +8,6 @@ use crate::config;
 use crate::history::HistoryManager;
 use crate::keywords::KeywordsManager;
 use crate::process;
-use dirs;
 
 /// Handles post-processing of an existing transcription from history.
 ///
@@ -56,11 +55,7 @@ pub async fn handle_process(
     }
 
     // Load transcription from history
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
+    let data_dir = crate::app_dirs::data_dir();
 
     let mut history_manager = HistoryManager::new(&data_dir)?;
     let n = index.unwrap_or(1);
@@ -104,8 +99,7 @@ pub async fn handle_process(
     tracing::info!("Executing action '{}' on transcription #{}", action.id, n);
 
     // Load keywords
-    let config_dir = dirs::config_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+    let config_dir = crate::app_dirs::config_dir();
     let keywords_manager = KeywordsManager::new(&config_dir)?;
     let keywords = keywords_manager.load_keywords()?;
 
