@@ -42,6 +42,28 @@ mod tests {
     }
 
     #[test]
+    fn cloud_sections_mark_only_selected_provider_model_active() {
+        let selected = crate::config::SelectedModel {
+            provider_id: "openai".to_string(),
+            model_id: crate::transcription::TranscriptionModel::Whisper.id().to_string(),
+        };
+
+        let sections = build_cloud_provider_sections(
+            &["openai".to_string(), "groq".to_string()],
+            Some(&selected),
+        );
+
+        let active_entries: Vec<_> = sections
+            .iter()
+            .flat_map(|section| section.models.iter())
+            .filter(|entry| entry.is_active)
+            .collect();
+        assert_eq!(active_entries.len(), 1);
+        assert_eq!(active_entries[0].provider_id, "openai");
+        assert_eq!(active_entries[0].model_id, selected.model_id);
+    }
+
+    #[test]
     fn selection_save_helpers_persist_provider_aware_state() {
         use crate::config;
         use std::fs;

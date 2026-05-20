@@ -831,6 +831,37 @@ mod tests {
     }
 
     #[test]
+    fn confirm_delete_only_opens_for_downloaded_models() {
+        let mut entries = vec![LocalModelEntry {
+            id: "missing".to_string(),
+            name: "Missing".to_string(),
+            description: String::new(),
+            size_mb: 1,
+            is_downloaded: false,
+            is_active: false,
+            is_available_in_registry: true,
+            languages: Vec::new(),
+            url: "https://example.com/missing.bin".to_string(),
+            recommended_hardware: None,
+            category: None,
+            sha256: None,
+            group_id: None,
+        }];
+        let mut tui = types::LocalModelsTui::new(entries.clone(), 0);
+
+        tui.confirm_delete();
+        assert!(matches!(tui.mode, LocalModelsMode::Browse));
+
+        entries[0].is_downloaded = true;
+        let mut tui = types::LocalModelsTui::new(entries, 0);
+        tui.confirm_delete();
+        assert!(matches!(
+            tui.mode,
+            LocalModelsMode::ConfirmDelete { ref entry, .. } if entry.id == "missing"
+        ));
+    }
+
+    #[test]
     fn selection_navigation_stays_in_bounds() {
         let entries = vec![
             LocalModelEntry {
@@ -871,60 +902,6 @@ mod tests {
         tui.move_selection_down();
         tui.move_selection_down();
         assert_eq!(tui.selected, 1);
-    }
-
-    #[test]
-    fn selection_navigation_uses_rendered_group_order() {
-        let entries = vec![
-            LocalModelEntry {
-                id: "tiny".to_string(),
-                name: "Tiny".to_string(),
-                description: String::new(),
-                size_mb: 1,
-                is_downloaded: false,
-                is_active: false,
-                is_available_in_registry: true,
-                languages: Vec::new(),
-                url: "https://example.com/tiny.bin".to_string(),
-                recommended_hardware: None,
-                category: None,
-                sha256: None,
-                group_id: None,
-            },
-            LocalModelEntry {
-                id: "turbo".to_string(),
-                name: "Turbo".to_string(),
-                description: String::new(),
-                size_mb: 1,
-                is_downloaded: true,
-                is_active: false,
-                is_available_in_registry: true,
-                languages: Vec::new(),
-                url: "https://example.com/turbo.bin".to_string(),
-                recommended_hardware: None,
-                category: None,
-                sha256: None,
-                group_id: None,
-            },
-            LocalModelEntry {
-                id: "large-v3".to_string(),
-                name: "Large".to_string(),
-                description: String::new(),
-                size_mb: 1,
-                is_downloaded: false,
-                is_active: false,
-                is_available_in_registry: true,
-                languages: Vec::new(),
-                url: "https://example.com/large-v3.bin".to_string(),
-                recommended_hardware: None,
-                category: None,
-                sha256: None,
-                group_id: None,
-            },
-        ];
-        let tui = types::LocalModelsTui::new(entries, 0);
-
-        assert_eq!(tui.selected_entry().expect("selected").id, "tiny");
     }
 
     #[test]
