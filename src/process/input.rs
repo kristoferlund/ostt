@@ -97,6 +97,12 @@ fn expand_tilde(path: &str) -> PathBuf {
 mod tests {
     use super::*;
 
+    fn test_env_lock() -> std::sync::MutexGuard<'static, ()> {
+        crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     // 1.2.6 — Basic resolution tests
     // ═══════════════════════════════════════════════════════════════════
@@ -191,6 +197,7 @@ mod tests {
 
     #[test]
     fn tilde_path_expansion_works() {
+        let _guard = test_env_lock();
         // Write a temp file under ~/
         let home = dirs::home_dir().expect("home dir must exist for test");
         let test_dir = home.join(".ostt_test_input_resolve");

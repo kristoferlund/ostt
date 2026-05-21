@@ -39,7 +39,10 @@ struct DeepgramResults {
 /// Transcribes an audio file using Deepgram's API.
 ///
 /// Sends raw binary audio data with Token authentication and model specified in query parameters.
-pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(
+    config: &TranscriptionConfig,
+    audio_path: &Path,
+) -> anyhow::Result<String> {
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 

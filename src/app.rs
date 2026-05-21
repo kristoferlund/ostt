@@ -7,7 +7,6 @@ use crate::logging;
 use anyhow::anyhow;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
-use dirs;
 use std::env;
 use std::fs;
 use std::io;
@@ -32,11 +31,7 @@ fn suppress_alsa_warnings() {
 /// 2. If config version is older than app version, preserves user config and updates version
 /// 3. If config version matches app version, does nothing
 async fn check_and_run_setup() -> Result<(), anyhow::Error> {
-    let config_path = dirs::home_dir()
-        .ok_or_else(|| anyhow!("Could not determine home directory"))?
-        .join(".config")
-        .join("ostt")
-        .join("ostt.toml");
+    let config_path = crate::app_dirs::config_path()?;
 
     match crate::setup::version::check_setup_needed(&config_path)? {
         Some(old_version) => {
@@ -53,6 +48,11 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
                 })?;
             }
 
+            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
+                tracing::error!("Config migration failed: {e}");
+                anyhow!("Config migration failed: {e}")
+            })?;
+
             crate::setup::version::update_config_version(&config_path).map_err(|e| {
                 tracing::error!("Failed to update config version: {e}");
                 anyhow!("Failed to update config version: {e}")
@@ -64,6 +64,10 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
         }
         None => {
             // Config exists and version matches, no setup needed
+            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
+                tracing::error!("Config migration failed: {e}");
+                anyhow!("Config migration failed: {e}")
+            })?;
             tracing::debug!("Config version up to date ({})", env!("CARGO_PKG_VERSION"));
         }
     }
@@ -77,7 +81,7 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
 #[command(version)]
 #[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
 #[command(
-    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication and select a model\n    $ ostt auth\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
+    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication for cloud providers\n    $ ostt auth\n    \n    # Choose cloud or local transcription model\n    $ ostt model\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
 )]
 #[command(
     after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
@@ -182,12 +186,21 @@ enum Commands {
         index: Option<usize>,
     },
 
-    /// Authenticate with a transcription provider and select model
+    /// Manage cloud provider credentials
     ///
-    /// Configure your AI provider credentials and choose which model to use.
-    /// Handles both provider selection and API key management in one flow.
+    /// Configure or remove AI provider credentials.
     #[command(visible_alias = "a")]
-    Auth,
+    Auth {
+        #[command(subcommand)]
+        command: Option<AuthCommand>,
+    },
+
+    /// Choose and manage cloud or local transcription models
+    ///
+    /// Opens an interactive model picker. Choose a cloud model from authenticated
+    /// providers, download and activate local models, or add a custom local model.
+    #[command(name = "model")]
+    Model,
 
     /// View and browse transcription history
     ///
@@ -291,6 +304,59 @@ enum Commands {
         #[arg(long, short)]
         install: bool,
     },
+
+    /// Manage the local model daemon
+    ///
+    /// The daemon keeps a local Whisper model loaded in memory so transcriptions
+    /// start instantly instead of reloading the model on every call. It always
+    /// serves the currently active model (configured with `ostt model`).
+    ///
+    /// Examples:
+    ///   ostt daemon start            # start the daemon for the active model
+    ///   ostt daemon stop             # stop the running daemon
+    ///   ostt daemon restart          # restart with the current active model
+    ///   ostt daemon status           # show running status and service info
+    ///   ostt daemon install          # install as a login service (auto-start)
+    ///   ostt daemon uninstall        # remove the login service
+    #[command(visible_alias = "d")]
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommand,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum DaemonCommand {
+    /// Start the daemon for the active local model
+    Start,
+    /// Stop the running daemon
+    Stop,
+    /// Restart the daemon with the currently active local model
+    Restart,
+    /// Show daemon status (running, model, PID, service)
+    Status,
+    /// Install daemon as a login service (auto-start on login)
+    Install,
+    /// Remove the daemon login service
+    Uninstall,
+    /// [Internal] Run the daemon process — used by the service manager and daemon start
+    #[command(hide = true)]
+    Run {
+        /// Model ID to load (defaults to the currently active local model)
+        #[arg(long)]
+        model_id: Option<String>,
+        /// Exit after this many seconds of inactivity (omit for no timeout)
+        #[arg(long)]
+        idle_timeout_secs: Option<u64>,
+    },
+}
+
+#[derive(Subcommand)]
+enum AuthCommand {
+    /// Add or update a cloud provider credential
+    Login,
+    /// Remove a cloud provider credential
+    Logout,
 }
 
 fn resolve_process_args(
@@ -330,6 +396,42 @@ pub async fn run() -> Result<(), anyhow::Error> {
     let cli = Cli::parse();
 
     // Handle commands that don't need logging or config setup
+    // The `daemon run` subcommand is the long-running daemon process itself.
+    // It must use daemon-specific logging and skip the normal setup flow.
+    if let Some(Commands::Daemon {
+        command:
+            DaemonCommand::Run {
+                ref model_id,
+                idle_timeout_secs,
+            },
+    }) = cli.command
+    {
+        logging::init_logging()?;
+        return commands::daemon::handle_daemon_run(model_id.clone(), idle_timeout_secs).await;
+    }
+
+    // Print logo only for plain-text informational commands where it adds context
+    // without interfering with TUI rendering or piped output.
+    let show_logo = matches!(
+        &cli.command,
+        Some(Commands::ListDevices) | Some(Commands::Logs) | Some(Commands::Auth { .. })
+    );
+    let show_logo = show_logo
+        || matches!(
+            &cli.command,
+            Some(Commands::Daemon {
+                command: DaemonCommand::Start
+                    | DaemonCommand::Stop
+                    | DaemonCommand::Restart
+                    | DaemonCommand::Status
+                    | DaemonCommand::Install
+                    | DaemonCommand::Uninstall,
+            })
+        );
+    if show_logo {
+        eprintln!("\n ┏┓┏╋╋ \n ┗┛┛┗┗\n");
+    }
+
     match &cli.command {
         Some(Commands::Completions {
             shell,
@@ -420,8 +522,13 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;
         }
-        Some(Commands::Auth) => {
-            if let Err(e) = commands::handle_auth().await {
+        Some(Commands::Auth { command }) => {
+            let result = match command.unwrap_or(AuthCommand::Login) {
+                AuthCommand::Login => commands::handle_auth().await,
+                AuthCommand::Logout => commands::auth::handle_logout().await,
+            };
+
+            if let Err(e) = result {
                 // Check if it's a cancellation error (cliclack already displayed the message)
                 let err_msg = e.to_string();
                 if err_msg.contains("cancelled") || err_msg.contains("interrupted") {
@@ -431,6 +538,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
                     return Err(e);
                 }
             }
+        }
+        Some(Commands::Model) => {
+            commands::handle_model().await?;
         }
         Some(Commands::History) => {
             commands::handle_history().await?;
@@ -471,6 +581,17 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
             commands::handle_launch(full_args).await?;
         }
+        Some(Commands::Daemon { command }) => match command {
+            DaemonCommand::Start => commands::daemon::handle_daemon_start().await?,
+            DaemonCommand::Stop => commands::daemon::handle_daemon_stop().await?,
+            DaemonCommand::Restart => commands::daemon::handle_daemon_restart().await?,
+            DaemonCommand::Status => commands::daemon::handle_daemon_status().await?,
+            DaemonCommand::Install => commands::daemon::handle_daemon_install()?,
+            DaemonCommand::Uninstall => commands::daemon::handle_daemon_uninstall()?,
+            DaemonCommand::Run { .. } => {
+                unreachable!("daemon run is handled before logging init")
+            }
+        },
         Some(Commands::Completions { .. }) | Some(Commands::ListDevices) | Some(Commands::Logs) => {
             unreachable!("These commands are handled earlier")
         }

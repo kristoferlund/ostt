@@ -5,7 +5,6 @@
 //! Does not output to terminal to avoid interfering with the TUI.
 //! Automatically cleans up old log files, keeping only the 7 most recent days.
 
-use dirs;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -24,7 +23,7 @@ static APPENDER_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = O
 /// - If the log directory cannot be determined or created
 /// - If the subscriber initialization fails
 pub fn init_logging() -> Result<(), anyhow::Error> {
-    let log_dir = get_log_dir()?;
+    let log_dir = crate::app_dirs::log_dir()?;
 
     // Clean up old log files before initializing new logging
     if let Err(e) = cleanup_old_logs(&log_dir) {
@@ -56,27 +55,6 @@ pub fn init_logging() -> Result<(), anyhow::Error> {
 
     tracing::debug!("Logging initialized. Log file: {}", log_dir.display());
     Ok(())
-}
-
-/// Determines the log directory, following XDG Base Directory Specification.
-///
-/// Prefers XDG_STATE_HOME if set, otherwise uses ~/.local/state/ostt.
-///
-/// # Errors
-/// - If home directory cannot be determined
-/// - If log directory cannot be created
-fn get_log_dir() -> Result<PathBuf, anyhow::Error> {
-    let log_dir = if let Ok(xdg_state) = std::env::var("XDG_STATE_HOME") {
-        PathBuf::from(xdg_state).join("ostt")
-    } else {
-        let home = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?;
-        home.join(".local/state/ostt")
-    };
-
-    std::fs::create_dir_all(&log_dir)?;
-
-    Ok(log_dir)
 }
 
 /// Cleans up old log files, keeping only the 7 most recent days.

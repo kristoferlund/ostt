@@ -7,7 +7,6 @@ use crate::keywords::KeywordsManager;
 use crate::process;
 use crate::recording::RecordingHistory;
 use crate::transcription;
-use dirs;
 
 /// Retries transcription of a previous recording.
 ///
@@ -27,11 +26,7 @@ pub async fn handle_retry(
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Retry Command ===");
 
-    let data_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-        .join(".local")
-        .join("share")
-        .join("ostt");
+    let data_dir = crate::app_dirs::data_dir();
 
     let recording_history = RecordingHistory::new(&data_dir)?;
     let all_recordings = recording_history.get_all_recordings()?;
@@ -66,38 +61,40 @@ pub async fn handle_retry(
         anyhow::anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
     })?;
 
-    // Get the selected model from config
-    let selected_model_id = config::get_selected_model().ok().flatten();
+    let selected_model = config::get_selected_model_entry().ok().flatten();
 
-    if let Some(model_id) = selected_model_id {
-        // Get API key
-        let model = transcription::TranscriptionModel::from_id(&model_id)
-            .ok_or_else(|| anyhow::anyhow!("Unknown model: {model_id}"))?;
-        let provider = model.provider();
-
-        let api_key = match config::get_api_key(provider.id())? {
-            Some(key) => key,
-            None => {
-                return Err(anyhow::anyhow!(
-                    "No API key for {}. Please run 'ostt auth'",
-                    provider.name()
-                ));
-            }
-        };
-
+    if let Some(selected_model) = selected_model {
         // Load keywords
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
+        let config_dir = crate::app_dirs::config_dir();
         let keywords_manager = KeywordsManager::new(&config_dir)?;
         let keywords = keywords_manager.load_keywords()?;
 
-        // Prepare transcription config
-        let transcription_config = transcription::TranscriptionConfig::new(
-            model,
-            api_key,
-            keywords.clone(),
-            config_data.providers.clone(),
-        );
+        let transcription_config = if selected_model.provider_id == "local" {
+            transcription::TranscriptionConfig::new_local(
+                selected_model.model_id.clone(),
+                keywords.clone(),
+                config_data.providers.clone(),
+            )
+        } else {
+            let model = transcription::TranscriptionModel::from_id(&selected_model.model_id)
+                .ok_or_else(|| anyhow::anyhow!("Unknown model: {}", selected_model.model_id))?;
+            let provider = model.provider();
+            let api_key = match config::get_api_key(provider.id())? {
+                Some(key) => key,
+                None => {
+                    return Err(anyhow::anyhow!(
+                        "No API key for {}. Please run 'ostt auth'",
+                        provider.name()
+                    ));
+                }
+            };
+            transcription::TranscriptionConfig::new(
+                model,
+                api_key,
+                keywords.clone(),
+                config_data.providers.clone(),
+            )
+        };
 
         // Transcribe
         tracing::debug!("Starting transcription for retry...");
@@ -126,8 +123,10 @@ pub async fn handle_retry(
                             ));
                         }
 
-                        match process::picker::show_action_picker(&config_data.process.actions)? {
-                            process::picker::PickerResult::Selected(selected_id) => {
+                        match process::process_view::show_action_picker(
+                            &config_data.process.actions,
+                        )? {
+                            process::process_view::PickerResult::Selected(selected_id) => {
                                 let action = config_data
                                     .process
                                     .get_action(&selected_id)
@@ -148,7 +147,7 @@ pub async fn handle_retry(
                                     }
                                 }
                             }
-                            process::picker::PickerResult::Cancelled => {
+                            process::process_view::PickerResult::Cancelled => {
                                 // Cancelled — fall through to output raw transcription
                                 trimmed_text
                             }

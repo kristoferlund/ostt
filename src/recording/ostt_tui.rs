@@ -18,7 +18,7 @@ use std::io::{stdout, Stdout};
 
 use crate::config::file::ProcessAction;
 use crate::config::VisualizationType;
-use crate::process::picker::render_picker_frame;
+use crate::process::process_view::render_process_view;
 use crate::transcription::TranscriptionAnimation;
 
 use super::visualizations::{resize_waveform, update_waveform, SpectrumAnalyzer};
@@ -453,7 +453,7 @@ impl OsttTui {
         let actions_ref = actions.to_vec();
         self.terminal.draw(|frame| {
             let area = frame.area();
-            render_picker_frame(frame, area, &actions_ref, list_state, None);
+            render_process_view(frame, area, &actions_ref, list_state, None);
         })?;
 
         // Poll for input with 50ms timeout

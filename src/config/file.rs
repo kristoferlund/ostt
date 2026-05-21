@@ -8,6 +8,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+fn current_config_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 /// Visualization type for recording display.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -54,6 +58,14 @@ pub struct AudioConfig {
 
 fn default_output_format() -> String {
     "mp3 -ab 16k -ar 12000".to_string()
+}
+
+const LOCAL_TRANSCRIPTION_OUTPUT_FORMAT: &str = "pcm_s16le -ar 16000";
+const LOCAL_TRANSCRIPTION_SAMPLE_RATE: u32 = 16000;
+
+pub fn is_local_transcription_audio_compatible(audio: &AudioConfig) -> bool {
+    audio.sample_rate == LOCAL_TRANSCRIPTION_SAMPLE_RATE
+        && audio.output_format == LOCAL_TRANSCRIPTION_OUTPUT_FORMAT
 }
 
 fn default_peak_volume_threshold() -> u8 {
@@ -199,6 +211,62 @@ pub struct ElevenLabsConfig {
     pub language_code: Option<String>,
 }
 
+/// Local transcription provider configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalTranscriptionConfig {
+    /// Language hint: "auto" or ISO code (e.g. "sv", "en")
+    pub language: String,
+    /// Suppress timestamp output
+    pub no_timestamps: bool,
+    /// Suppress text context from previous segments
+    pub no_context: bool,
+    /// Sampling temperature (0.0 = greedy/deterministic)
+    pub temperature: f32,
+    /// Entropy threshold for fallback (2.4 = default)
+    pub entropy_thold: f32,
+    /// No-speech probability threshold (0.6 = default)
+    pub no_speech_thold: f32,
+}
+
+impl Default for LocalTranscriptionConfig {
+    fn default() -> Self {
+        Self {
+            language: "auto".to_string(),
+            no_timestamps: true,
+            no_context: true,
+            temperature: 0.0,
+            entropy_thold: 2.4,
+            no_speech_thold: 0.6,
+        }
+    }
+}
+
+impl LocalTranscriptionConfig {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        validate_local_values(self.temperature, self.entropy_thold, self.no_speech_thold)?;
+
+        Ok(())
+    }
+}
+
+fn validate_local_values(
+    temperature: f32,
+    entropy_thold: f32,
+    no_speech_thold: f32,
+) -> anyhow::Result<()> {
+    if !(0.0..=1.0).contains(&temperature) {
+        anyhow::bail!("temperature must be between 0.0 and 1.0");
+    }
+    if entropy_thold < 0.0 {
+        anyhow::bail!("entropy_thold must be >= 0.0");
+    }
+    if !(0.0..=1.0).contains(&no_speech_thold) {
+        anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
+    }
+    Ok(())
+}
+
 /// Mistral Voxtral API configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MistralConfig {
@@ -230,6 +298,8 @@ pub struct ProvidersConfig {
     pub assemblyai: AssemblyAIConfig,
     #[serde(default)]
     pub elevenlabs: ElevenLabsConfig,
+    #[serde(default)]
+    pub local: LocalTranscriptionConfig,
     #[serde(default)]
     pub mistral: MistralConfig,
 }
@@ -602,10 +672,23 @@ impl ProcessConfig {
     }
 }
 
+/// Active transcription provider/model selection.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct TranscriptionSelectionConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+}
+
 /// Complete application configuration.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OsttConfig {
+    #[serde(default = "current_config_version")]
+    pub config_version: String,
     pub audio: AudioConfig,
+    #[serde(default)]
+    pub transcription: TranscriptionSelectionConfig,
     #[serde(default)]
     pub providers: ProvidersConfig,
     #[serde(default)]
@@ -625,6 +708,7 @@ impl OsttConfig {
         let config_path = get_config_path()?;
         let config_content = fs::read_to_string(&config_path)?;
         let config: OsttConfig = toml::from_str(&config_content)?;
+        config.providers.local.validate()?;
         for action in &config.process.actions {
             action.validate()?;
         }
@@ -648,6 +732,7 @@ impl OsttConfig {
     #[allow(dead_code)]
     pub(crate) fn default() -> Self {
         OsttConfig {
+            config_version: current_config_version(),
             audio: AudioConfig {
                 device: "default".to_string(),
                 sample_rate: 16000,
@@ -656,6 +741,7 @@ impl OsttConfig {
                 output_format: default_output_format(),
                 visualization: VisualizationType::default(),
             },
+            transcription: TranscriptionSelectionConfig::default(),
             providers: ProvidersConfig::default(),
             process: ProcessConfig::default(),
             popup: PopupConfig::default(),
@@ -670,18 +756,8 @@ impl OsttConfig {
 /// # Errors
 /// - If the config directory cannot be determined
 /// - If the config directory cannot be created
-fn get_config_path() -> Result<PathBuf, std::io::Error> {
-    let config_dir = dirs::home_dir().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Could not find home directory",
-        )
-    })?;
-    let config_path = config_dir.join(".config").join("ostt").join("ostt.toml");
-
-    std::fs::create_dir_all(config_path.parent().unwrap())?;
-
-    Ok(config_path)
+pub(crate) fn get_config_path() -> Result<PathBuf, std::io::Error> {
+    crate::app_dirs::config_path()
 }
 
 /// Saves the configuration to the config file.
@@ -691,6 +767,78 @@ fn get_config_path() -> Result<PathBuf, std::io::Error> {
 /// - If the config file cannot be written
 pub fn save_config(config: &OsttConfig) -> anyhow::Result<()> {
     config.save()
+}
+
+pub fn ensure_local_transcription_audio_config() -> anyhow::Result<()> {
+    let config_path = get_config_path()?;
+    let content = fs::read_to_string(&config_path)?;
+    let updated = ensure_local_transcription_audio_config_content(&content);
+    fs::write(config_path, updated)?;
+    Ok(())
+}
+
+fn ensure_local_transcription_audio_config_content(content: &str) -> String {
+    let mut output = Vec::new();
+    let mut in_audio = false;
+    let mut saw_audio = false;
+    let mut wrote_sample_rate = false;
+    let mut wrote_output_format = false;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed == "[audio]" {
+            in_audio = true;
+            saw_audio = true;
+            wrote_sample_rate = false;
+            wrote_output_format = false;
+            output.push(line.to_string());
+            continue;
+        }
+
+        if in_audio && trimmed.starts_with('[') && trimmed.ends_with(']') {
+            if !wrote_sample_rate {
+                output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+            }
+            if !wrote_output_format {
+                output.push(format!(
+                    "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+                ));
+            }
+            in_audio = false;
+        }
+
+        if in_audio && trimmed.starts_with("sample_rate") {
+            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+            wrote_sample_rate = true;
+        } else if in_audio && trimmed.starts_with("output_format") {
+            output.push(format!(
+                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+            ));
+            wrote_output_format = true;
+        } else {
+            output.push(line.to_string());
+        }
+    }
+
+    if in_audio {
+        if !wrote_sample_rate {
+            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+        }
+        if !wrote_output_format {
+            output.push(format!(
+                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+            ));
+        }
+    } else if !saw_audio {
+        output.push(String::new());
+        output.push("[audio]".to_string());
+        output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
+        output.push(format!(
+            "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
+        ));
+    }
+
+    format!("{}\n", output.join("\n").trim())
 }
 
 #[cfg(test)]
@@ -711,11 +859,71 @@ mod tests {
         toml::from_str(toml_str)
     }
 
+    #[test]
+    fn local_transcription_audio_requires_wav_16khz() {
+        let mut audio = AudioConfig {
+            device: "default".to_string(),
+            sample_rate: 16000,
+            peak_volume_threshold: default_peak_volume_threshold(),
+            reference_level_db: default_reference_level_db(),
+            output_format: "pcm_s16le -ar 16000".to_string(),
+            visualization: VisualizationType::default(),
+        };
+
+        assert!(is_local_transcription_audio_compatible(&audio));
+
+        audio.output_format = default_output_format();
+        assert!(!is_local_transcription_audio_compatible(&audio));
+
+        audio.output_format = "pcm_s16le -ar 16000".to_string();
+        audio.sample_rate = 12000;
+        assert!(!is_local_transcription_audio_compatible(&audio));
+    }
+
+    #[test]
+    fn local_transcription_audio_update_preserves_other_config() {
+        let content = r#"# ostt
+[audio]
+device = "default"
+sample_rate = 12000
+peak_volume_threshold = 90
+output_format = "mp3 -ab 16k -ar 12000"
+visualization = "spectrum"
+
+[transcription]
+provider = "openai"
+model = "whisper"
+"#;
+
+        let updated = ensure_local_transcription_audio_config_content(content);
+
+        assert!(updated.contains("device = \"default\""));
+        assert!(updated.contains("sample_rate = 16000"));
+        assert!(updated.contains("peak_volume_threshold = 90"));
+        assert!(updated.contains("output_format = \"pcm_s16le -ar 16000\""));
+        assert!(updated.contains("[transcription]"));
+        assert!(updated.contains("provider = \"openai\""));
+    }
+
     fn validate_process_config(config: &ProcessConfig) -> Result<(), Box<dyn std::error::Error>> {
         for action in &config.actions {
             action.validate()?;
         }
         Ok(())
+    }
+
+    fn validate_ostt_config(config: &OsttConfig) -> anyhow::Result<()> {
+        config.providers.local.validate()?;
+        for action in &config.process.actions {
+            action
+                .validate()
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        }
+        Ok(())
+    }
+
+    fn parse_ostt_config(toml_str: &str) -> Result<OsttConfig, toml::de::Error> {
+        toml::from_str(toml_str)
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -809,6 +1017,111 @@ mod tests {
         "#;
         let config: OsttConfig = toml::from_str(toml_str).unwrap();
         assert!(config.process.actions.is_empty());
+    }
+
+    #[test]
+    fn missing_local_provider_defaults_to_standard_local_params() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let local = &config.providers.local;
+        assert_eq!(local.language, "auto");
+        assert!(local.no_timestamps);
+        assert!(local.no_context);
+        assert_eq!(local.temperature, 0.0);
+        assert_eq!(local.entropy_thold, 2.4);
+        assert_eq!(local.no_speech_thold, 0.6);
+    }
+
+    #[test]
+    fn full_local_provider_deserializes() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            language = "sv"
+            no_timestamps = false
+            no_context = false
+            temperature = 0.2
+            entropy_thold = 3.0
+            no_speech_thold = 0.4
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let local = &config.providers.local;
+        assert_eq!(local.language, "sv");
+        assert!(!local.no_timestamps);
+        assert!(!local.no_context);
+        assert_eq!(local.temperature, 0.2);
+        assert_eq!(local.entropy_thold, 3.0);
+        assert_eq!(local.no_speech_thold, 0.4);
+    }
+
+    #[test]
+    fn local_validation_rejects_invalid_global_values() {
+        let cases = [
+            ("temperature = 1.1", "temperature"),
+            ("temperature = -0.1", "temperature"),
+            ("entropy_thold = -0.1", "entropy_thold"),
+            ("no_speech_thold = 1.1", "no_speech_thold"),
+        ];
+
+        for (local_setting, expected_error) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+                    sample_rate = 16000
+
+                    [providers.local]
+                    {local_setting}
+                "#
+            );
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(
+                err.contains(expected_error),
+                "expected '{err}' to contain '{expected_error}'"
+            );
+        }
+    }
+
+    #[test]
+    fn local_validation_accepts_valid_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            temperature = 1.0
+            entropy_thold = 0.0
+            no_speech_thold = 0.0
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn local_config_validation_does_not_validate_active_model_id() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+
+            [providers.local]
+            language = "auto"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
     }
 
     #[test]

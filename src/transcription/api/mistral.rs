@@ -19,7 +19,10 @@ struct MistralResponse {
 /// Uses multipart form data with bearer token authentication.
 /// Keywords are passed as the `context_bias` parameter to improve transcription
 /// accuracy for domain-specific terms.
-pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(
+    config: &TranscriptionConfig,
+    audio_path: &Path,
+) -> anyhow::Result<String> {
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 

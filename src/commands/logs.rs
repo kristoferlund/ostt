@@ -1,7 +1,6 @@
 //! Display recent log entries from the application.
 
 use anyhow::anyhow;
-use dirs;
 use std::fs;
 use std::path::PathBuf;
 
@@ -16,7 +15,7 @@ const DEFAULT_LINES: usize = 50;
 /// - If the log directory cannot be determined
 /// - If log files cannot be read
 pub fn handle_logs() -> Result<(), anyhow::Error> {
-    let log_dir = get_log_dir()?;
+    let log_dir = crate::app_dirs::log_dir()?;
 
     if !log_dir.exists() {
         println!("Log directory does not exist yet: {}", log_dir.display());
@@ -49,11 +48,6 @@ pub fn handle_logs() -> Result<(), anyhow::Error> {
     } else {
         0
     };
-
-    println!();
-    println!(" ┏┓┏╋╋ ");
-    println!(" ┗┛┛┗┗ ");
-    println!();
 
     if start_index > 0 {
         println!("Showing last {} of {} lines:", DEFAULT_LINES, lines.len());
@@ -102,16 +96,4 @@ fn find_latest_log(log_dir: &PathBuf) -> Result<PathBuf, anyhow::Error> {
     latest_file
         .map(|(path, _)| path)
         .ok_or_else(|| anyhow!("No log files found in {}", log_dir.display()))
-}
-
-/// Determines the log directory, following XDG Base Directory Specification.
-fn get_log_dir() -> Result<PathBuf, anyhow::Error> {
-    let log_dir = if let Ok(xdg_state) = std::env::var("XDG_STATE_HOME") {
-        PathBuf::from(xdg_state).join("ostt")
-    } else {
-        let home = dirs::home_dir().ok_or_else(|| anyhow!("Could not determine home directory"))?;
-        home.join(".local/state/ostt")
-    };
-
-    Ok(log_dir)
 }

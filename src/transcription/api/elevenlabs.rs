@@ -20,7 +20,10 @@ struct ElevenLabsResponse {
 /// Sends multipart form data with `xi-api-key` header authentication.
 /// Keywords are passed as `keyterms` to improve transcription accuracy for
 /// domain-specific terms.
-pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyhow::Result<String> {
+pub(super) async fn transcribe(
+    config: &TranscriptionConfig,
+    audio_path: &Path,
+) -> anyhow::Result<String> {
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 

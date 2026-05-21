@@ -1,7 +1,7 @@
 //! Transcription history storage and retrieval using SQLite.
 //!
 //! Manages persistent storage of all transcriptions with timestamps,
-//! and provides querying capabilities for the history viewer.
+//! and provides querying capabilities for the history view.
 
 use anyhow::Result;
 use chrono::{DateTime, Local};

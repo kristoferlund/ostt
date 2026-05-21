@@ -4,8 +4,8 @@
 //! and provides an interactive terminal UI for browsing and selecting
 //! past transcriptions.
 
+pub mod history_view;
 pub mod storage;
-pub mod ui;
 
+pub use history_view::HistoryView;
 pub use storage::{HistoryManager, TranscriptionEntry};
-pub use ui::HistoryViewer;

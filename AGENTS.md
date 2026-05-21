@@ -59,4 +59,8 @@ If you genuinely think a convention is harmful, surface it. Don't fork silently.
 "Tests pass" is wrong if any were skipped.
 Default to surfacing uncertainty, not hiding it..
 
+## Rule 13 — Keep communication very brief
+Use the minimum text needed to convey the message.
+Do not write essays about reasoning unless necessary to guide the work.
+Be brief with users and developers without omitting important details.
 

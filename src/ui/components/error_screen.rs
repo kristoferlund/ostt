@@ -51,12 +51,9 @@ impl ErrorScreen {
 
                 for y in area.y..area.y + area.height {
                     for x in area.x..area.x + area.width {
-                        frame.buffer_mut().set_string(
-                            x,
-                            y,
-                            " ",
-                            Style::default().bg(Color::Rgb(255, 0, 0)),
-                        );
+                        frame
+                            .buffer_mut()
+                            .set_string(x, y, " ", Style::default().bg(Color::Red));
                     }
                 }
 
@@ -65,9 +62,7 @@ impl ErrorScreen {
 
                 let error_text = ratatui::text::Line::from(ratatui::text::Span::styled(
                     error_message,
-                    Style::default()
-                        .fg(Color::Rgb(255, 255, 255))
-                        .bg(Color::Rgb(255, 0, 0)),
+                    Style::default().fg(Color::White).bg(Color::Red),
                 ));
 
                 // Calculate the number of lines the text will wrap to
