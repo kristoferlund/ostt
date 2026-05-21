@@ -22,9 +22,9 @@
 
 ---
 
-OSTT is a terminal-native speech-to-text tool. Record from a hotkey, transcribe with your chosen provider, then send the result to your clipboard, a file, stdout, an AI prompt, or any shell command. It does not assume one vendor, one subscription, or one app-specific workflow: bring your own API key and choose from OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, and Mistral.
+OSTT is a terminal-native speech-to-text tool. Record from a hotkey, transcribe with local Whisper-compatible models or your chosen cloud provider, then send the result to your clipboard, a file, stdout, an AI prompt, or any shell command. Local transcription runs offline and supports GPU acceleration through Metal on macOS and CUDA or Vulkan on Linux.
 
-OSTT is built for people who treat the terminal as a normal place for voice input to land. You can print to stdout, copy to the clipboard, write to files, retry the same recording with another model, transcribe existing audio, and post-process text with AI prompts or shell commands. Voice becomes text that can move through the same tools as everything else.
+OSTT is built for people who treat the terminal as a normal place for voice input to land. It does not assume one vendor, one subscription, or one app-specific workflow: use offline local models, bring your own API key for OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, or Mistral, and retry the same recording with another model when needed. Voice becomes text that can move through the same tools as everything else.
 
 > [!TIP]
 > Bind `Alt+Space` to `ostt launch -c` for a global hotkey popup. Press once to start recording, press again to stop and transcribe. Use `Alt+Ctrl+Space` with `ostt launch -c -p` for a popup with an action picker.

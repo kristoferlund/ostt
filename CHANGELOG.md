@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.12 - 2026-05-21
+
 ### Added
 
 - **Local transcription** — Run transcription fully offline using whisper.cpp. Metal is enabled on all macOS builds (Apple Silicon ~180 ms). CUDA and Vulkan builds are available for Linux. The install script auto-selects the right GPU variant.
@@ -17,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated model picker UI, dialogs, and toasts to use terminal ANSI colors and consistent local/cloud model screens.
+
 ## 0.0.11 - 2026-05-13
 
 ### Fixed
