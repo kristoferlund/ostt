@@ -3,7 +3,11 @@
 //! This module provides support for multiple transcription providers and models through a
 //! unified interface. Each provider has its own API endpoint and authentication method.
 
-#[cfg(any(target_os = "macos", feature = "whisper-cuda", feature = "whisper-vulkan"))]
+#[cfg(any(
+    target_os = "macos",
+    feature = "whisper-cuda",
+    feature = "whisper-vulkan"
+))]
 use std::ffi::CStr;
 
 pub mod animation;
@@ -36,14 +40,22 @@ pub(crate) fn local_inference_backend() -> &'static str {
     {
         "Metal GPU acceleration"
     }
-    #[cfg(not(any(target_os = "macos", feature = "whisper-cuda", feature = "whisper-vulkan")))]
+    #[cfg(not(any(
+        target_os = "macos",
+        feature = "whisper-cuda",
+        feature = "whisper-vulkan"
+    )))]
     {
         "CPU inference"
     }
 }
 
 pub(crate) fn local_inference_backend_details() -> String {
-    #[cfg(any(target_os = "macos", feature = "whisper-cuda", feature = "whisper-vulkan"))]
+    #[cfg(any(
+        target_os = "macos",
+        feature = "whisper-cuda",
+        feature = "whisper-vulkan"
+    ))]
     {
         let devices = local_gpu_devices();
         if devices.is_empty() {
@@ -61,13 +73,21 @@ pub(crate) fn local_inference_backend_details() -> String {
         format!("{} using device(s): {devices}", local_inference_backend())
     }
 
-    #[cfg(not(any(target_os = "macos", feature = "whisper-cuda", feature = "whisper-vulkan")))]
+    #[cfg(not(any(
+        target_os = "macos",
+        feature = "whisper-cuda",
+        feature = "whisper-vulkan"
+    )))]
     {
         local_inference_backend().to_string()
     }
 }
 
-#[cfg(any(target_os = "macos", feature = "whisper-cuda", feature = "whisper-vulkan"))]
+#[cfg(any(
+    target_os = "macos",
+    feature = "whisper-cuda",
+    feature = "whisper-vulkan"
+))]
 fn local_gpu_devices() -> Vec<String> {
     unsafe {
         let count = whisper_rs_sys::ggml_backend_dev_count();
@@ -77,7 +97,8 @@ fn local_gpu_devices() -> Vec<String> {
             let device = whisper_rs_sys::ggml_backend_dev_get(index);
             let device_type = whisper_rs_sys::ggml_backend_dev_type(device);
             if device_type != whisper_rs_sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU
-                && device_type != whisper_rs_sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU
+                && device_type
+                    != whisper_rs_sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU
             {
                 continue;
             }

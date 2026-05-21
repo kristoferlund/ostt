@@ -762,6 +762,8 @@ mod tests {
     fn with_isolated_data_dir(test: impl FnOnce(PathBuf)) {
         let _guard = test_env_lock();
         let previous_home = env::var_os("HOME");
+        let previous_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+        let previous_xdg_data_home = env::var_os("XDG_DATA_HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
@@ -770,6 +772,8 @@ mod tests {
         let models_dir = dir.join("models");
         set_test_models_dir(Some(models_dir.clone()));
         env::set_var("HOME", &dir);
+        env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
+        env::set_var("XDG_DATA_HOME", dir.join(".local").join("share"));
 
         test(models_dir);
 
@@ -778,6 +782,16 @@ mod tests {
             env::set_var("HOME", previous_home);
         } else {
             env::remove_var("HOME");
+        }
+        if let Some(previous_xdg_config_home) = previous_xdg_config_home {
+            env::set_var("XDG_CONFIG_HOME", previous_xdg_config_home);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
+        }
+        if let Some(previous_xdg_data_home) = previous_xdg_data_home {
+            env::set_var("XDG_DATA_HOME", previous_xdg_data_home);
+        } else {
+            env::remove_var("XDG_DATA_HOME");
         }
         let _ = fs::remove_dir_all(dir);
     }
@@ -874,6 +888,7 @@ mod tests {
     fn models_dir_defaults_to_home_local_share() {
         let _guard = test_env_lock();
         let previous_home = env::var_os("HOME");
+        let previous_xdg_data_home = env::var_os("XDG_DATA_HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
@@ -881,6 +896,7 @@ mod tests {
         let home = env::temp_dir().join(format!("ostt-models-home-test-{unique}"));
         set_test_models_dir(None);
         env::set_var("HOME", &home);
+        env::remove_var("XDG_DATA_HOME");
 
         assert_eq!(
             models_dir(),
@@ -894,6 +910,11 @@ mod tests {
             env::set_var("HOME", previous_home);
         } else {
             env::remove_var("HOME");
+        }
+        if let Some(previous_xdg_data_home) = previous_xdg_data_home {
+            env::set_var("XDG_DATA_HOME", previous_xdg_data_home);
+        } else {
+            env::remove_var("XDG_DATA_HOME");
         }
     }
 
@@ -1357,6 +1378,8 @@ mod tests {
     async fn download_model_replaces_existing_file_without_activating() {
         let _guard = test_env_lock();
         let previous_home = env::var_os("HOME");
+        let previous_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+        let previous_xdg_data_home = env::var_os("XDG_DATA_HOME");
 
         let first_url = serve_once("200 OK", "application/octet-stream", b"first".to_vec());
         let second_url = serve_once("200 OK", "application/octet-stream", b"second".to_vec());
@@ -1367,6 +1390,8 @@ mod tests {
         let dir = env::temp_dir().join(format!("ostt-redownload-test-{unique}"));
         set_test_models_dir(Some(dir.join("models")));
         env::set_var("HOME", &dir);
+        env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
+        env::set_var("XDG_DATA_HOME", dir.join(".local").join("share"));
         config::save_selected_model("local", "active").expect("save selected model");
         let dest_path = model_files_dir().join("turbo.bin");
 
@@ -1388,6 +1413,16 @@ mod tests {
             env::set_var("HOME", previous_home);
         } else {
             env::remove_var("HOME");
+        }
+        if let Some(previous_xdg_config_home) = previous_xdg_config_home {
+            env::set_var("XDG_CONFIG_HOME", previous_xdg_config_home);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
+        }
+        if let Some(previous_xdg_data_home) = previous_xdg_data_home {
+            env::set_var("XDG_DATA_HOME", previous_xdg_data_home);
+        } else {
+            env::remove_var("XDG_DATA_HOME");
         }
         let _ = fs::remove_dir_all(dir);
     }

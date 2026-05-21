@@ -72,5 +72,3 @@ fn is_editor_available(editor: &str) -> bool {
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
-
-

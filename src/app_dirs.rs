@@ -5,6 +5,13 @@
 
 use std::path::PathBuf;
 
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir)
+}
+
 /// Returns `~/.local/share/ostt` (XDG_DATA_HOME/ostt if set).
 ///
 /// This is where model files, recordings, history, and the daemon socket live.
@@ -12,7 +19,7 @@ pub(crate) fn data_dir() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_DATA_HOME") {
         return PathBuf::from(xdg).join("ostt");
     }
-    dirs::home_dir()
+    home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".local")
         .join("share")
@@ -24,7 +31,7 @@ pub(crate) fn config_dir() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
         return PathBuf::from(xdg).join("ostt");
     }
-    dirs::home_dir()
+    home_dir()
         .unwrap_or_else(|| PathBuf::from("~"))
         .join(".config")
         .join("ostt")
@@ -52,7 +59,7 @@ pub(crate) fn log_dir() -> Result<PathBuf, anyhow::Error> {
     let dir = if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
         PathBuf::from(xdg).join("ostt")
     } else {
-        dirs::home_dir()
+        home_dir()
             .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
             .join(".local")
             .join("state")

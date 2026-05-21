@@ -1,6 +1,8 @@
 use std::path::Path;
 
 use super::TranscriptionConfig;
+use crate::config::LocalTranscriptionConfig;
+use crate::transcription::daemon_client::{probe_daemon, request_transcription};
 use crate::transcription::local_models::{resolve_installed_model_path, ModelError};
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
@@ -8,10 +10,20 @@ pub(super) async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
 ) -> anyhow::Result<String> {
-    let model_path = resolve_installed_model_path(&config.model_id)?;
     validate_local_audio_format(audio_path)?;
-    let audio_samples = load_audio_for_whisper(audio_path)?;
     let local_config = config.local_config().cloned().unwrap_or_default();
+
+    if let Some(text) = try_daemon_transcription(&config.model_id, audio_path, &local_config).await
+    {
+        return Ok(text);
+    }
+
+    tracing::info!(
+        "local transcription mode: in-process (daemon unavailable or not usable for model '{}')",
+        config.model_id
+    );
+    let model_path = resolve_installed_model_path(&config.model_id)?;
+    let audio_samples = load_audio_for_whisper(audio_path)?;
     whisper_rs::install_logging_hooks();
 
     let text = tokio::task::spawn_blocking(move || {
@@ -63,6 +75,42 @@ pub(super) async fn transcribe(
     .map_err(|err| anyhow::anyhow!("Local whisper runtime task failed: {err}"))??;
 
     Ok(filter_obvious_hallucination(&text).unwrap_or_default())
+}
+
+async fn try_daemon_transcription(
+    model_id: &str,
+    audio_path: &Path,
+    local_config: &LocalTranscriptionConfig,
+) -> Option<String> {
+    let Some(info) = probe_daemon().await else {
+        tracing::info!(
+            "local transcription mode: in-process (daemon not running, selected model '{}')",
+            model_id
+        );
+        return None;
+    };
+    if info.model_id != model_id {
+        tracing::info!(
+            "local transcription mode: in-process (daemon loaded model '{}', selected model '{}')",
+            info.model_id,
+            model_id
+        );
+        return None;
+    }
+
+    tracing::info!("local transcription mode: daemon (model '{model_id}')");
+    match request_transcription(audio_path, local_config).await {
+        Ok(text) => {
+            tracing::info!("local daemon transcription completed for model '{model_id}'");
+            Some(text)
+        }
+        Err(err) => {
+            tracing::warn!(
+                "local daemon transcription failed for model '{model_id}', falling back in-process: {err}"
+            );
+            None
+        }
+    }
 }
 
 pub(crate) fn filter_obvious_hallucination(text: &str) -> Option<String> {

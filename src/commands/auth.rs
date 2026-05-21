@@ -167,12 +167,16 @@ mod tests {
 
     struct TestHome {
         previous_home: Option<std::ffi::OsString>,
+        previous_xdg_config_home: Option<std::ffi::OsString>,
+        previous_xdg_data_home: Option<std::ffi::OsString>,
         dir: std::path::PathBuf,
     }
 
     impl TestHome {
         fn new() -> Self {
             let previous_home = std::env::var_os("HOME");
+            let previous_xdg_config_home = std::env::var_os("XDG_CONFIG_HOME");
+            let previous_xdg_data_home = std::env::var_os("XDG_DATA_HOME");
             let unique = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .expect("system time")
@@ -180,8 +184,15 @@ mod tests {
             let dir = std::env::temp_dir().join(format!("ostt-auth-test-{unique}"));
             fs::create_dir_all(&dir).expect("create temp home");
             std::env::set_var("HOME", &dir);
+            std::env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
+            std::env::set_var("XDG_DATA_HOME", dir.join(".local").join("share"));
 
-            Self { previous_home, dir }
+            Self {
+                previous_home,
+                previous_xdg_config_home,
+                previous_xdg_data_home,
+                dir,
+            }
         }
     }
 
@@ -191,6 +202,16 @@ mod tests {
                 std::env::set_var("HOME", previous_home);
             } else {
                 std::env::remove_var("HOME");
+            }
+            if let Some(previous_xdg_config_home) = self.previous_xdg_config_home.take() {
+                std::env::set_var("XDG_CONFIG_HOME", previous_xdg_config_home);
+            } else {
+                std::env::remove_var("XDG_CONFIG_HOME");
+            }
+            if let Some(previous_xdg_data_home) = self.previous_xdg_data_home.take() {
+                std::env::set_var("XDG_DATA_HOME", previous_xdg_data_home);
+            } else {
+                std::env::remove_var("XDG_DATA_HOME");
             }
             let _ = fs::remove_dir_all(&self.dir);
         }

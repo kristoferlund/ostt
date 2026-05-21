@@ -253,7 +253,7 @@ async fn handle_key(
         (LocalModelsMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => return Ok(true),
         (LocalModelsMode::Browse, KeyCode::Down) => tui.move_selection_down(),
         (LocalModelsMode::Browse, KeyCode::Up) => tui.move_selection_up(),
-        (LocalModelsMode::Browse, KeyCode::Enter) => handle_selected_entry(tui, registry)?,
+        (LocalModelsMode::Browse, KeyCode::Enter) => handle_selected_entry(tui, registry).await?,
         (LocalModelsMode::Browse, KeyCode::Char('i')) => {
             tracing::debug!("Opening local model info view");
             tui.show_info();
@@ -361,12 +361,12 @@ async fn handle_key(
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
         ) => tui.back_to_browse(),
         (LocalModelsMode::ConfirmAudioConfig { entry, .. }, KeyCode::Enter) => {
-            update_audio_config_and_activate(tui, registry, &entry)?;
+            update_audio_config_and_activate(tui, registry, &entry).await?;
         }
         (
             LocalModelsMode::ConfirmAudioConfig { entry, .. },
             KeyCode::Char('y') | KeyCode::Char('Y'),
-        ) => update_audio_config_and_activate(tui, registry, &entry)?,
+        ) => update_audio_config_and_activate(tui, registry, &entry).await?,
         (
             LocalModelsMode::ConfirmDelete { .. },
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
@@ -383,7 +383,7 @@ async fn handle_key(
     Ok(false)
 }
 
-fn handle_selected_entry(
+async fn handle_selected_entry(
     tui: &mut LocalModelsTui,
     registry: &[RegistryEntry],
 ) -> anyhow::Result<()> {
@@ -418,7 +418,7 @@ fn handle_selected_entry(
         return Ok(());
     }
 
-    match activate_entry(&entry) {
+    match activate_entry(&entry).await {
         Ok(()) => {
             tracing::info!("Activated local model '{}'", entry.id);
             tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
@@ -432,7 +432,7 @@ fn handle_selected_entry(
     Ok(())
 }
 
-fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
+async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     if !entry.is_downloaded {
         anyhow::bail!("Download first with [d]");
     }
@@ -441,15 +441,21 @@ fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
         anyhow::bail!("Download first with [d]");
     }
     config::save_selected_model("local", &entry.id)?;
+    reload_daemon_if_running(&entry.id).await?;
     Ok(())
 }
 
-fn update_audio_config_and_activate(
+async fn update_audio_config_and_activate(
     tui: &mut LocalModelsTui,
     registry: &[RegistryEntry],
     entry: &LocalModelEntry,
 ) -> anyhow::Result<()> {
-    match config::ensure_local_transcription_audio_config().and_then(|()| activate_entry(entry)) {
+    match async {
+        config::ensure_local_transcription_audio_config()?;
+        activate_entry(entry).await
+    }
+    .await
+    {
         Ok(()) => {
             tracing::info!(
                 "Updated audio config and activated local model '{}'",
@@ -469,6 +475,27 @@ fn update_audio_config_and_activate(
         }
     }
     Ok(())
+}
+
+async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
+    let Some(info) = crate::transcription::daemon_client::probe_daemon().await else {
+        tracing::debug!(
+            "No local daemon running; selected model '{model_id}' will load in-process"
+        );
+        return Ok(());
+    };
+
+    if info.model_id == model_id {
+        tracing::info!("Local daemon already loaded with activated model '{model_id}'");
+        return Ok(());
+    }
+
+    tracing::info!(
+        "Reloading local daemon after model activation: '{}' -> '{}'",
+        info.model_id,
+        model_id
+    );
+    crate::transcription::daemon_client::ensure_daemon(model_id, None).await
 }
 
 fn start_confirmed_download(
@@ -851,8 +878,12 @@ mod tests {
                 model_id: "turbo".to_string(),
             };
 
-            let entries =
-                build_local_model_entries(&LocalModelState::default(), &registry, Some(&selected), None);
+            let entries = build_local_model_entries(
+                &LocalModelState::default(),
+                &registry,
+                Some(&selected),
+                None,
+            );
 
             assert_eq!(entries.len(), 1);
             assert!(entries[0].is_downloaded);
@@ -866,7 +897,8 @@ mod tests {
             let registry = vec![registry_entry("turbo"), registry_entry("base")];
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             fs::write(model_files_dir().join("turbo.bin"), [1, 2, 3]).expect("write model");
-            let entries = build_local_model_entries(&LocalModelState::default(), &registry, None, None);
+            let entries =
+                build_local_model_entries(&LocalModelState::default(), &registry, None, None);
 
             assert_eq!(downloaded_model_disk_usage_bytes(&entries), 3);
         });

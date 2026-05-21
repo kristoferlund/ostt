@@ -399,10 +399,11 @@ pub async fn run() -> Result<(), anyhow::Error> {
     // The `daemon run` subcommand is the long-running daemon process itself.
     // It must use daemon-specific logging and skip the normal setup flow.
     if let Some(Commands::Daemon {
-        command: DaemonCommand::Run {
-            ref model_id,
-            idle_timeout_secs,
-        },
+        command:
+            DaemonCommand::Run {
+                ref model_id,
+                idle_timeout_secs,
+            },
     }) = cli.command
     {
         logging::init_logging()?;

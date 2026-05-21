@@ -15,6 +15,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::time::{sleep, timeout};
 
+use crate::config::LocalTranscriptionConfig;
+
 use super::local_models::daemon_socket_path;
 
 // ── Protocol types ────────────────────────────────────────────────────────────
@@ -23,7 +25,10 @@ use super::local_models::daemon_socket_path;
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request<'a> {
     Ping,
-    Transcribe { audio_path: &'a str },
+    Transcribe {
+        audio_path: &'a str,
+        config: &'a LocalTranscriptionConfig,
+    },
     Shutdown,
 }
 
@@ -88,7 +93,10 @@ pub async fn ensure_daemon(model_id: &str, idle_timeout_secs: Option<u64>) -> an
 ///
 /// The daemon must already be loaded with the correct model. Returns the raw
 /// transcription text (before hallucination filtering).
-pub async fn request_transcription(audio_path: &Path) -> anyhow::Result<String> {
+pub async fn request_transcription(
+    audio_path: &Path,
+    config: &LocalTranscriptionConfig,
+) -> anyhow::Result<String> {
     let audio_path_str = audio_path
         .to_str()
         .ok_or_else(|| anyhow!("audio path is not valid UTF-8"))?;
@@ -101,6 +109,7 @@ pub async fn request_transcription(audio_path: &Path) -> anyhow::Result<String> 
             &mut stream,
             &Request::Transcribe {
                 audio_path: audio_path_str,
+                config,
             },
         ),
     )
@@ -119,7 +128,11 @@ pub async fn shutdown_daemon() -> anyhow::Result<()> {
     let Ok(mut stream) = UnixStream::connect(daemon_socket_path()).await else {
         return Ok(());
     };
-    let _ = timeout(Duration::from_secs(3), send(&mut stream, &Request::Shutdown)).await;
+    let _ = timeout(
+        Duration::from_secs(3),
+        send(&mut stream, &Request::Shutdown),
+    )
+    .await;
     Ok(())
 }
 

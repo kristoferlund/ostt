@@ -41,7 +41,9 @@ mod tests {
     fn cloud_sections_mark_only_selected_provider_model_active() {
         let selected = crate::config::SelectedModel {
             provider_id: "openai".to_string(),
-            model_id: crate::transcription::TranscriptionModel::Whisper.id().to_string(),
+            model_id: crate::transcription::TranscriptionModel::Whisper
+                .id()
+                .to_string(),
         };
 
         let sections = build_cloud_provider_sections(

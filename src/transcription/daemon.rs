@@ -22,6 +22,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::time::timeout;
 
+use crate::config::LocalTranscriptionConfig;
 use crate::transcription::api::local::{
     filter_obvious_hallucination, load_audio_for_whisper, validate_local_audio_format,
 };
@@ -36,7 +37,11 @@ use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextPar
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Request {
     Ping,
-    Transcribe { audio_path: String },
+    Transcribe {
+        audio_path: String,
+        #[serde(default)]
+        config: LocalTranscriptionConfig,
+    },
     Shutdown,
 }
 
@@ -117,7 +122,9 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
     };
 
     match idle_timeout_secs {
-        Some(secs) => tracing::info!("daemon: model '{model_id}' loaded, ready (idle timeout {secs}s)"),
+        Some(secs) => {
+            tracing::info!("daemon: model '{model_id}' loaded, ready (idle timeout {secs}s)")
+        }
         None => tracing::info!("daemon: model '{model_id}' loaded, ready (no idle timeout)"),
     }
 
@@ -127,7 +134,7 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
             timeout(Duration::from_secs(secs), accept_fut).await
         } else {
             // No idle timeout: wrap in an infallible timeout that never fires.
-            Ok(accept_fut.await.map_err(|e| e))
+            Ok(accept_fut.await)
         };
 
         match result {
@@ -197,21 +204,30 @@ async fn handle_connection(
             .await?;
             Ok(true)
         }
-        Request::Transcribe { audio_path } => {
+        Request::Transcribe { audio_path, config } => {
+            tracing::info!(
+                "daemon: transcription request received (model: {model_id}, audio: {audio_path})"
+            );
             let path = PathBuf::from(&audio_path);
-            let resp = match run_inference(&path, ctx).await {
-                Ok(text) => Response {
-                    ok: true,
-                    model_id: Some(model_id.to_string()),
-                    text: Some(text),
-                    error: None,
-                },
-                Err(e) => Response {
-                    ok: false,
-                    model_id: None,
-                    text: None,
-                    error: Some(e.to_string()),
-                },
+            let resp = match run_inference(&path, ctx, config).await {
+                Ok(text) => {
+                    tracing::info!("daemon: transcription request completed (model: {model_id})");
+                    Response {
+                        ok: true,
+                        model_id: Some(model_id.to_string()),
+                        text: Some(text),
+                        error: None,
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("daemon: transcription request failed (model: {model_id}): {e}");
+                    Response {
+                        ok: false,
+                        model_id: None,
+                        text: None,
+                        error: Some(e.to_string()),
+                    }
+                }
             };
             write_framed(&mut stream, &resp).await?;
             Ok(false)
@@ -221,7 +237,11 @@ async fn handle_connection(
 
 // ── Inference ─────────────────────────────────────────────────────────────────
 
-async fn run_inference(audio_path: &std::path::Path, ctx: Arc<WhisperContext>) -> anyhow::Result<String> {
+async fn run_inference(
+    audio_path: &std::path::Path,
+    ctx: Arc<WhisperContext>,
+    local_config: LocalTranscriptionConfig,
+) -> anyhow::Result<String> {
     validate_local_audio_format(audio_path)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
 
@@ -230,14 +250,20 @@ async fn run_inference(audio_path: &std::path::Path, ctx: Arc<WhisperContext>) -
             .create_state()
             .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {e}"))?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_print_timestamps(false);
+        let language = if local_config.language == "auto" {
+            None
+        } else {
+            Some(local_config.language.as_str())
+        };
+        params.set_language(language);
+        params.set_print_timestamps(!local_config.no_timestamps);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_special(false);
-        params.set_no_context(true);
-        params.set_temperature(0.0);
-        params.set_entropy_thold(2.4);
-        params.set_no_speech_thold(0.6);
+        params.set_no_context(local_config.no_context);
+        params.set_temperature(local_config.temperature);
+        params.set_entropy_thold(local_config.entropy_thold);
+        params.set_no_speech_thold(local_config.no_speech_thold);
         state
             .full(params, &audio_samples)
             .map_err(|e| anyhow::anyhow!("Transcription failed: {e}"))?;

@@ -97,5 +97,3 @@ fn find_latest_log(log_dir: &PathBuf) -> Result<PathBuf, anyhow::Error> {
         .map(|(path, _)| path)
         .ok_or_else(|| anyhow!("No log files found in {}", log_dir.display()))
 }
-
-

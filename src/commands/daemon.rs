@@ -33,7 +33,7 @@ pub async fn handle_daemon_run(
     // model_id may be overridden by the caller (e.g. spawn_daemon_process passes it),
     // but falls back to the config active model for service-managed invocations.
     let model_id = model_id
-        .or_else(|| active_local_model())
+        .or_else(active_local_model)
         .ok_or_else(|| anyhow!("No active local model configured. Run 'ostt model' first."))?;
     crate::transcription::daemon::run(&model_id, idle_timeout_secs).await
 }
@@ -97,9 +97,13 @@ pub async fn handle_daemon_status() -> anyhow::Result<()> {
                 println!("PID:     {p}");
             }
             println!("Socket:  {}", daemon_socket_path().display());
-            let mismatch = active.as_deref().map_or(false, |m| m != d.model_id);
+            let mismatch = active.as_deref().is_some_and(|m| m != d.model_id);
             if mismatch {
-                println!("Model:   {} (active: {})", d.model_id, active.as_deref().unwrap_or("none"));
+                println!(
+                    "Model:   {} (active: {})",
+                    d.model_id,
+                    active.as_deref().unwrap_or("none")
+                );
                 println!("Warning: run 'ostt daemon restart' to load the active model");
             } else {
                 println!("Model:   {}", d.model_id);
@@ -132,7 +136,11 @@ pub fn handle_daemon_install() -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("could not determine ostt executable path")?;
 
     let service_path = service_file_path();
-    std::fs::create_dir_all(service_path.parent().unwrap_or(std::path::Path::new("/tmp")))?;
+    std::fs::create_dir_all(
+        service_path
+            .parent()
+            .unwrap_or(std::path::Path::new("/tmp")),
+    )?;
 
     #[cfg(target_os = "macos")]
     {
