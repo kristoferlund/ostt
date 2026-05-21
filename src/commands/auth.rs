@@ -13,8 +13,6 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
 
     ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
 
-    println!("\n ┏┓┏╋╋ \n ┗┛┛┗┗ \n");
-
     intro(style(" auth ").on_white().black())?;
 
     let providers = cloud_providers();
@@ -67,8 +65,6 @@ pub async fn handle_logout() -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Logout ===");
 
     ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
-
-    println!("\n ┏┓┏╋╋ \n ┗┛┛┗┗ \n");
 
     intro(style(" auth logout ").on_white().black())?;
 
