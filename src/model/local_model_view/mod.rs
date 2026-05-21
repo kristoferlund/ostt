@@ -441,28 +441,7 @@ fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
         anyhow::bail!("Download first with [d]");
     }
     config::save_selected_model("local", &entry.id)?;
-    // Pre-warm the daemon in the background so the model is ready for the
-    // first transcription. The TUI's periodic probe will show the loaded badge.
-    spawn_daemon_if_enabled(&entry.id);
     Ok(())
-}
-
-/// Spawn the local model daemon in the background if daemon mode is enabled.
-/// Fire-and-forget: failures are logged but do not propagate.
-fn spawn_daemon_if_enabled(model_id: &str) {
-    let Ok(config) = config::OsttConfig::load() else {
-        return;
-    };
-    let effective = config.providers.local.effective_for_model(model_id);
-    if !effective.daemon {
-        return;
-    }
-    let model_id = model_id.to_string();
-    tokio::spawn(async move {
-        if let Err(e) = crate::transcription::daemon_client::ensure_daemon(&model_id, None).await {
-            tracing::warn!("could not pre-warm daemon for model '{model_id}': {e}");
-        }
-    });
 }
 
 fn update_audio_config_and_activate(

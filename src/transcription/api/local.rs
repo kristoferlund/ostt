@@ -8,24 +8,10 @@ pub(super) async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
 ) -> anyhow::Result<String> {
-    // ── Daemon path ───────────────────────────────────────────────────────────
-    // When daemon mode is enabled (default: true), ensure the model is kept
-    // loaded in a background process and route the request through it.
-    // Any failure falls through to direct (in-process) transcription.
-    if let Some(lc) = config.local_config() {
-        let effective = lc.effective_for_model(&config.model_id);
-        if effective.daemon {
-            match try_daemon_transcription(&config.model_id, audio_path, effective.daemon_idle_timeout_secs).await {
-                Some(result) => return result,
-                None => tracing::debug!("daemon unavailable, falling back to direct transcription"),
-            }
-        }
-    }
-
-    // ── Direct (in-process) path ──────────────────────────────────────────────
     let model_path = resolve_installed_model_path(&config.model_id)?;
     validate_local_audio_format(audio_path)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
+    let local_config = config.local_config().cloned().unwrap_or_default();
     whisper_rs::install_logging_hooks();
 
     #[cfg(all(target_os = "macos", not(feature = "whisper-cuda"), not(feature = "whisper-vulkan")))]
@@ -47,14 +33,20 @@ pub(super) async fn transcribe(
             .create_state()
             .map_err(|err| anyhow::anyhow!("Failed to create whisper state: {err}"))?;
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        params.set_print_timestamps(false);
+        let language = if local_config.language == "auto" {
+            None
+        } else {
+            Some(local_config.language.as_str())
+        };
+        params.set_language(language);
+        params.set_print_timestamps(!local_config.no_timestamps);
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_special(false);
-        params.set_no_context(true);
-        params.set_temperature(0.0);
-        params.set_entropy_thold(2.4);
-        params.set_no_speech_thold(0.6);
+        params.set_no_context(local_config.no_context);
+        params.set_temperature(local_config.temperature);
+        params.set_entropy_thold(local_config.entropy_thold);
+        params.set_no_speech_thold(local_config.no_speech_thold);
 
         state
             .full(params, &audio_samples)
@@ -76,30 +68,6 @@ pub(super) async fn transcribe(
     .map_err(|err| anyhow::anyhow!("Local whisper runtime task failed: {err}"))??;
 
     Ok(filter_obvious_hallucination(&text).unwrap_or_default())
-}
-
-/// Try to route transcription through the daemon. Returns `Some(result)` when
-/// the daemon handled the request (successfully or with an error), `None` when
-/// the daemon is unavailable and the caller should fall back to direct transcription.
-async fn try_daemon_transcription(
-    model_id: &str,
-    audio_path: &Path,
-    idle_timeout_secs: u64,
-) -> Option<anyhow::Result<String>> {
-    use crate::transcription::daemon_client;
-
-    if let Err(e) = daemon_client::ensure_daemon(model_id, Some(idle_timeout_secs)).await {
-        tracing::warn!("could not ensure daemon for model '{model_id}': {e}");
-        return None;
-    }
-
-    match daemon_client::request_transcription(audio_path).await {
-        Ok(raw) => Some(Ok(filter_obvious_hallucination(&raw).unwrap_or_default())),
-        Err(e) => {
-            tracing::warn!("daemon transcription failed: {e}");
-            None
-        }
-    }
 }
 
 pub(crate) fn filter_obvious_hallucination(text: &str) -> Option<String> {
