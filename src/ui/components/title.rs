@@ -6,7 +6,7 @@ use ratatui::Frame;
 pub fn render_title(frame: &mut Frame<'_>, area: Rect, title: &str) {
     let label = format!(" {title} ");
     frame.render_widget(
-        Paragraph::new(label.clone()).style(Style::default().fg(Color::White).bg(Color::Blue)),
+        Paragraph::new(label.clone()).style(Style::default().fg(Color::Black).bg(Color::Cyan)),
         Rect {
             width: label.len() as u16,
             height: 1,

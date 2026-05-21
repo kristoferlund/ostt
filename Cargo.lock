@@ -1717,6 +1717,7 @@ dependencies = [
  "tui-input",
  "urlencoding",
  "whisper-rs",
+ "whisper-rs-sys",
 ]
 
 [[package]]

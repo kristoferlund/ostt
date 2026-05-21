@@ -318,7 +318,6 @@ enum Commands {
     ///   ostt daemon status           # show running status and service info
     ///   ostt daemon install          # install as a login service (auto-start)
     ///   ostt daemon uninstall        # remove the login service
-    ///   ostt daemon logs             # daemon logs appear in ostt logs
     #[command(visible_alias = "d")]
     Daemon {
         #[command(subcommand)]

@@ -9,9 +9,8 @@
 //! with the system service manager (launchd on macOS, systemd --user on Linux).
 //! When installed, the daemon starts automatically at login and restarts on failure.
 //!
-//! # Log file
-//! The daemon writes to `~/.local/state/ostt/daemon.log`. `ostt daemon logs` reads
-//! from this file.
+//! # Logs
+//! Daemon activity is written to the regular OSTT logs. Use `ostt logs` to inspect it.
 
 use std::path::PathBuf;
 use std::time::Duration;

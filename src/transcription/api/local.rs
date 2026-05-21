@@ -14,21 +14,16 @@ pub(super) async fn transcribe(
     let local_config = config.local_config().cloned().unwrap_or_default();
     whisper_rs::install_logging_hooks();
 
-    #[cfg(all(target_os = "macos", not(feature = "whisper-cuda"), not(feature = "whisper-vulkan")))]
-    tracing::debug!("local transcription: Metal GPU acceleration enabled");
-    #[cfg(feature = "whisper-cuda")]
-    tracing::debug!("local transcription: CUDA GPU acceleration enabled");
-    #[cfg(feature = "whisper-vulkan")]
-    tracing::debug!("local transcription: Vulkan GPU acceleration enabled");
-    #[cfg(not(any(target_os = "macos", feature = "whisper-cuda", feature = "whisper-vulkan")))]
-    tracing::debug!("local transcription: CPU inference");
-
     let text = tokio::task::spawn_blocking(move || {
         let model_path = model_path.to_string_lossy().into_owned();
         // WhisperContextParameters::default() sets use_gpu: cfg!(feature = "_gpu").
         // On macOS the binary is built with the metal feature, so GPU is used automatically.
         let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
             .map_err(|err| ModelError::LoadFailed(err.to_string()))?;
+        tracing::info!(
+            "local transcription backend: {}",
+            crate::transcription::local_inference_backend_details()
+        );
         let mut state = ctx
             .create_state()
             .map_err(|err| anyhow::anyhow!("Failed to create whisper state: {err}"))?;

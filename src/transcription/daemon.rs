@@ -97,6 +97,11 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
     })
     .await??;
 
+    tracing::info!(
+        "daemon: local transcription backend: {}",
+        crate::transcription::local_inference_backend_details()
+    );
+
     let ctx = Arc::new(ctx);
 
     // Bind socket.

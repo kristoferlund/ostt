@@ -80,9 +80,9 @@ fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem
 
     if entry.is_downloaded {
         let (pill_fg, pill_bg) = if is_selected {
-            (Color::White, Color::LightGreen)
+            (Color::Black, Color::LightGreen)
         } else {
-            (Color::White, Color::Green)
+            (Color::Black, Color::Green)
         };
         spans.push(Span::styled(
             " dl ",
@@ -93,9 +93,9 @@ fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem
 
     if entry.is_daemon_loaded {
         let (pill_fg, pill_bg) = if is_selected {
-            (Color::White, Color::LightMagenta)
+            (Color::Black, Color::LightMagenta)
         } else {
-            (Color::White, Color::Magenta)
+            (Color::Black, Color::Magenta)
         };
         spans.push(Span::styled(
             " run ",
