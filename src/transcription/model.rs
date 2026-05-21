@@ -40,6 +40,10 @@ pub enum TranscriptionModel {
     ElevenLabsScribeV2,
     /// ElevenLabs Scribe v1 model (previous generation)
     ElevenLabsScribeV1,
+    /// Mistral Voxtral Mini Transcribe model (fast, efficient, 13 languages)
+    MistralVoxtralMiniTranscribe,
+    /// Mistral Voxtral Mini 2602 model (pinned version)
+    MistralVoxtralMiniTranscribeV2,
 }
 
 impl TranscriptionModel {
@@ -63,6 +67,8 @@ impl TranscriptionModel {
             TranscriptionModel::ElevenLabsScribeV2 | TranscriptionModel::ElevenLabsScribeV1 => {
                 TranscriptionProvider::ElevenLabs
             }
+            TranscriptionModel::MistralVoxtralMiniTranscribe
+            | TranscriptionModel::MistralVoxtralMiniTranscribeV2 => TranscriptionProvider::Mistral,
         }
     }
 
@@ -84,6 +90,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperLargeV3 => "berget-whisper-large-v3",
             TranscriptionModel::ElevenLabsScribeV2 => "elevenlabs-scribe-v2",
             TranscriptionModel::ElevenLabsScribeV1 => "elevenlabs-scribe-v1",
+            TranscriptionModel::MistralVoxtralMiniTranscribe => "mistral-voxtral-mini",
+            TranscriptionModel::MistralVoxtralMiniTranscribeV2 => "mistral-voxtral-mini-v2",
         }
     }
 
@@ -110,6 +118,12 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperLargeV3 => "Whisper Large V3 (general-purpose)",
             TranscriptionModel::ElevenLabsScribeV2 => "Scribe v2 (highest accuracy, 99 languages)",
             TranscriptionModel::ElevenLabsScribeV1 => "Scribe v1 (previous generation)",
+            TranscriptionModel::MistralVoxtralMiniTranscribe => {
+                "Voxtral Mini Transcribe (fast, efficient, 13 languages)"
+            }
+            TranscriptionModel::MistralVoxtralMiniTranscribeV2 => {
+                "Voxtral Mini 2602 (newer version, improved accuracy)"
+            }
         }
     }
 
@@ -131,6 +145,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperLargeV3 => "General-purpose OpenAI Whisper Large V3 hosted through Berget for multilingual transcription and translation when no Swedish- or Norwegian-specialized model is preferred.",
             TranscriptionModel::ElevenLabsScribeV2 => "ElevenLabs' latest Scribe speech-to-text model for high-accuracy transcription with broad multilingual support, including support for many languages beyond English.",
             TranscriptionModel::ElevenLabsScribeV1 => "ElevenLabs' previous-generation Scribe speech-to-text model for multilingual transcription workloads.",
+            TranscriptionModel::MistralVoxtralMiniTranscribe => "Mistral's Voxtral Mini transcription model for fast, efficient multilingual speech-to-text via the Mistral API.",
+            TranscriptionModel::MistralVoxtralMiniTranscribeV2 => "Pinned Voxtral Mini 2602 transcription model for stable Mistral speech-to-text behavior.",
         }
     }
 
@@ -156,7 +172,9 @@ impl TranscriptionModel {
             | TranscriptionModel::GroqWhisperLargeV3
             | TranscriptionModel::GroqWhisperLargeV3Turbo
             | TranscriptionModel::AssemblyAIUniversal3Pro
-            | TranscriptionModel::BergetWhisperLargeV3 => &["Multilingual"],
+            | TranscriptionModel::BergetWhisperLargeV3
+            | TranscriptionModel::MistralVoxtralMiniTranscribe
+            | TranscriptionModel::MistralVoxtralMiniTranscribeV2 => &["Multilingual"],
         }
     }
 
@@ -184,6 +202,10 @@ impl TranscriptionModel {
             TranscriptionModel::ElevenLabsScribeV2 | TranscriptionModel::ElevenLabsScribeV1 => {
                 "https://api.elevenlabs.io/v1/speech-to-text"
             }
+            TranscriptionModel::MistralVoxtralMiniTranscribe
+            | TranscriptionModel::MistralVoxtralMiniTranscribeV2 => {
+                "https://api.mistral.ai/v1/audio/transcriptions"
+            }
         }
     }
 
@@ -205,6 +227,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperLargeV3 => "openai/whisper-large-v3",
             TranscriptionModel::ElevenLabsScribeV2 => "scribe_v2",
             TranscriptionModel::ElevenLabsScribeV1 => "scribe_v1",
+            TranscriptionModel::MistralVoxtralMiniTranscribe => "voxtral-mini-latest",
+            TranscriptionModel::MistralVoxtralMiniTranscribeV2 => "voxtral-mini-2602",
         }
     }
 
@@ -226,6 +250,8 @@ impl TranscriptionModel {
             "berget-whisper-large-v3" => Some(TranscriptionModel::BergetWhisperLargeV3),
             "elevenlabs-scribe-v2" => Some(TranscriptionModel::ElevenLabsScribeV2),
             "elevenlabs-scribe-v1" => Some(TranscriptionModel::ElevenLabsScribeV1),
+            "mistral-voxtral-mini" => Some(TranscriptionModel::MistralVoxtralMiniTranscribe),
+            "mistral-voxtral-mini-v2" => Some(TranscriptionModel::MistralVoxtralMiniTranscribeV2),
             _ => None,
         }
     }
@@ -248,6 +274,8 @@ impl TranscriptionModel {
             TranscriptionModel::BergetWhisperLargeV3,
             TranscriptionModel::ElevenLabsScribeV2,
             TranscriptionModel::ElevenLabsScribeV1,
+            TranscriptionModel::MistralVoxtralMiniTranscribe,
+            TranscriptionModel::MistralVoxtralMiniTranscribeV2,
         ]
     }
 
@@ -319,6 +347,6 @@ mod tests {
         for model in TranscriptionModel::all() {
             assert!(ids.insert(model.id()), "duplicate model id: {}", model.id());
         }
-        assert_eq!(ids.len(), 15, "update this count when adding a model");
+        assert_eq!(ids.len(), 17, "update this count when adding a model");
     }
 }

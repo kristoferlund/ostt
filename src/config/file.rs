@@ -267,6 +267,15 @@ fn validate_local_values(
     Ok(())
 }
 
+/// Mistral Voxtral API configuration.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct MistralConfig {
+    /// Optional language code for transcription (e.g. "en", "sv").
+    /// When set, can improve accuracy for known languages.
+    /// Defaults to null (auto-detect).
+    pub language: Option<String>,
+}
+
 /// Provider-specific configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ProviderConfig {
@@ -291,6 +300,8 @@ pub struct ProvidersConfig {
     pub elevenlabs: ElevenLabsConfig,
     #[serde(default)]
     pub local: LocalTranscriptionConfig,
+    #[serde(default)]
+    pub mistral: MistralConfig,
 }
 
 /// Popup window configuration for the `launch` subcommand.

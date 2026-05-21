@@ -16,6 +16,7 @@ pub enum TranscriptionProvider {
     Berget,
     ElevenLabs,
     Local,
+    Mistral,
 }
 
 impl TranscriptionProvider {
@@ -29,6 +30,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Berget => "berget",
             TranscriptionProvider::ElevenLabs => "elevenlabs",
             TranscriptionProvider::Local => "local",
+            TranscriptionProvider::Mistral => "mistral",
         }
     }
 
@@ -42,6 +44,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Berget => "Berget",
             TranscriptionProvider::ElevenLabs => "ElevenLabs",
             TranscriptionProvider::Local => "Local (whisper.cpp)",
+            TranscriptionProvider::Mistral => "Mistral",
         }
     }
 
@@ -55,6 +58,7 @@ impl TranscriptionProvider {
             "berget" => Some(TranscriptionProvider::Berget),
             "elevenlabs" => Some(TranscriptionProvider::ElevenLabs),
             "local" => Some(TranscriptionProvider::Local),
+            "mistral" => Some(TranscriptionProvider::Mistral),
             _ => None,
         }
     }
@@ -69,6 +73,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Berget,
             TranscriptionProvider::ElevenLabs,
             TranscriptionProvider::Local,
+            TranscriptionProvider::Mistral,
         ]
     }
 }

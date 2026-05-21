@@ -12,8 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Local transcription** — Run transcription fully offline using whisper.cpp. Metal is enabled on all macOS builds (Apple Silicon ~180 ms). CUDA and Vulkan builds are available for Linux. The install script auto-selects the right GPU variant.
 - **Local model management** — `ostt model` lets users browse, download, activate, and delete local models from a hosted registry. Custom models can be added via Hugging Face URLs or direct `.gguf`/`ggml-*.bin` links.
 - **Local model daemon** — A persistent background process keeps the model loaded between transcriptions, eliminating per-call startup cost. Managed via `ostt daemon start|stop|restart|status|install|uninstall`. Installs as a launchd service (macOS) or systemd user unit (Linux). Daemon logs are merged into `ostt logs`.
-- **Cloud model info screen** — Cloud models now expose model ID, name, description, language coverage, and active status in the model picker.
-- **Model metadata guardrails** — Tests now require every supported cloud model to define complete metadata before release.
+- **Mistral provider** - New transcription provider with Voxtral Mini Transcribe and Voxtral Mini 2602 models. Supports optional language hints via `[providers.mistral].language`.
 
 ### Changed
 
