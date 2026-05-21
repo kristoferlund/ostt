@@ -17,7 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Updated model picker UI, dialogs, and toasts to use terminal ANSI colors and consistent local/cloud model screens.
-
 ## 0.0.11 - 2026-05-13
 
 ### Fixed
