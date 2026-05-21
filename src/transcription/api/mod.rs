@@ -10,6 +10,7 @@ mod deepgram;
 mod deepinfra;
 mod elevenlabs;
 mod groq;
+mod mistral;
 mod openai;
 
 use serde::Deserialize;
@@ -81,6 +82,7 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::AssemblyAI => assemblyai::transcribe(config, audio_path).await,
         TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
         TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
+        TranscriptionProvider::Mistral => mistral::transcribe(config, audio_path).await,
     }?;
 
     Ok(result)

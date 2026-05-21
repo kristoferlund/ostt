@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Mistral provider** - New transcription provider with Voxtral Mini Transcribe and Voxtral Mini 2602 models. Supports optional language hints via `[providers.mistral].language`.
+
 ## 0.0.11 - 2026-05-13
 
 ### Fixed
