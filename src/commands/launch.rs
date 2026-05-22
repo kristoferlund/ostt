@@ -5,6 +5,7 @@
 //! a new instance.
 
 use anyhow::{anyhow, Context};
+use std::fs;
 use std::process::Command;
 
 use crate::config::file::PopupConfig;
@@ -12,71 +13,37 @@ use crate::config::OsttConfig;
 
 // ─── Running instance detection ─────────────────────────────────────────────
 
-/// Finds a running ostt process (not this launcher) by looking for our binary.
-///
-/// Some terminals (gnome-terminal, konsole) use a server model where the CLI
-/// process exits immediately, making PID file tracking of the terminal unreliable.
-/// Instead, we find the ostt process directly.
-///
-/// Uses `pgrep -f` to get candidates, then verifies each candidate's actual
-/// executable matches our binary path (filtering out terminals and shells
-/// that merely reference the ostt path in their arguments).
-fn find_running_ostt() -> Option<u32> {
-    let ostt_bin = ostt_binary_path().ok()?;
+/// Finds the active recording process from the recorder-owned PID file.
+fn find_running_recorder() -> Option<u32> {
+    let pid_path = crate::app_dirs::recording_pid_path();
+    let pid = fs::read_to_string(&pid_path)
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u32>().ok())?;
 
-    // Use pgrep to find processes with our binary path in their command line.
-    let output = Command::new("pgrep")
-        .args(["-f", &ostt_bin])
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
+    if is_recording_process(pid) {
+        Some(pid)
+    } else {
+        tracing::debug!("Removing stale recording PID file: {}", pid_path.display());
+        let _ = fs::remove_file(pid_path);
+        None
     }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let my_pid = std::process::id();
-
-    // Check each candidate: verify its actual executable is our ostt binary,
-    // not a terminal emulator or shell that has our path in its arguments.
-    for line in stdout.trim().lines() {
-        if let Ok(pid) = line.trim().parse::<u32>() {
-            if pid == my_pid {
-                continue;
-            }
-            if is_ostt_process(pid, &ostt_bin) {
-                return Some(pid);
-            }
-        }
-    }
-    None
 }
 
-/// Checks if a process is actually running our ostt binary (not just referencing it).
-fn is_ostt_process(pid: u32, ostt_bin: &str) -> bool {
-    // Use `ps -o comm= -p <pid>` to get the process executable name.
-    // On macOS this returns the full path, on Linux the basename.
-    let output = Command::new("ps")
-        .args(["-o", "comm=", "-p", &pid.to_string()])
-        .output();
+/// Checks if a PID from the recorder-owned PID file is still live.
+fn is_recording_process(pid: u32) -> bool {
+    pid != std::process::id() && process_exists(pid)
+}
 
-    match output {
-        Ok(o) if o.status.success() => {
-            let comm = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            // Check if the process command matches our binary name or full path
-            let ostt_name = std::path::Path::new(ostt_bin)
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("ostt");
-            comm == ostt_bin || comm == ostt_name || comm.ends_with(&format!("/{}", ostt_name))
-        }
-        _ => false,
-    }
+fn process_exists(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 /// Sends SIGUSR1 to finish recording on a running ostt instance.
 fn signal_running_ostt(pid: u32) -> anyhow::Result<()> {
-    tracing::info!("Sending SIGUSR1 to ostt PID {}", pid);
+    tracing::debug!("Sending SIGUSR1 to ostt PID {}", pid);
 
     let status = Command::new("kill")
         .args(["-USR1", &pid.to_string()])
@@ -196,7 +163,7 @@ fn detect_terminal(config: &PopupConfig) -> anyhow::Result<(TerminalEmulator, St
     // Auto-detect
     for terminal in TerminalEmulator::detection_order() {
         if let Some(binary) = terminal.find_binary() {
-            tracing::info!(
+            tracing::debug!(
                 "Auto-detected terminal: {} ({})",
                 terminal.command_name(),
                 binary
@@ -361,12 +328,12 @@ fn build_terminal_args(
 
 /// Handles the `ostt launch` command.
 ///
-/// If an ostt instance is already running (tracked via PID file), sends SIGUSR1
+/// If an ostt recorder is already running, sends SIGUSR1
 /// to finish recording. Otherwise, spawns a new terminal window with ostt.
 pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
-    // Check if there's already a running ostt instance
-    if let Some(pid) = find_running_ostt() {
-        tracing::info!("Found running ostt instance (PID {}), sending SIGUSR1", pid);
+    // Check if there's already a running recorder.
+    if let Some(pid) = find_running_recorder() {
+        tracing::debug!("Found running ostt recorder (PID {}), sending SIGUSR1", pid);
         signal_running_ostt(pid)?;
         return Ok(());
     }
@@ -377,7 +344,7 @@ pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
 
     // Detect terminal
     let (terminal, binary) = detect_terminal(popup)?;
-    tracing::info!("Using terminal: {} ({})", terminal.command_name(), binary);
+    tracing::debug!("Using terminal: {} ({})", terminal.command_name(), binary);
 
     // Get ostt binary path
     let ostt_bin = ostt_binary_path()?;
@@ -396,7 +363,7 @@ pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
         .spawn()
         .with_context(|| format!("Failed to spawn {}", terminal.command_name()))?;
 
-    tracing::info!("Terminal spawned with PID {}", child.id());
+    tracing::debug!("Terminal spawned with PID {}", child.id());
 
     // Detach the child process — we don't wait for it.
     drop(child);

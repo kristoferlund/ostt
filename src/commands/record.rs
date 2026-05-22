@@ -14,6 +14,26 @@ use crate::ui::ErrorScreen;
 use dirs;
 use ratatui::widgets::ListState;
 use std::fs;
+use std::path::PathBuf;
+
+struct RecordingPidGuard {
+    path: PathBuf,
+}
+
+impl Drop for RecordingPidGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+fn write_recording_pid_file() -> anyhow::Result<RecordingPidGuard> {
+    let path = crate::app_dirs::recording_pid_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, std::process::id().to_string())?;
+    Ok(RecordingPidGuard { path })
+}
 
 /// Handles audio recording and optional transcription.
 ///
@@ -85,6 +105,14 @@ pub async fn handle_record(
         return Err(anyhow::anyhow!("Failed to register signal handler: {e}"));
     }
 
+    let recording_pid_guard = match write_recording_pid_file() {
+        Ok(guard) => guard,
+        Err(e) => {
+            tui.cleanup().ok();
+            return Err(anyhow::anyhow!("Failed to write recording PID file: {e}"));
+        }
+    };
+
     tracing::debug!(
         "Entering recording loop. Press 'Enter' to transcribe or 'Escape'/'q' to cancel."
     );
@@ -93,7 +121,7 @@ pub async fn handle_record(
 
     loop {
         if term.load(std::sync::atomic::Ordering::Relaxed) {
-            tracing::info!("Received SIGUSR1: transcribing via external trigger");
+            tracing::debug!("Received SIGUSR1: transcribing via external trigger");
             should_transcribe = true;
             break;
         }
@@ -136,6 +164,8 @@ pub async fn handle_record(
             }
         }
     }
+
+    drop(recording_pid_guard);
 
     tracing::debug!("Stopping recording and saving audio...");
     let codec = config_data

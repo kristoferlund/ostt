@@ -36,7 +36,7 @@ impl RecordingHistory {
             if let Err(e) = fs::remove_file(oldest) {
                 tracing::warn!("Failed to delete old recording: {}", e);
             } else {
-                tracing::info!("Deleted old recording: {}", oldest.display());
+                tracing::debug!("Deleted old recording: {}", oldest.display());
             }
         }
 

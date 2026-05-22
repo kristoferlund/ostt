@@ -1,6 +1,6 @@
 //! Application directory helpers following XDG Base Directory Specification.
 //!
-//! All path construction for ostt's data, config, and log directories goes here.
+//! All path construction for ostt's data, config, log, and runtime directories goes here.
 //! Callers should not build these paths inline.
 
 use std::path::PathBuf;
@@ -67,4 +67,25 @@ pub(crate) fn log_dir() -> Result<PathBuf, anyhow::Error> {
     };
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
+}
+
+/// Returns the per-user runtime directory for transient files.
+///
+/// On Linux this follows XDG_RUNTIME_DIR. On platforms without XDG runtime
+/// directories, it falls back to the system temp directory with a per-user name.
+pub(crate) fn runtime_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") {
+        return PathBuf::from(xdg).join("ostt");
+    }
+
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .unwrap_or_else(|_| unsafe { libc::geteuid().to_string() });
+
+    std::env::temp_dir().join(format!("ostt-{user}"))
+}
+
+/// Returns the active recorder PID file path.
+pub(crate) fn recording_pid_path() -> PathBuf {
+    runtime_dir().join("recording.pid")
 }
