@@ -13,7 +13,7 @@ pub(super) struct LocalModelListView;
 impl LocalModelListView {
     pub(super) fn render(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
         let layout = render_app_layout(frame, frame.area());
-        render_title(frame, layout.title, "Local Models");
+        render_title(frame, layout.title, "Local models");
 
         let selected_id = tui.selected_entry().map(|e| e.id.as_str());
         let mut items = Vec::new();

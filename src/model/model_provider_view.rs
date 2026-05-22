@@ -3,12 +3,15 @@ use ratatui::{
     backend::CrosstermBackend,
     style::{Color, Style},
     text::{Line, Span},
-    widgets::{List, ListItem, ListState},
+    widgets::{List, ListItem},
     Terminal,
 };
 use std::{io::Stdout, time::Duration};
 
-use crate::ui::{render_app_layout, render_footer, render_title};
+use crate::{
+    config,
+    ui::{render_app_layout, render_footer, render_title},
+};
 
 use super::is_ctrl_c;
 
@@ -23,33 +26,33 @@ pub(crate) async fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
 ) -> anyhow::Result<ModelProviderChoice> {
     tracing::debug!("Model provider picker opened");
-    let choices = ["Local provider", "Cloud provider"];
+    let choices = ["Local models", "Cloud models"];
     let mut selected = 0_usize;
 
     loop {
+        let current_model = config::get_selected_model_entry()?
+            .map(|selected| format!("{}/{}", selected.provider_id, selected.model_id))
+            .unwrap_or_else(|| "None".to_string());
+
         terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
-            render_title(frame, layout.title, "Provider");
+            render_title(frame, layout.title, "Model");
 
-            let items: Vec<ListItem> = choices
-                .iter()
-                .enumerate()
-                .map(|(i, choice)| {
-                    let style = if i == selected {
-                        Style::default().fg(Color::White).bg(Color::DarkGray)
-                    } else {
-                        Style::default()
-                    };
-                    ListItem::new(Line::from(Span::styled(choice.to_string(), style)))
-                })
-                .collect();
+            let mut items = vec![
+                ListItem::new(Line::from(format!("Current model: {current_model}"))),
+                ListItem::new(Line::from("")),
+                ListItem::new(Line::from("Select model:")),
+            ];
+            items.extend(choices.iter().enumerate().map(|(i, choice)| {
+                let style = if i == selected {
+                    Style::default().fg(Color::White).bg(Color::DarkGray)
+                } else {
+                    Style::default()
+                };
+                ListItem::new(Line::from(Span::styled(choice.to_string(), style)))
+            }));
 
-            let mut state = ListState::default().with_selected(Some(selected));
-            frame.render_stateful_widget(
-                List::new(items).highlight_style(Style::default()),
-                layout.body,
-                &mut state,
-            );
+            frame.render_widget(List::new(items), layout.body);
 
             render_footer(frame, layout.footer, "↑↓ select, ↵ confirm, esc/q quit");
         })?;

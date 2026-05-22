@@ -9,7 +9,6 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::config::file::{get_config_path, OsttConfig};
-use crate::transcription::model::TranscriptionModel;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectedModel {
@@ -134,66 +133,36 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
 /// Saves the selected model globally (only ONE model is selected at a time).
 ///
 /// Stores provider/model selection in the main config file under `[transcription]`.
-/// The legacy `~/.local/share/ostt/model` file is still read as a fallback.
 ///
 /// # Errors
-/// - If the secrets directory cannot be determined or created
-/// - If the model file cannot be written
+/// - If the config file cannot be written
 pub fn save_selected_model(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
     save_transcription_selection(Some(provider_id), Some(model_id))?;
-
-    tracing::info!("Model selected: {}", model_id);
+    tracing::info!("Model selected: {} ({})", model_id, provider_id);
     Ok(())
 }
 
 pub fn clear_selected_model() -> anyhow::Result<()> {
-    save_transcription_selection(None, None)?;
-
-    Ok(())
+    save_transcription_selection(None, None)
 }
 
 pub fn get_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
-    if let Ok(config) = OsttConfig::load() {
-        if let (Some(provider_id), Some(model_id)) = (
-            config.transcription.provider.as_deref(),
-            config.transcription.model.as_deref(),
-        ) {
-            return Ok(Some(SelectedModel {
-                provider_id: provider_id.to_string(),
-                model_id: model_id.to_string(),
-            }));
-        }
-    }
-
-    legacy_selected_model_entry()
-}
-
-pub(crate) fn legacy_selected_model_entry() -> anyhow::Result<Option<SelectedModel>> {
-    let secrets_dir = get_secrets_dir()?;
-    let model_file = secrets_dir.join("model");
-
-    if !model_file.exists() {
-        return Ok(None);
-    }
-
-    let content = fs::read_to_string(&model_file)?;
-    let trimmed = content.trim();
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-
-    if let Ok(selected_model) = serde_json::from_str::<SelectedModel>(trimmed) {
-        return Ok(Some(selected_model));
-    }
-
-    let provider_id = TranscriptionModel::from_id(trimmed)
-        .map(|model| model.provider().id().to_string())
-        .unwrap_or_else(|| "local".to_string());
-
-    Ok(Some(SelectedModel {
-        provider_id,
-        model_id: trimmed.to_string(),
-    }))
+    let config = match OsttConfig::load() {
+        Ok(c) => c,
+        Err(e) if e.to_string().contains("No such file") => return Ok(None),
+        Err(e) => return Err(anyhow::anyhow!("{e}")),
+    };
+    let entry = match (
+        config.transcription.provider.as_deref(),
+        config.transcription.model.as_deref(),
+    ) {
+        (Some(provider_id), Some(model_id)) => Some(SelectedModel {
+            provider_id: provider_id.to_string(),
+            model_id: model_id.to_string(),
+        }),
+        _ => None,
+    };
+    Ok(entry)
 }
 
 fn save_transcription_selection(

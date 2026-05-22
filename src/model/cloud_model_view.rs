@@ -78,7 +78,7 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
             match mode {
                 CloudModelMode::Browse => {
                     let layout = render_app_layout(frame, frame.area());
-                    render_title(frame, layout.title, "Cloud Model");
+                    render_title(frame, layout.title, "Cloud models");
                     let (items, selected_display_index) =
                         cloud_model_list_items(&sections, selected);
                     let mut state = ListState::default().with_selected(selected_display_index);
