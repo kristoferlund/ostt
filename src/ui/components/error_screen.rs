@@ -62,7 +62,7 @@ impl ErrorScreen {
 
                 let error_text = ratatui::text::Line::from(ratatui::text::Span::styled(
                     error_message,
-                    Style::default().fg(Color::White).bg(Color::Red),
+                    Style::default().fg(Color::Black).bg(Color::Red),
                 ));
 
                 // Calculate the number of lines the text will wrap to
