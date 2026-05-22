@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.13 - 2026-05-22
+
+### Changed
+
+- `ostt model` now shows the currently selected provider/model before choosing between local and cloud models.
+- Routine popup/recording lifecycle messages now log at debug level to keep normal logs quieter.
+
+### Fixed
+
+- `ostt launch` now targets only the active recorder process via a recorder-owned runtime PID file, preventing the hotkey from accidentally signaling the local model daemon.
+- Model selection now uses only `[transcription]` in `ostt.toml`; the legacy `~/.local/share/ostt/model` file is ignored and no longer migrated.
+- Avoided printing duplicate logos during authentication flows.
+- Improved error screen text color for better readability.
+
 ## 0.0.12 - 2026-05-21
 
 ### Added
