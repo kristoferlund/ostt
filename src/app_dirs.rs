@@ -80,7 +80,14 @@ pub(crate) fn runtime_dir() -> PathBuf {
 
     let user = std::env::var("USER")
         .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| unsafe { libc::geteuid().to_string() });
+        .unwrap_or_else(|_| {
+            home_dir()
+                .and_then(|home| {
+                    home.file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                })
+                .unwrap_or_else(|| "unknown".to_string())
+        });
 
     std::env::temp_dir().join(format!("ostt-{user}"))
 }
