@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.15 - 2026-05-27
+
 ### Fixed
 
 - Fixed Kitty popup launch behavior by using cell-based dimensions, supported window flags, macOS app bundle detection, configured positioning, and automatic quit when the popup closes.
