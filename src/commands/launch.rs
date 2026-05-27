@@ -91,9 +91,13 @@ impl TerminalEmulator {
 
     /// Try to find this terminal on the system.
     fn find_binary(&self) -> Option<String> {
-        // On macOS, Ghostty might be in /Applications
-        if matches!(self, Self::Ghostty) {
-            let app_path = "/Applications/Ghostty.app/Contents/MacOS/ghostty";
+        // macOS automation contexts such as Shortcuts often use a minimal PATH.
+        let app_path = match self {
+            Self::Ghostty => Some("/Applications/Ghostty.app/Contents/MacOS/ghostty"),
+            Self::Kitty => Some("/Applications/kitty.app/Contents/MacOS/kitty"),
+            _ => None,
+        };
+        if let Some(app_path) = app_path {
             if std::path::Path::new(app_path).exists() {
                 return Some(app_path.to_string());
             }
@@ -239,18 +243,24 @@ fn build_terminal_args(
         TerminalEmulator::Kitty => {
             let mut args = vec![
                 binary.to_string(),
-                "--class".to_string(),
+                "--single-instance".to_string(),
+                "--instance-group".to_string(),
                 "ostt-popup".to_string(),
+                "--title".to_string(),
+                "ostt".to_string(),
+                format!("--position={}x{}", config.x, config.y),
                 "-o".to_string(),
                 "remember_window_size=no".to_string(),
                 "-o".to_string(),
-                format!("initial_window_width={}", config.width),
+                format!("initial_window_width={}c", config.width),
                 "-o".to_string(),
-                format!("initial_window_height={}", config.height),
+                format!("initial_window_height={}c", config.height),
                 "-o".to_string(),
                 format!("font_size={}", config.font_size),
                 "-o".to_string(),
                 "background=#000000".to_string(),
+                "-o".to_string(),
+                "macos_quit_when_last_window_closed=yes".to_string(),
             ];
             if config.borderless {
                 args.extend(["-o".to_string(), "hide_window_decorations=yes".to_string()]);
@@ -370,4 +380,33 @@ pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
 
     // Exit the process immediately so the caller (hotkey, shell) doesn't block.
     std::process::exit(0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kitty_args_use_supported_flags_and_cell_dimensions() {
+        let args = build_terminal_args(
+            TerminalEmulator::Kitty,
+            "kitty",
+            &PopupConfig::default(),
+            "ostt",
+            &["-c".to_string()],
+        );
+
+        assert!(!args.iter().any(|arg| arg == "--class"));
+        assert!(args.iter().any(|arg| arg == "--single-instance"));
+        assert!(args
+            .windows(2)
+            .any(|args| args == ["--instance-group", "ostt-popup"]));
+        assert!(args.iter().any(|arg| arg == "--position=630x790"));
+        assert!(args.iter().any(|arg| arg == "initial_window_width=90c"));
+        assert!(args.iter().any(|arg| arg == "initial_window_height=15c"));
+        assert!(args
+            .iter()
+            .any(|arg| arg == "macos_quit_when_last_window_closed=yes"));
+        assert_eq!(args.last(), Some(&"-c".to_string()));
+    }
 }
