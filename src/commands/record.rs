@@ -5,9 +5,11 @@
 
 use super::common;
 use crate::app_dirs::recordings_dir;
-use crate::config::{self, OsttConfig, ProcessAction, SelectedModel};
+use crate::config::{OsttConfig, ProcessAction, SelectedModel};
 use crate::process;
-use crate::recording::{recording_history, AudioRecorder, OsttTui, PickerEvent, RecordingCommand};
+use crate::recording::{
+    recording_history, AudioRecorder, PickerEvent, RecordingCommand, RecordingTui,
+};
 use crate::transcription::TranscriptionAnimation;
 use ratatui::widgets::ListState;
 use signal_hook::consts::SIGUSR1;
@@ -42,12 +44,6 @@ fn write_recording_pid_file() -> anyhow::Result<RecordingPidGuard> {
 ///
 /// Records audio with real-time waveform visualization, optionally transcribes the recording,
 /// and saves to history. Supports external triggers via SIGUSR1 signal.
-///
-/// # Arguments
-/// * `clipboard` - If true, copy to clipboard instead of stdout
-/// * `output_file` - Optional file path to write output to instead of stdout
-/// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
-/// * `model_override` - Optional per-run provider/model override
 pub async fn handle_record(
     config: &OsttConfig,
     clipboard: bool,
@@ -56,7 +52,6 @@ pub async fn handle_record(
     model_override: Option<SelectedModel>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
-
     tracing::info!(
         "Configuration loaded: device={}, sample_rate={}Hz, peak_threshold={}%, reference_level={}dBFS",
         config.audio.device,
@@ -65,55 +60,109 @@ pub async fn handle_record(
         config.audio.reference_level_db
     );
 
-    let mut audio_recorder =
-        AudioRecorder::new(config.audio.sample_rate, config.audio.device.clone());
+    let mut audio_recorder = AudioRecorder::new(config);
     audio_recorder.start_recording().map_err(|err| {
         tracing::error!("Failed to start recording: {err}");
         anyhow::anyhow!(
             "Recording error: {err}\n\nPlease check your audio configuration and try again."
         )
     })?;
-    let actual_sample_rate = audio_recorder.get_sample_rate();
+    let actual_sample_rate = audio_recorder.sample_rate();
 
-    let mut tui = OsttTui::new(
-        actual_sample_rate,
-        config.audio.peak_volume_threshold,
-        config.audio.reference_level_db,
-        config.audio.visualization,
-    )
-    .map_err(|e| anyhow::anyhow!("Failed to initialize UI: {e}"))?;
-
+    let mut tui = RecordingTui::new(config, actual_sample_rate)
+        .map_err(|e| anyhow::anyhow!("Failed to initialize UI: {e}"))?;
     let term = Arc::new(AtomicBool::new(false));
     let term_clone = term.clone();
 
-    if let Err(e) = signal_hook::flag::register(SIGUSR1, term_clone) {
-        tui.cleanup().ok();
-        return Err(anyhow::anyhow!("Failed to register signal handler: {e}"));
-    }
-
-    let recording_pid_guard = match write_recording_pid_file() {
-        Ok(guard) => guard,
-        Err(e) => {
+    // Subscribe to SIGUSR1 signal
+    signal_hook::flag::register(SIGUSR1, term_clone)
+        .inspect_err(|_| {
             tui.cleanup().ok();
-            return Err(anyhow::anyhow!("Failed to write recording PID file: {e}"));
-        }
+        })
+        .map_err(|e| anyhow::anyhow!("Failed to register signal handler: {e}"))?;
+
+    // Remember the id of the current process
+    let recording_pid_guard = write_recording_pid_file()
+        .inspect_err(|_| {
+            tui.cleanup().ok();
+        })
+        .map_err(|e| anyhow::anyhow!("Failed to write recording PID file: {e}"))?;
+
+    let should_transcribe =
+        run_recording_loop(&mut tui, &mut audio_recorder, actual_sample_rate, &term).inspect_err(
+            |_| {
+                tui.cleanup().ok();
+            },
+        )?;
+
+    // Dropping the pid also deletes file
+    drop(recording_pid_guard);
+
+    let filepath = save_recording(&mut audio_recorder, config).inspect_err(|_| {
+        tui.cleanup().ok();
+    })?;
+
+    // Max 10 recordings are saved
+    recording_history::prune_old_recordings();
+
+    // Transcribe or skip if user pressed Esc etc.
+    let maybe_transcribed_text = match should_transcribe {
+        true => transcribe_with_animation(&mut tui, config, model_override, &filepath)
+            .await
+            .inspect_err(|_| {
+                tui.cleanup().ok();
+            })?,
+        false => None,
     };
 
+    // Process if there is a transcribed text and a process action.
+    let output_text = if let Some(transcribed_text) = maybe_transcribed_text {
+        Some(if process.is_some() {
+            process_with_animation(&mut tui, config, transcribed_text, process.as_deref())
+                .await
+                .inspect_err(|_| {
+                    tui.cleanup().ok();
+                })?
+        } else {
+            transcribed_text
+        })
+    } else {
+        None
+    };
+
+    tui.cleanup()
+        .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+
+    if let Some(output_text) = output_text {
+        write_record_output(&output_text, output_file, clipboard)?;
+    }
+
+    tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
+    Ok(())
+}
+
+fn run_recording_loop(
+    tui: &mut RecordingTui,
+    audio_recorder: &mut AudioRecorder,
+    actual_sample_rate: u32,
+    term: &AtomicBool,
+) -> anyhow::Result<bool> {
     tracing::debug!(
         "Entering recording loop. Press 'Enter' to transcribe or 'Escape'/'q' to cancel."
     );
-    let mut frame_count = 0u64;
-    let mut should_transcribe = false;
 
+    let mut frame_count = 0u64;
     loop {
         if term.load(Ordering::Relaxed) {
             tracing::debug!("Received SIGUSR1: transcribing via external trigger");
-            should_transcribe = true;
-            break;
+            return Ok(true);
         }
 
-        match tui.handle_input() {
-            Ok(RecordingCommand::Continue) => {
+        match tui.handle_input().map_err(|e| {
+            tracing::error!("Input handling error: {}", e);
+            anyhow::anyhow!("Input handling error: {e}")
+        })? {
+            RecordingCommand::Continue => {
                 frame_count += 1;
                 if frame_count.is_multiple_of(60) {
                     let sample_count = audio_recorder.sample_count();
@@ -121,169 +170,101 @@ pub async fn handle_record(
                     tracing::debug!("Recording: {:.1}s recorded", duration_secs);
                 }
 
-                let samples = audio_recorder.get_samples();
-                if let Err(e) = tui.render_waveform(&samples) {
-                    tui.cleanup().ok();
-                    return Err(anyhow::anyhow!("Render failed: {e}"));
-                }
+                render_recording_waveform(tui, audio_recorder)?;
             }
-            Ok(RecordingCommand::Transcribe) => {
-                should_transcribe = true;
-                break;
-            }
-            Ok(RecordingCommand::Cancel) => {
-                break;
-            }
-            Ok(RecordingCommand::TogglePause) => {
+            RecordingCommand::Transcribe => return Ok(true),
+            RecordingCommand::Cancel => return Ok(false),
+            RecordingCommand::TogglePause => {
                 audio_recorder.toggle_pause();
                 tui.is_paused = audio_recorder.is_paused();
-                let samples = audio_recorder.get_samples();
-                if let Err(e) = tui.render_waveform(&samples) {
-                    tui.cleanup().ok();
-                    return Err(anyhow::anyhow!("Render failed: {e}"));
-                }
-            }
-            Err(e) => {
-                tracing::error!("Input handling error: {}", e);
-                tui.cleanup().ok();
-                return Err(anyhow::anyhow!("Input handling error: {e}"));
+                render_recording_waveform(tui, audio_recorder)?;
             }
         }
     }
+}
 
-    drop(recording_pid_guard);
+fn render_recording_waveform(
+    tui: &mut RecordingTui,
+    audio_recorder: &AudioRecorder,
+) -> anyhow::Result<()> {
+    tui.render_waveform(&audio_recorder.samples())
+        .map_err(|e| anyhow::anyhow!("Render failed: {e}"))
+}
 
+fn save_recording(
+    audio_recorder: &mut AudioRecorder,
+    config: &OsttConfig,
+) -> anyhow::Result<PathBuf> {
     tracing::debug!("Stopping recording and saving audio...");
 
-    let codec = config
-        .audio
-        .output_format
-        .split_whitespace()
-        .next()
-        .unwrap_or("mp3");
-    let extension = match codec {
-        "libopus" => "ogg",
-        "libvorbis" => "ogg",
+    let extension = recording_file_extension(&config.audio.output_format);
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
+    let filename = format!("ostt-recording-{timestamp}.{extension}");
+    let filepath = recordings_dir()?.join(&filename);
+
+    audio_recorder
+        .stop_recording(Some(filepath.clone()), &config.audio.output_format)
+        .inspect_err(|e| {
+            tracing::error!("Failed to save recording: {}", e);
+        })?;
+
+    tracing::info!("Recording saved to: {}", filepath.display());
+    Ok(filepath)
+}
+
+fn recording_file_extension(output_format: &str) -> &str {
+    match output_format.split_whitespace().next().unwrap_or("mp3") {
+        "libopus" | "libvorbis" => "ogg",
         "flac" => "flac",
         "aac" => "m4a",
         "pcm_s16le" => "wav",
-        _ => codec,
-    };
-
-    let recordings_dir = match recordings_dir() {
-        Ok(dir) => dir,
-        Err(err) => {
-            tui.cleanup().ok();
-            return Err(err);
-        }
-    };
-
-    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
-    let filename = format!("ostt-recording-{timestamp}.{extension}");
-    let filepath = recordings_dir.join(&filename);
-
-    if let Err(e) =
-        audio_recorder.stop_recording(Some(filepath.clone()), &config.audio.output_format)
-    {
-        tracing::error!("Failed to save recording: {}", e);
-        tui.cleanup().ok();
-        return Err(e);
+        codec => codec,
     }
-
-    tracing::info!("Recording saved to: {}", filepath.display());
-
-    recording_history::cleanup_old_recordings();
-
-    let transcription_text = if should_transcribe {
-        let transcription_context =
-            match common::build_transcription_context(config, model_override) {
-                Ok(context) => context,
-                Err(err) => {
-                    tui.cleanup().ok();
-                    return Err(err);
-                }
-            };
-        let model_id = transcription_context.selected_model.model_id.clone();
-        let filepath_str = filepath.to_string_lossy().to_string();
-
-        match transcribe_recording_with_animation(
-            &mut tui,
-            transcription_context.config,
-            &model_id,
-            &filepath_str,
-        )
-        .await
-        {
-            Ok(text) => Some(text),
-            Err(e) => {
-                tracing::warn!("Transcription failed: {}", e);
-                eprintln!("Warning: Transcription failed: {e}");
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    if let Some(text) = transcription_text {
-        process_and_output_transcription(
-            &mut tui,
-            config,
-            text,
-            process.as_deref(),
-            output_file,
-            clipboard,
-        )
-        .await?;
-    } else {
-        tui.cleanup()
-            .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
-    }
-
-    tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
-    Ok(())
 }
 
-async fn process_and_output_transcription(
-    tui: &mut OsttTui,
+async fn transcribe_with_animation(
+    tui: &mut RecordingTui,
     config: &OsttConfig,
-    text: String,
-    process_arg: Option<&str>,
-    output_file: Option<String>,
-    clipboard: bool,
-) -> anyhow::Result<()> {
-    let output_text = match apply_record_process_option(tui, config, text, process_arg).await {
-        Ok(output_text) => output_text,
-        Err(err) => {
-            tui.cleanup().ok();
-            return Err(err);
+    model_override: Option<SelectedModel>,
+    filepath: &std::path::Path,
+) -> anyhow::Result<Option<String>> {
+    let transcription_context = common::build_transcription_context(config, model_override)?;
+    let model_id = transcription_context.selected_model.model_id.clone();
+    let filepath_str = filepath.to_string_lossy().to_string();
+
+    match transcribe_recording_with_animation(
+        tui,
+        transcription_context.config,
+        &model_id,
+        &filepath_str,
+    )
+    .await
+    {
+        Ok(text) => Ok(Some(text)),
+        Err(e) => {
+            tracing::warn!("Transcription failed: {}", e);
+            eprintln!("Warning: Transcription failed: {e}");
+            Ok(None)
         }
-    };
-
-    tui.cleanup()
-        .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
-
-    write_record_output(&output_text, output_file, clipboard)
+    }
 }
 
-async fn apply_record_process_option(
-    tui: &mut OsttTui,
+async fn process_with_animation(
+    tui: &mut RecordingTui,
     config: &OsttConfig,
     text: String,
     process_arg: Option<&str>,
 ) -> anyhow::Result<String> {
-    let Some(action) = process::select_requested_action(&config.process, process_arg, |actions| {
+    let action = process::select_requested_action(&config.process, process_arg, |actions| {
         pick_action_id_with_recording_tui(tui, actions)
     })?
-    else {
-        return Ok(text);
-    };
+    .expect("process_recording_with_animation called without a process action");
 
     run_process_action_with_animation(tui, action, text).await
 }
 
 fn pick_action_id_with_recording_tui(
-    tui: &mut OsttTui,
+    tui: &mut RecordingTui,
     actions: &[ProcessAction],
 ) -> anyhow::Result<Option<String>> {
     if actions.is_empty() {
@@ -312,7 +293,7 @@ fn pick_action_id_with_recording_tui(
 }
 
 async fn run_process_action_with_animation(
-    tui: &mut OsttTui,
+    tui: &mut RecordingTui,
     action: ProcessAction,
     text: String,
 ) -> anyhow::Result<String> {
@@ -390,7 +371,7 @@ fn write_record_output(
 }
 
 async fn transcribe_recording_with_animation(
-    tui: &mut OsttTui,
+    tui: &mut RecordingTui,
     transcription_config: crate::transcription::TranscriptionConfig,
     model_id: &str,
     audio_filename: &str,

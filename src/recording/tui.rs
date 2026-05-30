@@ -16,8 +16,8 @@ use ratatui::{
 use std::error::Error;
 use std::io::{stdout, Stdout};
 
-use crate::config::file::ProcessAction;
 use crate::config::VisualizationType;
+use crate::config::{file::ProcessAction, OsttConfig};
 use crate::process::process_view::render_process_view;
 use crate::transcription::TranscriptionAnimation;
 
@@ -49,7 +49,7 @@ pub enum RecordingCommand {
 ///
 /// Supports multiple visualization types: frequency spectrum or time-domain waveform.
 /// Displays real-time visualization, volume levels, recording duration, and animated transcription progress.
-pub struct OsttTui {
+pub struct RecordingTui {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     display_data: Vec<u64>,
     last_sample_time: std::time::Instant,
@@ -74,19 +74,14 @@ pub struct OsttTui {
     spectrum_analyzer: Option<SpectrumAnalyzer>,
 }
 
-impl OsttTui {
+impl RecordingTui {
     /// Creates a new TUI instance and enters alternate screen mode.
     ///
     /// # Errors
     /// - If terminal cannot be initialized
     /// - If raw mode cannot be enabled
     /// - If alternate screen cannot be entered
-    pub fn new(
-        sample_rate: u32,
-        peak_volume_threshold: u8,
-        reference_level_db: i8,
-        visualization_type: VisualizationType,
-    ) -> Result<Self, Box<dyn Error>> {
+    pub fn new(config: &OsttConfig, sample_rate: u32) -> Result<Self, Box<dyn Error>> {
         enable_raw_mode()?;
         let mut stdout = stdout();
         execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
@@ -101,14 +96,14 @@ impl OsttTui {
 
         // Initialize visualization-specific data
         let display_data = vec![0u64; terminal_width];
-        let spectrum_analyzer = if visualization_type == VisualizationType::Spectrum {
+        let spectrum_analyzer = if config.audio.visualization == VisualizationType::Spectrum {
             Some(SpectrumAnalyzer::new(terminal_width))
         } else {
             None
         };
 
         let now = std::time::Instant::now();
-        Ok(OsttTui {
+        Ok(RecordingTui {
             terminal,
             display_data,
             last_sample_time: now,
@@ -119,12 +114,12 @@ impl OsttTui {
             recording_start_time: now,
             peak_hold: 0,
             peak_hold_time: now,
-            peak_volume_threshold,
-            reference_level_db,
+            peak_volume_threshold: config.audio.peak_volume_threshold,
+            reference_level_db: config.audio.reference_level_db,
             is_paused: false,
             pause_duration: std::time::Duration::ZERO,
             pause_start_time: None,
-            visualization_type,
+            visualization_type: config.audio.visualization,
             spectrum_analyzer,
         })
     }

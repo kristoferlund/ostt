@@ -8,7 +8,7 @@ use std::fs;
 use std::path::PathBuf;
 
 /// Cleans up old recordings to keep only the 10 most recent.
-pub fn cleanup_old_recordings() {
+pub fn prune_old_recordings() {
     let mut recordings = match list_recording_files() {
         Ok(recordings) => recordings,
         Err(err) => {

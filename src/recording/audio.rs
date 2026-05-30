@@ -4,6 +4,8 @@
 //! format conversion using ffmpeg. Audio is captured from the system's default
 //! input device, converted to mono, and saved in the requested format.
 
+use crate::config::OsttConfig;
+
 use super::ffmpeg::find_ffmpeg;
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -37,26 +39,22 @@ pub struct AudioRecorder {
     /// Whether recording is currently paused
     is_paused: Arc<Mutex<bool>>,
     /// Device name or "default" to use the system default device
-    device_name: String,
+    device: String,
 }
 
 impl AudioRecorder {
     /// Creates a new audio recorder with requested sample rate and device.
     ///
-    /// # Arguments
-    /// * `requested_sample_rate` - The desired sample rate in Hz (actual may differ based on device)
-    /// * `device_name` - Device name/ID to use. Use "default" for system default device
-    ///
     /// Note: The actual recording sample rate may differ based on device capabilities.
     /// Call `get_sample_rate()` after `start_recording()` to get the actual rate.
-    pub fn new(requested_sample_rate: u32, device_name: String) -> Self {
+    pub fn new(config: &OsttConfig) -> Self {
         Self {
-            sample_rate: requested_sample_rate,
+            sample_rate: config.audio.sample_rate,
             samples: Arc::new(Mutex::new(Vec::new())),
             stream: None,
             device_channels: 1,
             is_paused: Arc::new(Mutex::new(false)),
-            device_name,
+            device: config.audio.device.clone(),
         }
     }
 
@@ -71,12 +69,12 @@ impl AudioRecorder {
         let device = suppress_alsa_warnings(|| {
             let host = cpal::default_host();
 
-            if self.device_name == "default" {
+            if self.device == "default" {
                 host.default_input_device()
                     .ok_or_else(|| anyhow!("No audio input device available"))
             } else {
                 // Try to find device by name or index
-                find_device_by_name(&host, &self.device_name)
+                find_device_by_name(&host, &self.device)
             }
         })?;
 
@@ -359,19 +357,6 @@ impl AudioRecorder {
         } else {
             tracing::debug!("Recording resumed");
         }
-    }
-}
-
-// Maintain backward compatibility with existing API
-impl AudioRecorder {
-    /// Deprecated: Use `samples()` instead.
-    pub fn get_samples(&self) -> Vec<i16> {
-        self.samples()
-    }
-
-    /// Deprecated: Use `sample_rate()` instead.
-    pub fn get_sample_rate(&self) -> u32 {
-        self.sample_rate()
     }
 }
 
