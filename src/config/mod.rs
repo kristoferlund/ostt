@@ -19,7 +19,8 @@ pub use file::{
 };
 pub use secrets::{
     clear_api_key, clear_selected_model, get_api_key, get_authorized_providers, get_selected_model,
-    get_selected_model_entry, save_api_key, save_selected_model, SelectedModel,
+    get_selected_model_entry, parse_provider_model, save_api_key, save_selected_model,
+    SelectedModel,
 };
 
 pub use file::{

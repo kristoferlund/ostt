@@ -42,10 +42,10 @@ pub(super) async fn transcribe(
 
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", config.model.api_model_name().to_string());
+        .text("model", config.api_model_name().to_string());
 
     // Debug log: Log the API call details (without the audio data)
-    let mut debug_params = vec![format!("model={}", config.model.api_model_name())];
+    let mut debug_params = vec![format!("model={}", config.api_model_name())];
 
     // Add keywords as hotwords (Berget-specific) and prompt (Whisper-compatible)
     if !config.keywords.is_empty() {
@@ -57,7 +57,7 @@ pub(super) async fn transcribe(
         tracing::debug!("Keywords used for Berget model: {:?}", config.keywords);
     }
 
-    let endpoint = config.model.endpoint();
+    let endpoint = config.endpoint();
 
     tracing::debug!(
         "Berget API Call:\n  URL: {}\n  Method: POST\n  Headers:\n    Authorization: Bearer <redacted>\n    Content-Type: multipart/form-data\n  Body parameters: {}",

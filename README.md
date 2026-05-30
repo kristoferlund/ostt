@@ -77,6 +77,7 @@ ostt auth           # Choose provider/model and save API key
 ostt model          # Choose cloud or local transcription model
 ostt                # Record, transcribe, print to stdout
 ostt -c             # Record, transcribe, copy to clipboard
+ostt -m deepgram/nova-3 -c
 ostt launch -c      # Popup workflow for global hotkeys
 ```
 
@@ -103,9 +104,10 @@ Actions are configured in `~/.config/ostt/ostt.toml` and can run either bash com
 ostt                         # Record audio, print transcription
 ostt -c                      # Record audio, copy transcription
 ostt -o notes.txt            # Record audio, write transcription to file
+ostt -m openai/whisper-1     # Override model for this run
 ostt launch -c               # Open popup recorder
-ostt transcribe file.mp3     # Transcribe existing audio
-ostt retry 2 -c              # Re-transcribe recording #2 and copy
+ostt transcribe file.mp3 -m deepinfra/openai/whisper-large-v3
+ostt retry 2 -m groq/whisper-large-v3 -c
 ostt replay                  # Play most recent recording
 ostt model                   # Choose cloud or local transcription model
 ostt history                 # Browse transcription history

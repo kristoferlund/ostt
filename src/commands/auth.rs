@@ -61,7 +61,7 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub async fn handle_logout() -> Result<(), anyhow::Error> {
+pub async fn handle_logout(config_data: &config::OsttConfig) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Logout ===");
 
     ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
@@ -92,7 +92,8 @@ pub async fn handle_logout() -> Result<(), anyhow::Error> {
     }
 
     config::clear_api_key(selected_provider.id())?;
-    let cleared_selection = clear_selected_model_if_provider_matches(selected_provider.id())?;
+    let cleared_selection =
+        clear_selected_model_if_provider_matches(config_data, selected_provider.id())?;
 
     if cleared_selection {
         outro("Credential removed. Active model cleared; run `ostt model` to choose a model.")?;
@@ -138,9 +139,12 @@ fn authorized_cloud_providers(
         .collect()
 }
 
-fn clear_selected_model_if_provider_matches(provider_id: &str) -> anyhow::Result<bool> {
-    if config::get_selected_model_entry()?
-        .is_some_and(|selected| selected.provider_id == provider_id)
+fn clear_selected_model_if_provider_matches(
+    config_data: &config::OsttConfig,
+    provider_id: &str,
+) -> anyhow::Result<bool> {
+    if config_data.transcription.provider.as_deref() == Some(provider_id)
+        && config_data.transcription.model.is_some()
     {
         config::clear_selected_model()?;
         return Ok(true);
@@ -261,14 +265,19 @@ mod tests {
         let _guard = test_env_lock();
         let _home = TestHome::new();
 
-        config::save_selected_model("openai", "whisper").expect("save selected model");
+        config::save_selected_model("openai", "whisper-1").expect("save selected model");
 
-        assert!(!clear_selected_model_if_provider_matches("groq").expect("clear groq"));
+        let config_data = config::OsttConfig::load().expect("load config");
+        assert!(
+            !clear_selected_model_if_provider_matches(&config_data, "groq").expect("clear groq")
+        );
         assert!(config::get_selected_model_entry()
             .expect("load selected model")
             .is_some());
 
-        assert!(clear_selected_model_if_provider_matches("openai").expect("clear openai"));
+        assert!(
+            clear_selected_model_if_provider_matches(&config_data, "openai").expect("clear openai")
+        );
         assert!(config::get_selected_model_entry()
             .expect("load selected model")
             .is_none());

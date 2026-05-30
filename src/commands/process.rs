@@ -3,10 +3,9 @@
 //! Loads a transcription from history, optionally shows the action picker,
 //! executes the selected action, and outputs the result.
 
-use crate::clipboard::copy_to_clipboard;
+use super::common;
 use crate::config;
 use crate::history::HistoryManager;
-use crate::keywords::KeywordsManager;
 use crate::process;
 
 /// Handles post-processing of an existing transcription from history.
@@ -21,6 +20,7 @@ use crate::process;
 /// * `clipboard` - If true, copy result to clipboard instead of stdout
 /// * `output_file` - Optional file path to write result to instead of stdout
 pub async fn handle_process(
+    config_data: &config::OsttConfig,
     index: Option<usize>,
     action_id: Option<String>,
     list: bool,
@@ -28,12 +28,6 @@ pub async fn handle_process(
     output_file: Option<String>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Process Command ===");
-
-    // Load config
-    let config_data = config::OsttConfig::load().map_err(|err| {
-        tracing::error!("Failed to load configuration: {err}");
-        anyhow::anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
-    })?;
 
     // --list mode: print configured actions and exit
     if list {
@@ -99,9 +93,7 @@ pub async fn handle_process(
     tracing::info!("Executing action '{}' on transcription #{}", action.id, n);
 
     // Load keywords
-    let config_dir = crate::app_dirs::config_dir();
-    let keywords_manager = KeywordsManager::new(&config_dir)?;
-    let keywords = keywords_manager.load_keywords()?;
+    let keywords = common::load_keywords()?;
 
     // Use animation if the picker was shown (we're in a TUI flow),
     // otherwise execute directly (no TUI was started)
@@ -119,32 +111,7 @@ pub async fn handle_process(
         process::execute_action(&action, &transcription.text, &keywords).await?
     };
 
-    // Output: file > clipboard > stdout
-    if let Some(file_path) = output_file {
-        match std::fs::write(&file_path, &result) {
-            Ok(_) => {
-                tracing::debug!("Processed result written to file: {file_path}");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to write to file '{file_path}': {e}");
-                return Err(anyhow::anyhow!(
-                    "Failed to write to file '{file_path}': {e}"
-                ));
-            }
-        }
-    } else if clipboard {
-        match copy_to_clipboard(&result) {
-            Ok(_) => {
-                tracing::debug!("Processed result copied to clipboard");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to copy to clipboard: {e}");
-            }
-        }
-    } else {
-        println!("{result}");
-        tracing::debug!("Processed result printed to stdout");
-    }
+    common::write_text_output(&result, output_file, clipboard, "Processed result")?;
 
     tracing::info!("=== ostt Process Command Completed ===");
     Ok(())

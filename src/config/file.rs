@@ -892,7 +892,7 @@ visualization = "spectrum"
 
 [transcription]
 provider = "openai"
-model = "whisper"
+model = "whisper-1"
 "#;
 
         let updated = ensure_local_transcription_audio_config_content(content);

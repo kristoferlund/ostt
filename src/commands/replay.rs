@@ -1,6 +1,6 @@
 //! Replay a previous recording from history using the system audio player.
 
-use crate::recording::RecordingHistory;
+use crate::recording::recording_history;
 use std::process::Command;
 
 /// Plays back a previous recording using the system's best available audio player.
@@ -14,10 +14,7 @@ use std::process::Command;
 pub async fn handle_replay(recording_index: Option<usize>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Replay Command ===");
 
-    let data_dir = crate::app_dirs::data_dir();
-
-    let history = RecordingHistory::new(&data_dir)?;
-    let all_recordings = history.get_all_recordings()?;
+    let all_recordings = recording_history::get_all_recordings()?;
 
     if all_recordings.is_empty() {
         return Err(anyhow::anyhow!("No recordings found in history"));

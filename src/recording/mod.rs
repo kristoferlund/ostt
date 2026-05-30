@@ -12,4 +12,3 @@ pub mod visualizations;
 pub use audio::AudioRecorder;
 pub use ffmpeg::find_ffmpeg;
 pub use ostt_tui::{OsttTui, PickerEvent, RecordingCommand};
-pub use recording_history::RecordingHistory;

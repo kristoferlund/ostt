@@ -41,9 +41,7 @@ mod tests {
     fn cloud_sections_mark_only_selected_provider_model_active() {
         let selected = crate::config::SelectedModel {
             provider_id: "openai".to_string(),
-            model_id: crate::transcription::TranscriptionModel::Whisper
-                .id()
-                .to_string(),
+            model_id: "whisper-1".to_string(),
         };
 
         let sections = build_cloud_provider_sections(
@@ -80,16 +78,15 @@ mod tests {
         std::env::set_var("HOME", &dir);
         crate::transcription::local_models::set_test_models_dir(Some(dir.join("models")));
 
-        let whisper = crate::transcription::TranscriptionModel::Whisper;
-        save_cloud_selection("openai", &whisper).expect("save cloud selection");
+        save_cloud_selection("openai", "whisper-1").expect("save cloud selection");
         let config = config::OsttConfig::load().expect("load config");
         assert_eq!(config.transcription.provider.as_deref(), Some("openai"));
-        assert_eq!(config.transcription.model.as_deref(), Some(whisper.id()));
+        assert_eq!(config.transcription.model.as_deref(), Some("whisper-1"));
         let selected = config::get_selected_model_entry()
             .expect("load selection")
             .expect("selected cloud model");
         assert_eq!(selected.provider_id, "openai");
-        assert_eq!(selected.model_id, whisper.id());
+        assert_eq!(selected.model_id, "whisper-1");
 
         crate::transcription::local_models::set_test_models_dir(None);
         let _ = fs::remove_dir_all(&dir);

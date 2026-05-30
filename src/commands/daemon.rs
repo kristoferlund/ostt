@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context};
 
+use crate::config::OsttConfig;
 use crate::transcription::daemon_client::{ensure_daemon, probe_daemon, shutdown_daemon};
 use crate::transcription::local_models::{daemon_pid_path, daemon_socket_path};
 
@@ -41,8 +42,8 @@ pub async fn handle_daemon_run(
 // ── User-facing subcommands ───────────────────────────────────────────────────
 
 /// Start the daemon for the currently active local model.
-pub async fn handle_daemon_start() -> anyhow::Result<()> {
-    let model_id = require_active_model()?;
+pub async fn handle_daemon_start(config: &OsttConfig) -> anyhow::Result<()> {
+    let model_id = require_active_model(config)?;
 
     if let Some(info) = probe_daemon().await {
         if info.model_id == model_id {
@@ -74,8 +75,8 @@ pub async fn handle_daemon_stop() -> anyhow::Result<()> {
 }
 
 /// Restart the daemon with the currently active local model.
-pub async fn handle_daemon_restart() -> anyhow::Result<()> {
-    let model_id = require_active_model()?;
+pub async fn handle_daemon_restart(config: &OsttConfig) -> anyhow::Result<()> {
+    let model_id = require_active_model(config)?;
     let _ = shutdown_daemon().await;
     tokio::time::sleep(Duration::from_millis(500)).await;
     println!("Starting daemon for model '{model_id}'…");
@@ -85,8 +86,8 @@ pub async fn handle_daemon_restart() -> anyhow::Result<()> {
 }
 
 /// Print daemon status.
-pub async fn handle_daemon_status() -> anyhow::Result<()> {
-    let active = active_local_model();
+pub async fn handle_daemon_status(config: &OsttConfig) -> anyhow::Result<()> {
+    let active = active_local_model_from_config(config);
     let info = probe_daemon().await;
     let pid = read_pid_file();
 
@@ -229,8 +230,18 @@ fn active_local_model() -> Option<String> {
         .map(|m| m.model_id)
 }
 
-fn require_active_model() -> anyhow::Result<String> {
-    active_local_model().ok_or_else(|| {
+fn active_local_model_from_config(config: &OsttConfig) -> Option<String> {
+    match (
+        config.transcription.provider.as_deref(),
+        config.transcription.model.as_deref(),
+    ) {
+        (Some("local"), Some(model_id)) => Some(model_id.to_string()),
+        _ => None,
+    }
+}
+
+fn require_active_model(config: &OsttConfig) -> anyhow::Result<String> {
+    active_local_model_from_config(config).ok_or_else(|| {
         anyhow!("No local model is active. Run 'ostt model' to download and activate one.")
     })
 }

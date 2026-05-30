@@ -9,7 +9,6 @@ use std::fs;
 use std::process::Command;
 
 use crate::config::file::PopupConfig;
-use crate::config::OsttConfig;
 
 // ─── Running instance detection ─────────────────────────────────────────────
 
@@ -340,7 +339,10 @@ fn build_terminal_args(
 ///
 /// If an ostt recorder is already running, sends SIGUSR1
 /// to finish recording. Otherwise, spawns a new terminal window with ostt.
-pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
+pub async fn handle_launch(
+    config: &crate::config::OsttConfig,
+    args: Vec<String>,
+) -> Result<(), anyhow::Error> {
     // Check if there's already a running recorder.
     if let Some(pid) = find_running_recorder() {
         tracing::debug!("Found running ostt recorder (PID {}), sending SIGUSR1", pid);
@@ -348,8 +350,6 @@ pub async fn handle_launch(args: Vec<String>) -> Result<(), anyhow::Error> {
         return Ok(());
     }
 
-    // Load config for popup settings
-    let config = OsttConfig::load().map_err(|e| anyhow!("Failed to load config: {e}"))?;
     let popup = &config.popup;
 
     // Detect terminal

@@ -3,18 +3,21 @@
 //! Handles audio recording with real-time waveform visualization, optional transcription,
 //! and history management. Supports external triggers via SIGUSR1 signal.
 
-use crate::clipboard::copy_to_clipboard;
-use crate::config;
-use crate::history::HistoryManager;
-use crate::keywords::KeywordsManager;
+use super::common;
+use crate::app_dirs::recordings_dir;
+use crate::config::{self, OsttConfig, ProcessAction, SelectedModel};
 use crate::process;
-use crate::recording::{AudioRecorder, OsttTui, PickerEvent, RecordingCommand, RecordingHistory};
+use crate::recording::{recording_history, AudioRecorder, OsttTui, PickerEvent, RecordingCommand};
 use crate::transcription::TranscriptionAnimation;
-use crate::ui::ErrorScreen;
-use dirs;
 use ratatui::widgets::ListState;
-use std::fs;
-use std::path::PathBuf;
+use signal_hook::consts::SIGUSR1;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
 
 struct RecordingPidGuard {
     path: PathBuf,
@@ -44,63 +47,46 @@ fn write_recording_pid_file() -> anyhow::Result<RecordingPidGuard> {
 /// * `clipboard` - If true, copy to clipboard instead of stdout
 /// * `output_file` - Optional file path to write output to instead of stdout
 /// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
+/// * `model_override` - Optional per-run provider/model override
 pub async fn handle_record(
+    config: &OsttConfig,
     clipboard: bool,
     output_file: Option<String>,
     process: Option<String>,
+    model_override: Option<SelectedModel>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Audio Recorder Started ===");
 
-    let config_data = match config::OsttConfig::load() {
-        Ok(config) => config,
-        Err(err) => {
-            tracing::error!("Failed to load configuration: {err}");
-            let error_message = format!(
-                "Configuration Error:\n\n{err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again."
-            );
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&error_message)?;
-            error_screen.cleanup()?;
-            return Err(anyhow::anyhow!("Configuration error: {err}"));
-        }
-    };
-
     tracing::info!(
         "Configuration loaded: device={}, sample_rate={}Hz, peak_threshold={}%, reference_level={}dBFS",
-        config_data.audio.device,
-        config_data.audio.sample_rate,
-        config_data.audio.peak_volume_threshold,
-        config_data.audio.reference_level_db
+        config.audio.device,
+        config.audio.sample_rate,
+        config.audio.peak_volume_threshold,
+        config.audio.reference_level_db
     );
 
-    let mut audio_recorder = AudioRecorder::new(
-        config_data.audio.sample_rate,
-        config_data.audio.device.clone(),
-    );
-
-    if let Err(e) = audio_recorder.start_recording() {
-        tracing::error!("Failed to start recording: {e}");
-        let error_message = format!(
-            "Recording Error:\n\n{e}\n\nPlease check your audio configuration and try again."
-        );
-        let mut error_screen = ErrorScreen::new()?;
-        error_screen.show_error(&error_message)?;
-        error_screen.cleanup()?;
-        return Err(e);
-    }
-
+    let mut audio_recorder =
+        AudioRecorder::new(config.audio.sample_rate, config.audio.device.clone());
+    audio_recorder.start_recording().map_err(|err| {
+        tracing::error!("Failed to start recording: {err}");
+        anyhow::anyhow!(
+            "Recording error: {err}\n\nPlease check your audio configuration and try again."
+        )
+    })?;
     let actual_sample_rate = audio_recorder.get_sample_rate();
+
     let mut tui = OsttTui::new(
         actual_sample_rate,
-        config_data.audio.peak_volume_threshold,
-        config_data.audio.reference_level_db,
-        config_data.audio.visualization,
+        config.audio.peak_volume_threshold,
+        config.audio.reference_level_db,
+        config.audio.visualization,
     )
     .map_err(|e| anyhow::anyhow!("Failed to initialize UI: {e}"))?;
 
-    let term = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let term = Arc::new(AtomicBool::new(false));
     let term_clone = term.clone();
-    if let Err(e) = signal_hook::flag::register(signal_hook::consts::SIGUSR1, term_clone) {
+
+    if let Err(e) = signal_hook::flag::register(SIGUSR1, term_clone) {
         tui.cleanup().ok();
         return Err(anyhow::anyhow!("Failed to register signal handler: {e}"));
     }
@@ -120,7 +106,7 @@ pub async fn handle_record(
     let mut should_transcribe = false;
 
     loop {
-        if term.load(std::sync::atomic::Ordering::Relaxed) {
+        if term.load(Ordering::Relaxed) {
             tracing::debug!("Received SIGUSR1: transcribing via external trigger");
             should_transcribe = true;
             break;
@@ -168,7 +154,8 @@ pub async fn handle_record(
     drop(recording_pid_guard);
 
     tracing::debug!("Stopping recording and saving audio...");
-    let codec = config_data
+
+    let codec = config
         .audio
         .output_format
         .split_whitespace()
@@ -183,27 +170,20 @@ pub async fn handle_record(
         _ => codec,
     };
 
-    // Prepare data directory for recordings
-    let data_dir = match dirs::home_dir() {
-        Some(home) => home.join(".local").join("share").join("ostt"),
-        None => {
+    let recordings_dir = match recordings_dir() {
+        Ok(dir) => dir,
+        Err(err) => {
             tui.cleanup().ok();
-            return Err(anyhow::anyhow!("Could not determine home directory"));
+            return Err(err);
         }
     };
 
-    // Save to persistent recordings directory with timestamp
-    let recordings_dir = data_dir.join("recordings");
-    if let Err(e) = fs::create_dir_all(&recordings_dir) {
-        tui.cleanup().ok();
-        return Err(e.into());
-    }
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
     let filename = format!("ostt-recording-{timestamp}.{extension}");
     let filepath = recordings_dir.join(&filename);
 
     if let Err(e) =
-        audio_recorder.stop_recording(Some(filepath.clone()), &config_data.audio.output_format)
+        audio_recorder.stop_recording(Some(filepath.clone()), &config.audio.output_format)
     {
         tracing::error!("Failed to save recording: {}", e);
         tui.cleanup().ok();
@@ -212,305 +192,50 @@ pub async fn handle_record(
 
     tracing::info!("Recording saved to: {}", filepath.display());
 
-    // Clean up old recordings to keep only 10 most recent
-    if let Ok(recording_history) = RecordingHistory::new(&data_dir) {
-        let _ = recording_history.cleanup_old_recordings();
-    }
+    recording_history::cleanup_old_recordings();
 
     let transcription_text = if should_transcribe {
-        let selected_model = config::get_selected_model_entry().ok().flatten();
-
-        if let Some(selected_model) = selected_model {
-            let filepath_str = filepath.to_string_lossy().to_string();
-            match transcribe_recording_with_animation(
-                &mut tui,
-                &config_data,
-                &selected_model,
-                &filepath_str,
-            )
-            .await
-            {
-                Ok(text) => Some(text),
-                Err(e) => {
-                    tracing::warn!("Transcription failed: {}", e);
-                    eprintln!("Warning: Transcription failed: {e}");
-                    None
+        let transcription_context =
+            match common::build_transcription_context(config, model_override) {
+                Ok(context) => context,
+                Err(err) => {
+                    tui.cleanup().ok();
+                    return Err(err);
                 }
+            };
+        let model_id = transcription_context.selected_model.model_id.clone();
+        let filepath_str = filepath.to_string_lossy().to_string();
+
+        match transcribe_recording_with_animation(
+            &mut tui,
+            transcription_context.config,
+            &model_id,
+            &filepath_str,
+        )
+        .await
+        {
+            Ok(text) => Some(text),
+            Err(e) => {
+                tracing::warn!("Transcription failed: {}", e);
+                eprintln!("Warning: Transcription failed: {e}");
+                None
             }
-        } else {
-            tracing::debug!("No transcription model configured");
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error("Error: No transcription model configured.\n\nPlease run 'ostt auth' to select a model.")?;
-            error_screen.cleanup()?;
-            None
         }
     } else {
         None
     };
 
     if let Some(text) = transcription_text {
-        // Processing flow: if -p was passed, chain processing after transcription
-        let output_text = match process.as_deref() {
-            None => {
-                // No processing requested, output raw transcription
-                text
-            }
-            Some("") => {
-                // Show action picker
-                if config_data.process.actions.is_empty() {
-                    tui.cleanup().ok();
-                    return Err(anyhow::anyhow!(
-                        "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
-                    ));
-                }
-
-                // Single-action shortcut: skip picker if only one action
-                let selected_id = if config_data.process.actions.len() == 1 {
-                    Some(config_data.process.actions[0].id.clone())
-                } else {
-                    // Render picker through OsttTui
-                    let mut list_state = ListState::default();
-                    list_state.select(Some(0));
-                    loop {
-                        match tui
-                            .render_action_picker(&config_data.process.actions, &mut list_state)
-                            .map_err(|e| anyhow::anyhow!("{e}"))?
-                        {
-                            Some(PickerEvent::Selected(id)) => break Some(id),
-                            Some(PickerEvent::Cancelled) => break None,
-                            None => continue,
-                        }
-                    }
-                };
-
-                match selected_id {
-                    Some(selected_id) => {
-                        let action = config_data
-                            .process
-                            .get_action(&selected_id)
-                            .expect("Picker returned an ID not in config")
-                            .clone();
-
-                        let config_dir = match dirs::config_dir() {
-                            Some(dir) => dir,
-                            None => {
-                                tui.cleanup().ok();
-                                return Err(anyhow::anyhow!(
-                                    "Could not determine config directory"
-                                ));
-                            }
-                        };
-                        let keywords_manager = match KeywordsManager::new(&config_dir) {
-                            Ok(km) => km,
-                            Err(e) => {
-                                tui.cleanup().ok();
-                                return Err(e);
-                            }
-                        };
-                        let keywords = match keywords_manager.load_keywords() {
-                            Ok(kw) => kw,
-                            Err(e) => {
-                                tui.cleanup().ok();
-                                return Err(e);
-                            }
-                        };
-
-                        // Inline processing animation through OsttTui
-                        let mut animation = TranscriptionAnimation::new(80);
-                        animation.set_status_label("Processing...");
-
-                        let action_clone = action.clone();
-                        let text_clone = text.clone();
-                        let keywords_clone = keywords.clone();
-                        let task_handle = tokio::spawn(async move {
-                            process::execute_action(&action_clone, &text_clone, &keywords_clone)
-                                .await
-                        });
-
-                        let mut cancelled = false;
-                        loop {
-                            if let Err(e) = tui.render_transcription_animation(&mut animation) {
-                                tracing::warn!("Failed to render animation: {}", e);
-                            }
-
-                            if task_handle.is_finished() {
-                                break;
-                            }
-
-                            if crossterm::event::poll(std::time::Duration::from_millis(0))
-                                .unwrap_or(false)
-                            {
-                                if let Ok(crossterm::event::Event::Key(key)) =
-                                    crossterm::event::read()
-                                {
-                                    match key.code {
-                                        crossterm::event::KeyCode::Esc
-                                        | crossterm::event::KeyCode::Char('q') => {
-                                            tracing::info!("Processing cancelled by user");
-                                            task_handle.abort();
-                                            cancelled = true;
-                                            break;
-                                        }
-                                        crossterm::event::KeyCode::Char('c')
-                                            if key.modifiers.contains(
-                                                crossterm::event::KeyModifiers::CONTROL,
-                                            ) =>
-                                        {
-                                            tracing::info!("Processing cancelled by user (Ctrl+C)");
-                                            task_handle.abort();
-                                            cancelled = true;
-                                            break;
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                        }
-
-                        if cancelled {
-                            text
-                        } else {
-                            match task_handle.await {
-                                Ok(Ok(result)) => result,
-                                Ok(Err(e)) => {
-                                    tui.cleanup().ok();
-                                    return Err(e);
-                                }
-                                Err(e) => {
-                                    tui.cleanup().ok();
-                                    return Err(anyhow::anyhow!("Processing task failed: {e}"));
-                                }
-                            }
-                        }
-                    }
-                    None => {
-                        // Cancelled — fall through to output raw transcription
-                        text
-                    }
-                }
-            }
-            Some(id) => {
-                // Look up action by ID
-                let action = match config_data.process.get_action(id) {
-                    Some(a) => a.clone(),
-                    None => {
-                        tui.cleanup().ok();
-                        return Err(anyhow::anyhow!(
-                            "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
-                        ));
-                    }
-                };
-
-                let config_dir = match dirs::config_dir() {
-                    Some(dir) => dir,
-                    None => {
-                        tui.cleanup().ok();
-                        return Err(anyhow::anyhow!("Could not determine config directory"));
-                    }
-                };
-                let keywords_manager = match KeywordsManager::new(&config_dir) {
-                    Ok(km) => km,
-                    Err(e) => {
-                        tui.cleanup().ok();
-                        return Err(e);
-                    }
-                };
-                let keywords = match keywords_manager.load_keywords() {
-                    Ok(kw) => kw,
-                    Err(e) => {
-                        tui.cleanup().ok();
-                        return Err(e);
-                    }
-                };
-
-                // Inline processing animation through OsttTui
-                let mut animation = TranscriptionAnimation::new(80);
-                animation.set_status_label("Processing...");
-
-                let action_clone = action.clone();
-                let text_clone = text.clone();
-                let keywords_clone = keywords.clone();
-                let task_handle = tokio::spawn(async move {
-                    process::execute_action(&action_clone, &text_clone, &keywords_clone).await
-                });
-
-                let mut cancelled = false;
-                loop {
-                    if let Err(e) = tui.render_transcription_animation(&mut animation) {
-                        tracing::warn!("Failed to render animation: {}", e);
-                    }
-
-                    if task_handle.is_finished() {
-                        break;
-                    }
-
-                    if crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false)
-                    {
-                        if let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() {
-                            match key.code {
-                                crossterm::event::KeyCode::Esc
-                                | crossterm::event::KeyCode::Char('q') => {
-                                    tracing::info!("Processing cancelled by user");
-                                    task_handle.abort();
-                                    cancelled = true;
-                                    break;
-                                }
-                                crossterm::event::KeyCode::Char('c')
-                                    if key
-                                        .modifiers
-                                        .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                                {
-                                    tracing::info!("Processing cancelled by user (Ctrl+C)");
-                                    task_handle.abort();
-                                    cancelled = true;
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        }
-                    }
-
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                }
-
-                if cancelled {
-                    text
-                } else {
-                    match task_handle.await {
-                        Ok(Ok(result)) => result,
-                        Ok(Err(e)) => {
-                            tui.cleanup().ok();
-                            return Err(e);
-                        }
-                        Err(e) => {
-                            tui.cleanup().ok();
-                            return Err(anyhow::anyhow!("Processing task failed: {e}"));
-                        }
-                    }
-                }
-            }
-        };
-
-        // Clean up TUI before outputting results
-        tui.cleanup()
-            .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
-
-        // Determine output destination: file > clipboard > stdout (default)
-        if let Some(file_path) = output_file {
-            std::fs::write(&file_path, &output_text)?;
-            tracing::info!("Transcription written to file: {}", file_path);
-        } else if clipboard {
-            copy_to_clipboard(&output_text)?;
-            tracing::info!("Transcription copied to clipboard");
-        } else {
-            println!("{output_text}");
-            tracing::debug!("Transcription printed to stdout");
-        }
+        process_and_output_transcription(
+            &mut tui,
+            config,
+            text,
+            process.as_deref(),
+            output_file,
+            clipboard,
+        )
+        .await?;
     } else {
-        // No transcription — still need to clean up TUI
         tui.cleanup()
             .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
     }
@@ -519,79 +244,158 @@ pub async fn handle_record(
     Ok(())
 }
 
-/// Transcribes an audio recording with animated progress indicator.
-///
-/// # Arguments
-/// * `output_mode` - Optional override for output mode (clipboard or stdout)
-///
-/// # Errors
-/// - If the model ID is invalid
-/// - If no API key is configured for the provider
-/// - If transcription fails
+async fn process_and_output_transcription(
+    tui: &mut OsttTui,
+    config: &OsttConfig,
+    text: String,
+    process_arg: Option<&str>,
+    output_file: Option<String>,
+    clipboard: bool,
+) -> anyhow::Result<()> {
+    let output_text = match apply_record_process_option(tui, config, text, process_arg).await {
+        Ok(output_text) => output_text,
+        Err(err) => {
+            tui.cleanup().ok();
+            return Err(err);
+        }
+    };
+
+    tui.cleanup()
+        .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+
+    write_record_output(&output_text, output_file, clipboard)
+}
+
+async fn apply_record_process_option(
+    tui: &mut OsttTui,
+    config: &OsttConfig,
+    text: String,
+    process_arg: Option<&str>,
+) -> anyhow::Result<String> {
+    let Some(action) = process::select_requested_action(&config.process, process_arg, |actions| {
+        pick_action_id_with_recording_tui(tui, actions)
+    })?
+    else {
+        return Ok(text);
+    };
+
+    run_process_action_with_animation(tui, action, text).await
+}
+
+fn pick_action_id_with_recording_tui(
+    tui: &mut OsttTui,
+    actions: &[ProcessAction],
+) -> anyhow::Result<Option<String>> {
+    if actions.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
+        ));
+    }
+
+    if actions.len() == 1 {
+        return Ok(Some(actions[0].id.clone()));
+    }
+
+    let mut list_state = ListState::default();
+    list_state.select(Some(0));
+
+    loop {
+        match tui
+            .render_action_picker(actions, &mut list_state)
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+        {
+            Some(PickerEvent::Selected(id)) => return Ok(Some(id)),
+            Some(PickerEvent::Cancelled) => return Ok(None),
+            None => continue,
+        }
+    }
+}
+
+async fn run_process_action_with_animation(
+    tui: &mut OsttTui,
+    action: ProcessAction,
+    text: String,
+) -> anyhow::Result<String> {
+    let keywords = common::load_keywords()?;
+    let mut animation = TranscriptionAnimation::new(80);
+    animation.set_status_label("Processing...");
+
+    let action_clone = action.clone();
+    let text_clone = text.clone();
+    let keywords_clone = keywords.clone();
+    let task_handle = tokio::spawn(async move {
+        process::execute_action(&action_clone, &text_clone, &keywords_clone).await
+    });
+
+    loop {
+        if let Err(e) = tui.render_transcription_animation(&mut animation) {
+            tracing::warn!("Failed to render animation: {}", e);
+        }
+
+        if task_handle.is_finished() {
+            break;
+        }
+
+        if processing_cancel_requested() {
+            tracing::info!("Processing cancelled by user");
+            task_handle.abort();
+            return Ok(text);
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+
+    match task_handle.await {
+        Ok(Ok(result)) => Ok(result),
+        Ok(Err(e)) => Err(e),
+        Err(e) => Err(anyhow::anyhow!("Processing task failed: {e}")),
+    }
+}
+
+fn processing_cancel_requested() -> bool {
+    if !crossterm::event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
+        return false;
+    }
+
+    let Ok(crossterm::event::Event::Key(key)) = crossterm::event::read() else {
+        return false;
+    };
+
+    match key.code {
+        crossterm::event::KeyCode::Esc | crossterm::event::KeyCode::Char('q') => true,
+        crossterm::event::KeyCode::Char('c') => key
+            .modifiers
+            .contains(crossterm::event::KeyModifiers::CONTROL),
+        _ => false,
+    }
+}
+
+fn write_record_output(
+    output_text: &str,
+    output_file: Option<String>,
+    clipboard: bool,
+) -> anyhow::Result<()> {
+    if let Some(file_path) = output_file {
+        std::fs::write(&file_path, output_text)?;
+        tracing::info!("Transcription written to file: {}", file_path);
+    } else if clipboard {
+        crate::clipboard::copy_to_clipboard(output_text)?;
+        tracing::info!("Transcription copied to clipboard");
+    } else {
+        println!("{output_text}");
+        tracing::debug!("Transcription printed to stdout");
+    }
+
+    Ok(())
+}
+
 async fn transcribe_recording_with_animation(
     tui: &mut OsttTui,
-    config_data: &config::OsttConfig,
-    selected_model: &config::SelectedModel,
+    transcription_config: crate::transcription::TranscriptionConfig,
+    model_id: &str,
     audio_filename: &str,
 ) -> anyhow::Result<String> {
     use crate::transcription;
-
-    let model_id = selected_model.model_id.as_str();
-    let transcription_config = if selected_model.provider_id == "local" {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
-            .join("ostt");
-        let keywords_manager = KeywordsManager::new(&config_dir)?;
-        let keywords = keywords_manager.load_keywords()?;
-        transcription::TranscriptionConfig::new_local(
-            selected_model.model_id.clone(),
-            keywords,
-            config_data.providers.clone(),
-        )
-    } else {
-        let model = match transcription::TranscriptionModel::from_id(model_id) {
-            Some(m) => m,
-            None => {
-                tui.cleanup().ok();
-                let mut error_screen = ErrorScreen::new()?;
-                error_screen.show_error(&format!("Error: Unknown model '{model_id}'"))?;
-                error_screen.cleanup()?;
-                return Err(anyhow::anyhow!("Unknown model: {model_id}"));
-            }
-        };
-
-        let provider = model.provider();
-
-        let api_key = match config::get_api_key(provider.id())? {
-            Some(key) => key,
-            None => {
-                tui.cleanup().ok();
-                let mut error_screen = ErrorScreen::new()?;
-                error_screen.show_error(&format!(
-                    "Error: No API key for {}. Please run 'ostt auth'",
-                    provider.name()
-                ))?;
-                error_screen.cleanup()?;
-                return Err(anyhow::anyhow!(
-                "No API key found for provider '{}'. Please run 'ostt auth' to authorize this provider.",
-                provider.id()
-            ));
-            }
-        };
-
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?
-            .join("ostt");
-        let keywords_manager = KeywordsManager::new(&config_dir)?;
-        let keywords = keywords_manager.load_keywords()?;
-
-        transcription::TranscriptionConfig::new(
-            model,
-            api_key,
-            keywords,
-            config_data.providers.clone(),
-        )
-    };
 
     tracing::debug!(
         "Starting transcription with model '{}' for file '{}'",
@@ -654,34 +458,17 @@ async fn transcribe_recording_with_animation(
             let trimmed_text = text.trim().to_string();
             tracing::debug!("Transcription completed: {}", trimmed_text);
 
-            let data_dir = dirs::home_dir()
-                .ok_or_else(|| anyhow::anyhow!("Could not determine home directory"))?
-                .join(".local")
-                .join("share")
-                .join("ostt");
-
-            let mut history_manager = HistoryManager::new(&data_dir)?;
-            if let Err(e) = history_manager.save_transcription(&trimmed_text) {
-                tracing::warn!("Failed to save transcription to history: {}", e);
-            }
+            common::save_transcription_history(&trimmed_text)?;
 
             // Return the transcription text to be output after TUI cleanup
             Ok(text)
         }
         Ok(Err(e)) => {
             tracing::error!("Transcription failed: {}", e);
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&format!("Error: Transcription failed - {e}"))?;
-            error_screen.cleanup()?;
             Err(e)
         }
         Err(e) => {
             tracing::error!("Transcription task failed: {}", e);
-            tui.cleanup().ok();
-            let mut error_screen = ErrorScreen::new()?;
-            error_screen.show_error(&format!("Error: Transcription task failed - {e}"))?;
-            error_screen.cleanup()?;
             Err(anyhow::anyhow!("Transcription task failed: {e}"))
         }
     }

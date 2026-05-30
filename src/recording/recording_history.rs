@@ -5,68 +5,52 @@
 
 use anyhow::Result;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// Manages recording history for retry and replay functionality.
-pub struct RecordingHistory {
-    /// Path to the recordings directory
-    recordings_dir: PathBuf,
+/// Cleans up old recordings to keep only the 10 most recent.
+pub fn cleanup_old_recordings() {
+    let mut recordings = match list_recording_files() {
+        Ok(recordings) => recordings,
+        Err(err) => {
+            tracing::warn!("Failed to list recordings for cleanup: {}", err);
+            return;
+        }
+    };
+
+    if recordings.len() >= 10 {
+        recordings.sort();
+        let oldest = &recordings[0];
+
+        if let Err(e) = fs::remove_file(oldest) {
+            tracing::warn!("Failed to delete old recording: {}", e);
+        } else {
+            tracing::debug!("Deleted old recording: {}", oldest.display());
+        }
+    }
 }
 
-impl RecordingHistory {
-    /// Creates a new recording history manager.
-    pub fn new(data_dir: &Path) -> Result<Self> {
-        let recordings_dir = data_dir.join("recordings");
-        fs::create_dir_all(&recordings_dir)?;
-        Ok(Self { recordings_dir })
-    }
+/// Retrieves all recordings ordered by most recent first.
+pub fn get_all_recordings() -> Result<Vec<PathBuf>> {
+    let mut recordings = list_recording_files()?;
+    recordings.reverse();
+    Ok(recordings)
+}
 
-    /// Cleans up old recordings to keep only the 10 most recent.
-    ///
-    /// Should be called before saving a new recording.
-    pub fn cleanup_old_recordings(&self) -> Result<()> {
-        let mut recordings = self.list_recording_files()?;
-
-        // If we have 10 or more recordings, delete the oldest to make room
-        if recordings.len() >= 10 {
-            // Sort by filename (which includes timestamp, so older files come first)
-            recordings.sort();
-            let oldest = &recordings[0];
-
-            if let Err(e) = fs::remove_file(oldest) {
-                tracing::warn!("Failed to delete old recording: {}", e);
+fn list_recording_files() -> Result<Vec<PathBuf>> {
+    let recordings_dir = crate::app_dirs::recordings_dir()?;
+    let entries = fs::read_dir(&recordings_dir)?;
+    let mut recordings: Vec<PathBuf> = entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let path = entry.path();
+            if path.is_file() && path.file_name()?.to_str()?.starts_with("ostt-recording-") {
+                Some(path)
             } else {
-                tracing::debug!("Deleted old recording: {}", oldest.display());
+                None
             }
-        }
+        })
+        .collect();
 
-        Ok(())
-    }
-
-    /// Lists all recording files in chronological order (oldest first).
-    fn list_recording_files(&self) -> Result<Vec<PathBuf>> {
-        let entries = fs::read_dir(&self.recordings_dir)?;
-        let mut recordings: Vec<PathBuf> = entries
-            .filter_map(|entry| {
-                let entry = entry.ok()?;
-                let path = entry.path();
-                // Only include files that start with "ostt-recording-"
-                if path.is_file() && path.file_name()?.to_str()?.starts_with("ostt-recording-") {
-                    Some(path)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        recordings.sort();
-        Ok(recordings)
-    }
-
-    /// Retrieves all recordings ordered by most recent first.
-    pub fn get_all_recordings(&self) -> Result<Vec<PathBuf>> {
-        let mut recordings = self.list_recording_files()?;
-        recordings.reverse(); // Most recent first
-        Ok(recordings)
-    }
+    recordings.sort();
+    Ok(recordings)
 }

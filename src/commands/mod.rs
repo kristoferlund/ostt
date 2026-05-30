@@ -15,6 +15,7 @@
 //! - `replay`: Replay a previous recording from history
 
 pub mod auth;
+pub(crate) mod common;
 pub mod config;
 pub mod daemon;
 pub mod history;
