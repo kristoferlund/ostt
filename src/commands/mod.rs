@@ -15,7 +15,6 @@
 //! - `replay`: Replay a previous recording from history
 
 pub mod auth;
-pub(crate) mod common;
 pub mod config;
 pub mod daemon;
 pub mod history;
@@ -24,6 +23,7 @@ pub mod launch;
 pub mod list_devices;
 pub mod logs;
 pub mod model;
+pub(crate) mod output;
 pub mod process;
 pub mod record;
 pub mod replay;

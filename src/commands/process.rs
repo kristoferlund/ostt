@@ -3,9 +3,10 @@
 //! Loads a transcription from history, optionally shows the action picker,
 //! executes the selected action, and outputs the result.
 
-use super::common;
+use super::output;
 use crate::config;
 use crate::history::HistoryManager;
+use crate::keywords;
 use crate::process;
 
 /// Handles post-processing of an existing transcription from history.
@@ -93,7 +94,7 @@ pub async fn handle_process(
     tracing::info!("Executing action '{}' on transcription #{}", action.id, n);
 
     // Load keywords
-    let keywords = common::load_keywords()?;
+    let keywords = keywords::load_keywords()?;
 
     // Use animation if the picker was shown (we're in a TUI flow),
     // otherwise execute directly (no TUI was started)
@@ -111,7 +112,7 @@ pub async fn handle_process(
         process::execute_action(&action, &transcription.text, &keywords).await?
     };
 
-    common::write_text_output(&result, output_file, clipboard, "Processed result")?;
+    output::write_text(&result, output_file, clipboard, "Processed result")?;
 
     tracing::info!("=== ostt Process Command Completed ===");
     Ok(())

@@ -12,6 +12,7 @@ use std::ffi::CStr;
 
 pub mod animation;
 pub mod api;
+pub(crate) mod context;
 pub mod daemon;
 pub mod daemon_client;
 pub mod local_models;
@@ -20,6 +21,7 @@ pub mod provider;
 
 pub use animation::TranscriptionAnimation;
 pub use api::{transcribe, TranscriptionConfig, TranscriptionResponse};
+pub(crate) use context::build_context;
 pub use model::{all_models, find_model, models_for_provider, ModelSpec};
 pub use provider::TranscriptionProvider;
 

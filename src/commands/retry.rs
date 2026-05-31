@@ -1,10 +1,9 @@
 //! Retry transcription of a previous recording without re-recording audio.
 
-use super::common;
-use crate::config;
+use super::output;
 use crate::process;
 use crate::recording::recording_history;
-use crate::transcription;
+use crate::{config, history, transcription};
 
 /// Retries transcription of a previous recording.
 ///
@@ -52,7 +51,7 @@ pub async fn handle_retry(
 
     tracing::info!("Retrying transcription for recording #{}", index);
 
-    let context = common::build_transcription_context(config_data, model_override)?;
+    let context = transcription::build_context(config_data, model_override)?;
 
     // Transcribe
     tracing::debug!("Starting transcription for retry...");
@@ -61,7 +60,7 @@ pub async fn handle_retry(
             let transcription_text = text.trim().to_string();
             tracing::debug!("Retry transcription completed: {}", transcription_text);
 
-            common::save_transcription_history(&transcription_text)?;
+            history::save_transcription(&transcription_text)?;
             let output_text = process::apply_requested_action(
                 &config_data.process,
                 &transcription_text,
@@ -69,7 +68,7 @@ pub async fn handle_retry(
                 process.as_deref(),
             )
             .await?;
-            common::write_text_output(&output_text, output_file, clipboard, "Output text")?;
+            output::write_text(&output_text, output_file, clipboard, "Output text")?;
 
             Ok(())
         }

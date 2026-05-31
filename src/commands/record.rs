@@ -3,8 +3,9 @@
 //! Handles audio recording with real-time waveform visualization, optional transcription,
 //! and history management. Supports external triggers via SIGUSR1 signal.
 
-use super::common;
 use crate::config::{OsttConfig, ProcessAction, SelectedModel};
+use crate::history;
+use crate::keywords;
 use crate::process::{self, process_view::PickerResult};
 use crate::recording::{
     active::ActiveRecordingGuard, recording_history, storage, AudioRecorder, RecordingCommand,
@@ -73,7 +74,7 @@ pub async fn handle_record(
     // Prune only after a real recording was saved so cancellation cannot mutate history.
     recording_history::prune_old_recordings();
 
-    let transcription_context = common::build_transcription_context(config, model_override)
+    let transcription_context = crate::transcription::build_context(config, model_override)
         .context("failed to build transcription context")?;
     let model_id = transcription_context.selected_model.model_id.clone();
     let filepath_str = filepath.to_string_lossy().to_string();
@@ -235,7 +236,7 @@ async fn run_process_action_with_animation(
     action: ProcessAction,
     text: String,
 ) -> anyhow::Result<String> {
-    let keywords = common::load_keywords().context("failed to load keywords")?;
+    let keywords = keywords::load_keywords().context("failed to load keywords")?;
     let mut animation = TranscriptionAnimation::new(80);
     animation.set_status_label("Processing...");
 
@@ -340,7 +341,7 @@ async fn transcribe_recording_with_animation(
             let trimmed_text = text.trim().to_string();
             tracing::debug!("Transcription completed: {}", trimmed_text);
 
-            common::save_transcription_history(&trimmed_text)
+            history::save_transcription(&trimmed_text)
                 .context("failed to save transcription history")?;
 
             // Return the transcription text to be output after TUI cleanup

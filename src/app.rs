@@ -75,6 +75,13 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+fn load_config() -> anyhow::Result<crate::config::OsttConfig> {
+    crate::config::OsttConfig::load().map_err(|err| {
+        tracing::error!("Failed to load configuration: {err}");
+        anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
+    })
+}
+
 /// A terminal-based speech-to-text recorder with real-time waveform visualization
 #[derive(Parser)]
 #[command(name = "ostt")]
@@ -507,7 +514,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
     // Check if setup is needed (version check or missing config)
     check_and_run_setup().await?;
 
-    let config_data = commands::common::load_config()?;
+    let config_data = load_config()?;
 
     // Route to appropriate command handler
     match cli.command {

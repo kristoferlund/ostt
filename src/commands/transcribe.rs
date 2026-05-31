@@ -3,10 +3,9 @@
 //! Accepts an audio file path and transcribes it using the configured provider/model,
 //! reusing the same transcription pipeline as the `record` command.
 
-use super::common;
-use crate::config;
+use super::output;
 use crate::process;
-use crate::transcription;
+use crate::{config, history, transcription};
 use std::path::PathBuf;
 
 /// Handles transcription of a pre-recorded audio file.
@@ -36,7 +35,7 @@ pub async fn handle_transcribe(
 
     tracing::info!("Transcribing file: {}", file.display());
 
-    let context = common::build_transcription_context(config_data, model_override)?;
+    let context = transcription::build_context(config_data, model_override)?;
 
     // Transcribe
     tracing::debug!("Starting transcription...");
@@ -50,7 +49,7 @@ pub async fn handle_transcribe(
     let transcription_text = text.trim().to_string();
     tracing::debug!("Transcription completed: {}", transcription_text);
 
-    common::save_transcription_history(&transcription_text)?;
+    history::save_transcription(&transcription_text)?;
     let output_text = process::apply_requested_action(
         &config_data.process,
         &transcription_text,
@@ -58,7 +57,7 @@ pub async fn handle_transcribe(
         process.as_deref(),
     )
     .await?;
-    common::write_text_output(&output_text, output_file, clipboard, "Output text")?;
+    output::write_text(&output_text, output_file, clipboard, "Output text")?;
 
     Ok(())
 }
