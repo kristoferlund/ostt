@@ -152,7 +152,7 @@ pub(crate) fn load_audio_for_whisper(audio_path: &Path) -> anyhow::Result<Vec<f3
 pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<()> {
     let reader = hound::WavReader::open(audio_path).map_err(|err| {
         anyhow::anyhow!(
-            "Local transcription requires WAV audio: {err}. Configure [audio] with output_format = \"pcm_s16le -ar 16000\" and sample_rate = 16000."
+            "Local transcription requires WAV audio: {err}. Configure [audio] with output_format = \"pcm_s16le -ar 16000\"."
         )
     })?;
     let spec = reader.spec();
@@ -163,7 +163,7 @@ pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<(
         || spec.channels != 1
     {
         anyhow::bail!(
-            "Local transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Configure [audio] with output_format = \"pcm_s16le -ar 16000\" and sample_rate = 16000. Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
+            "Local transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Configure [audio] with output_format = \"pcm_s16le -ar 16000\". Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
             spec.sample_format,
             spec.bits_per_sample,
             spec.sample_rate,

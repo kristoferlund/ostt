@@ -28,7 +28,7 @@ use std::os::unix::io::AsRawFd;
 /// - Automatic cleanup of temporary files
 /// - Pause and resume support
 pub struct AudioRecorder {
-    /// Actual recording sample rate from device
+    /// Actual recording sample rate from device, set after recording starts.
     sample_rate: u32,
     /// Recorded audio samples (i16 PCM mono)
     samples: Arc<Mutex<Vec<i16>>>,
@@ -43,13 +43,11 @@ pub struct AudioRecorder {
 }
 
 impl AudioRecorder {
-    /// Creates a new audio recorder with requested sample rate and device.
-    ///
-    /// Note: The actual recording sample rate may differ based on device capabilities.
-    /// Call `get_sample_rate()` after `start_recording()` to get the actual rate.
+    /// Creates a new audio recorder for the configured input device.
+    /// Call `sample_rate()` after `start_recording()` to get the device rate.
     pub fn new(config: &OsttConfig) -> Self {
         Self {
-            sample_rate: config.audio.sample_rate,
+            sample_rate: 0,
             samples: Arc::new(Mutex::new(Vec::new())),
             stream: None,
             device_channels: 1,
@@ -86,15 +84,6 @@ impl AudioRecorder {
         let device_config = device.default_input_config()?;
         let device_sample_rate = device_config.sample_rate().0;
         let num_channels = device_config.channels() as usize;
-
-        // Warn if requested sample rate doesn't match device
-        if device_sample_rate != self.sample_rate {
-            tracing::warn!(
-                "Requested sample rate {}Hz but device uses {}Hz. Recording at device rate.",
-                self.sample_rate,
-                device_sample_rate
-            );
-        }
 
         tracing::debug!(
             "Device configuration: {}Hz, {} channels",

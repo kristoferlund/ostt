@@ -22,7 +22,6 @@ impl LocalModelAudioConfigConfirmationDialog {
                 Line::from(""),
                 Line::from("Local transcription requires WAV audio:"),
                 Line::from("output_format = \"pcm_s16le -ar 16000\""),
-                Line::from("sample_rate = 16000"),
                 Line::from(""),
                 Line::from(Span::styled(
                     "<Update>",
