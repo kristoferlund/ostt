@@ -5,7 +5,7 @@
 
 pub mod components;
 
-pub(crate) use keys::is_ctrl_c;
+pub(crate) use keys::{cancel_requested, is_cancel_key, is_ctrl_c};
 mod keys;
 
 pub use components::{

@@ -5,55 +5,10 @@
 //! a new instance.
 
 use anyhow::{anyhow, Context};
-use std::fs;
 use std::process::Command;
 
 use crate::config::file::PopupConfig;
-
-// ─── Running instance detection ─────────────────────────────────────────────
-
-/// Finds the active recording process from the recorder-owned PID file.
-fn find_running_recorder() -> Option<u32> {
-    let pid_path = crate::app_dirs::recording_pid_path();
-    let pid = fs::read_to_string(&pid_path)
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u32>().ok())?;
-
-    if is_recording_process(pid) {
-        Some(pid)
-    } else {
-        tracing::debug!("Removing stale recording PID file: {}", pid_path.display());
-        let _ = fs::remove_file(pid_path);
-        None
-    }
-}
-
-/// Checks if a PID from the recorder-owned PID file is still live.
-fn is_recording_process(pid: u32) -> bool {
-    pid != std::process::id() && process_exists(pid)
-}
-
-fn process_exists(pid: u32) -> bool {
-    Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
-/// Sends SIGUSR1 to finish recording on a running ostt instance.
-fn signal_running_ostt(pid: u32) -> anyhow::Result<()> {
-    tracing::debug!("Sending SIGUSR1 to ostt PID {}", pid);
-
-    let status = Command::new("kill")
-        .args(["-USR1", &pid.to_string()])
-        .status()
-        .context("Failed to send SIGUSR1")?;
-
-    if !status.success() {
-        return Err(anyhow!("Failed to send SIGUSR1 to PID {}", pid));
-    }
-    Ok(())
-}
+use crate::recording::active;
 
 /// Shell-quotes a string by wrapping in single quotes and escaping internal single quotes.
 fn shell_quote(s: &str) -> String {
@@ -344,9 +299,9 @@ pub async fn handle_launch(
     args: Vec<String>,
 ) -> Result<(), anyhow::Error> {
     // Check if there's already a running recorder.
-    if let Some(pid) = find_running_recorder() {
+    if let Some(pid) = active::find_running_recorder() {
         tracing::debug!("Found running ostt recorder (PID {}), sending SIGUSR1", pid);
-        signal_running_ostt(pid)?;
+        active::signal_running_recorder(pid)?;
         return Ok(());
     }
 

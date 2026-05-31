@@ -4,7 +4,7 @@
 //! Handles real-time display updates, volume metering, and user input during recording.
 
 use crossterm::{
-    event::{self, Event, KeyCode, MouseEventKind},
+    event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode},
 };
@@ -18,19 +18,11 @@ use std::io::{stdout, Stdout};
 
 use crate::config::VisualizationType;
 use crate::config::{file::ProcessAction, OsttConfig};
-use crate::process::process_view::render_process_view;
+use crate::process::process_view::{handle_picker_event, render_process_view, PickerResult};
 use crate::transcription::TranscriptionAnimation;
+use crate::ui::is_cancel_key;
 
 use super::visualizations::{resize_waveform, update_waveform, SpectrumAnalyzer};
-
-/// Result of a single frame of the action picker rendered through OsttTui.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PickerEvent {
-    /// User selected an action — contains the action's ID.
-    Selected(String),
-    /// User cancelled (Esc/q/Ctrl+C).
-    Cancelled,
-}
 
 /// User input command during recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -362,16 +354,8 @@ impl RecordingTui {
                         tracing::debug!("Enter pressed: proceeding to transcription");
                         RecordingCommand::Transcribe
                     }
-                    KeyCode::Char('q') | KeyCode::Esc => {
-                        tracing::debug!("Escape or 'q' pressed: canceling recording");
-                        RecordingCommand::Cancel
-                    }
-                    KeyCode::Char('c')
-                        if key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                    {
-                        tracing::debug!("Ctrl+C pressed: canceling recording");
+                    _ if is_cancel_key(&key) => {
+                        tracing::debug!("Cancel key pressed: canceling recording");
                         RecordingCommand::Cancel
                     }
                     KeyCode::Char(' ') => {
@@ -435,7 +419,7 @@ impl RecordingTui {
 
     /// Renders one frame of the action picker and polls for input.
     ///
-    /// Returns `Ok(Some(PickerEvent))` if the user made a selection or cancelled,
+    /// Returns `Ok(Some(PickerResult))` if the user made a selection or cancelled,
     /// `Ok(None)` if the event loop should continue (no actionable input).
     ///
     /// # Errors
@@ -445,54 +429,21 @@ impl RecordingTui {
         &mut self,
         actions: &[ProcessAction],
         list_state: &mut ListState,
-    ) -> Result<Option<PickerEvent>, Box<dyn Error>> {
-        // Render one frame
-        let actions_ref = actions.to_vec();
+    ) -> Result<Option<PickerResult>, Box<dyn Error>> {
+        let mut list_area = Rect::default();
         self.terminal.draw(|frame| {
             let area = frame.area();
-            render_process_view(frame, area, &actions_ref, list_state, None);
+            list_area = render_process_view(frame, area, actions, list_state, None);
         })?;
 
-        // Poll for input with 50ms timeout
         if event::poll(std::time::Duration::from_millis(50))? {
-            match event::read()? {
-                Event::Key(key) => match key.code {
-                    KeyCode::Up | KeyCode::Char('k') => {
-                        list_state.select_previous();
-                    }
-                    KeyCode::Down | KeyCode::Char('j') => {
-                        list_state.select_next();
-                    }
-                    KeyCode::Enter => {
-                        if let Some(idx) = list_state.selected() {
-                            if idx < actions.len() {
-                                return Ok(Some(PickerEvent::Selected(actions[idx].id.clone())));
-                            }
-                        }
-                    }
-                    KeyCode::Esc | KeyCode::Char('q') => {
-                        return Ok(Some(PickerEvent::Cancelled));
-                    }
-                    KeyCode::Char('c')
-                        if key
-                            .modifiers
-                            .contains(crossterm::event::KeyModifiers::CONTROL) =>
-                    {
-                        return Ok(Some(PickerEvent::Cancelled));
-                    }
-                    _ => {}
-                },
-                Event::Mouse(mouse) => match mouse.kind {
-                    MouseEventKind::ScrollUp => {
-                        list_state.select_previous();
-                    }
-                    MouseEventKind::ScrollDown => {
-                        list_state.select_next();
-                    }
-                    _ => {}
-                },
-                _ => {}
-            }
+            return Ok(handle_picker_event(
+                event::read()?,
+                actions,
+                list_state,
+                None,
+                list_area,
+            ));
         }
 
         Ok(None)

@@ -7,8 +7,8 @@
 
 use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
+use crate::ui::cancel_requested;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -223,25 +223,11 @@ pub async fn execute_action_with_animation(
             break;
         }
 
-        // Poll for cancel input (Esc/q/Ctrl+C)
-        if event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => {
-                        tracing::info!("Processing cancelled by user");
-                        task_handle.abort();
-                        cancelled = true;
-                        break;
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        tracing::info!("Processing cancelled by user (Ctrl+C)");
-                        task_handle.abort();
-                        cancelled = true;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
+        if cancel_requested() {
+            tracing::info!("Processing cancelled by user");
+            task_handle.abort();
+            cancelled = true;
+            break;
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
