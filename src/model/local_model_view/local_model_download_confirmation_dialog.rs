@@ -1,6 +1,7 @@
 use ratatui::text::Line;
 use ratatui::Frame;
 
+use crate::transcription::local_models::full_model_id;
 use crate::ui::{render_dialog, DialogAction};
 
 use super::local_model_view_helpers::format_bytes;
@@ -19,6 +20,7 @@ impl LocalModelDownloadConfirmationDialog {
             "Start Download",
             vec![
                 Line::from(format!("Download \"{}\"?", entry.name)),
+                Line::from(format!("ID: {}", full_model_id(&entry.id))),
                 Line::from(""),
                 Line::from(format!(
                     "Size: {}",

@@ -1,9 +1,7 @@
 //! Provider credential authentication.
 
-use crate::config;
-use crate::transcription;
-use cliclack::outro;
-use cliclack::{confirm, intro, note, password, select};
+use crate::{config, transcription};
+use cliclack::{confirm, intro, note, outro, password, select};
 use console::style;
 use std::collections::HashSet;
 
