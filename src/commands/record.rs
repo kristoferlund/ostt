@@ -11,8 +11,11 @@ use crate::recording::{
     recording_history, AudioRecorder, PickerEvent, RecordingCommand, RecordingTui,
 };
 use crate::transcription::TranscriptionAnimation;
+use anyhow::Context;
 use ratatui::widgets::ListState;
 use signal_hook::consts::SIGUSR1;
+use signal_hook::low_level::unregister;
+use signal_hook::SigId;
 use std::{
     path::PathBuf,
     sync::{
@@ -25,19 +28,40 @@ struct RecordingPidGuard {
     path: PathBuf,
 }
 
+struct SignalGuard {
+    id: SigId,
+}
+
 impl Drop for RecordingPidGuard {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
     }
 }
 
+impl Drop for SignalGuard {
+    fn drop(&mut self) {
+        unregister(self.id);
+    }
+}
+
 fn write_recording_pid_file() -> anyhow::Result<RecordingPidGuard> {
     let path = crate::app_dirs::recording_pid_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        std::fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create recording PID directory: {}",
+                parent.display()
+            )
+        })?;
     }
-    std::fs::write(&path, std::process::id().to_string())?;
+    std::fs::write(&path, std::process::id().to_string())
+        .with_context(|| format!("Failed to write PID to {}", path.display()))?;
     Ok(RecordingPidGuard { path })
+}
+
+fn register_transcription_signal(term: Arc<AtomicBool>) -> anyhow::Result<SignalGuard> {
+    let id = signal_hook::flag::register(SIGUSR1, term)?;
+    Ok(SignalGuard { id })
 }
 
 /// Handles audio recording and optional transcription.
@@ -60,82 +84,78 @@ pub async fn handle_record(
     );
 
     let mut audio_recorder = AudioRecorder::new(config);
-    audio_recorder.start_recording().map_err(|err| {
-        tracing::error!("Failed to start recording: {err}");
-        anyhow::anyhow!(
-            "Recording error: {err}\n\nPlease check your audio configuration and try again."
-        )
-    })?;
+    audio_recorder
+        .start_recording()
+        .context("Failed to start audio recording")?;
     let actual_sample_rate = audio_recorder.sample_rate();
 
+    // The UI depends on the device's actual sample rate for timing and spectrum analysis.
     let mut tui = RecordingTui::new(config, actual_sample_rate)
-        .map_err(|e| anyhow::anyhow!("Failed to initialize UI: {e}"))?;
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .context("Failed to initialize recording UI")?;
     let term = Arc::new(AtomicBool::new(false));
-    let term_clone = term.clone();
 
-    // Subscribe to SIGUSR1 signal
-    signal_hook::flag::register(SIGUSR1, term_clone)
-        .inspect_err(|_| {
-            tui.cleanup().ok();
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to register signal handler: {e}"))?;
+    // External popup/launcher integrations use SIGUSR1 to finish the active recording.
+    let signal_guard = register_transcription_signal(term.clone())
+        .context("Failed to register recording signal handler")?;
 
-    // Remember the id of the current process
-    let recording_pid_guard = write_recording_pid_file()
-        .inspect_err(|_| {
-            tui.cleanup().ok();
-        })
-        .map_err(|e| anyhow::anyhow!("Failed to write recording PID file: {e}"))?;
+    // Other OSTT commands need this PID to trigger transcription of the active recorder.
+    let recording_pid_guard =
+        write_recording_pid_file().context("Failed to write recording PID file")?;
 
-    let should_transcribe =
-        run_recording_loop(&mut tui, &mut audio_recorder, actual_sample_rate, &term).inspect_err(
-            |_| {
-                tui.cleanup().ok();
-            },
-        )?;
+    // Cancel means discard the in-memory samples; only a transcribe action persists audio.
+    if !run_recording_loop(&mut tui, &mut audio_recorder, actual_sample_rate, &term)
+        .context("Recording loop failed")?
+    {
+        return finish_recording_without_output(&mut tui);
+    }
 
-    // Dropping the pid also deletes file
+    // Once recording has stopped, external triggers should no longer target this process.
+    drop(signal_guard);
     drop(recording_pid_guard);
 
-    let filepath = save_recording(&mut audio_recorder, config).inspect_err(|_| {
-        tui.cleanup().ok();
-    })?;
-
-    // Max 10 recordings are saved
-    recording_history::prune_old_recordings();
-
-    // Transcribe or skip if user pressed Esc etc.
-    let maybe_transcribed_text = match should_transcribe {
-        true => transcribe_with_animation(&mut tui, config, model_override, &filepath)
-            .await
-            .inspect_err(|_| {
-                tui.cleanup().ok();
-            })?,
-        false => None,
+    let Some(filepath) =
+        save_recording(&mut audio_recorder, config).context("Failed to save recording")?
+    else {
+        return finish_recording_without_output(&mut tui);
     };
 
-    // Process if there is a transcribed text and a process action.
-    let output_text = if let Some(transcribed_text) = maybe_transcribed_text {
-        Some(if process.is_some() {
+    // Prune only after a real recording was saved so cancellation cannot mutate history.
+    recording_history::prune_old_recordings();
+
+    let maybe_transcribed_text =
+        transcribe_with_animation(&mut tui, config, model_override, &filepath)
+            .await
+            .context("Failed to transcribe recording")?;
+
+    // A transcription failure is non-fatal for record mode; it still leaves the audio in history.
+    let output_text = match maybe_transcribed_text {
+        Some(transcribed_text) if process.is_some() => Some(
             process_with_animation(&mut tui, config, transcribed_text, process.as_deref())
                 .await
-                .inspect_err(|_| {
-                    tui.cleanup().ok();
-                })?
-        } else {
-            transcribed_text
-        })
-    } else {
-        None
+                .context("Failed to process transcription")?,
+        ),
+        Some(transcribed_text) => Some(transcribed_text),
+        None => None,
     };
 
     tui.cleanup()
-        .map_err(|e| anyhow::anyhow!("Cleanup failed: {e}"))?;
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .context("Failed to clean up recording UI")?;
 
     if let Some(output_text) = output_text {
-        write_record_output(&output_text, output_file, clipboard)?;
+        write_record_output(&output_text, output_file, clipboard)
+            .context("Failed to write recording output")?;
     }
 
+    tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
+    Ok(())
+}
+
+fn finish_recording_without_output(tui: &mut RecordingTui) -> Result<(), anyhow::Error> {
+    tui.cleanup()
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .context("Failed to clean up recording UI")?;
     tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
     Ok(())
 }
@@ -159,7 +179,7 @@ fn run_recording_loop(
 
         match tui.handle_input().map_err(|e| {
             tracing::error!("Input handling error: {}", e);
-            anyhow::anyhow!("Input handling error: {e}")
+            anyhow::anyhow!(e.to_string())
         })? {
             RecordingCommand::Continue => {
                 frame_count += 1;
@@ -187,28 +207,37 @@ fn render_recording_waveform(
     audio_recorder: &AudioRecorder,
 ) -> anyhow::Result<()> {
     tui.render_waveform(&audio_recorder.samples())
-        .map_err(|e| anyhow::anyhow!("Render failed: {e}"))
+        .map_err(|e| anyhow::anyhow!(e.to_string()))
+        .context("Failed to render recording waveform")
 }
 
 fn save_recording(
     audio_recorder: &mut AudioRecorder,
     config: &OsttConfig,
-) -> anyhow::Result<PathBuf> {
+) -> anyhow::Result<Option<PathBuf>> {
     tracing::debug!("Stopping recording and saving audio...");
 
     let extension = recording_file_extension(&config.audio.output_format);
     let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S-%3f");
     let filename = format!("ostt-recording-{timestamp}.{extension}");
-    let filepath = recordings_dir()?.join(&filename);
+    let filepath = recordings_dir()
+        .context("Failed to get recordings directory")?
+        .join(&filename);
 
     audio_recorder
         .stop_recording(Some(filepath.clone()), &config.audio.output_format)
         .inspect_err(|e| {
             tracing::error!("Failed to save recording: {}", e);
-        })?;
+        })
+        .context("Failed to stop recorder and encode audio")?;
+
+    if !filepath.exists() {
+        tracing::warn!("Recording stopped before any audio was captured");
+        return Ok(None);
+    }
 
     tracing::info!("Recording saved to: {}", filepath.display());
-    Ok(filepath)
+    Ok(Some(filepath))
 }
 
 fn recording_file_extension(output_format: &str) -> &str {
@@ -227,7 +256,8 @@ async fn transcribe_with_animation(
     model_override: Option<SelectedModel>,
     filepath: &std::path::Path,
 ) -> anyhow::Result<Option<String>> {
-    let transcription_context = common::build_transcription_context(config, model_override)?;
+    let transcription_context = common::build_transcription_context(config, model_override)
+        .context("Failed to build transcription context")?;
     let model_id = transcription_context.selected_model.model_id.clone();
     let filepath_str = filepath.to_string_lossy().to_string();
 
@@ -254,12 +284,17 @@ async fn process_with_animation(
     text: String,
     process_arg: Option<&str>,
 ) -> anyhow::Result<String> {
-    let action = process::select_requested_action(&config.process, process_arg, |actions| {
+    let Some(action) = process::select_requested_action(&config.process, process_arg, |actions| {
         pick_action_id_with_recording_tui(tui, actions)
-    })?
-    .expect("process_recording_with_animation called without a process action");
+    })
+    .context("Failed to select process action")?
+    else {
+        return Ok(text);
+    };
 
-    run_process_action_with_animation(tui, action, text).await
+    run_process_action_with_animation(tui, action, text)
+        .await
+        .context("Failed to run process action")
 }
 
 fn pick_action_id_with_recording_tui(
@@ -282,7 +317,8 @@ fn pick_action_id_with_recording_tui(
     loop {
         match tui
             .render_action_picker(actions, &mut list_state)
-            .map_err(|e| anyhow::anyhow!("{e}"))?
+            .map_err(|e| anyhow::anyhow!(e.to_string()))
+            .context("Failed to render process action picker")?
         {
             Some(PickerEvent::Selected(id)) => return Ok(Some(id)),
             Some(PickerEvent::Cancelled) => return Ok(None),
@@ -296,7 +332,7 @@ async fn run_process_action_with_animation(
     action: ProcessAction,
     text: String,
 ) -> anyhow::Result<String> {
-    let keywords = common::load_keywords()?;
+    let keywords = common::load_keywords().context("Failed to load keywords")?;
     let mut animation = TranscriptionAnimation::new(80);
     animation.set_status_label("Processing...");
 
@@ -356,10 +392,12 @@ fn write_record_output(
     clipboard: bool,
 ) -> anyhow::Result<()> {
     if let Some(file_path) = output_file {
-        std::fs::write(&file_path, output_text)?;
+        std::fs::write(&file_path, output_text)
+            .with_context(|| format!("Failed to write output file: {file_path}"))?;
         tracing::info!("Transcription written to file: {}", file_path);
     } else if clipboard {
-        crate::clipboard::copy_to_clipboard(output_text)?;
+        crate::clipboard::copy_to_clipboard(output_text)
+            .context("Failed to copy output to clipboard")?;
         tracing::info!("Transcription copied to clipboard");
     } else {
         println!("{output_text}");
@@ -438,7 +476,8 @@ async fn transcribe_recording_with_animation(
             let trimmed_text = text.trim().to_string();
             tracing::debug!("Transcription completed: {}", trimmed_text);
 
-            common::save_transcription_history(&trimmed_text)?;
+            common::save_transcription_history(&trimmed_text)
+                .context("Failed to save transcription history")?;
 
             // Return the transcription text to be output after TUI cleanup
             Ok(text)

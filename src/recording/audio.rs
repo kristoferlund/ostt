@@ -7,7 +7,7 @@
 use crate::config::OsttConfig;
 
 use super::ffmpeg::find_ffmpeg;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
 use std::path::{Path, PathBuf};
@@ -81,7 +81,9 @@ impl AudioRecorder {
             .unwrap_or_else(|_| "Unknown device".to_string());
         tracing::info!("Recording device: {}", device_name);
 
-        let device_config = device.default_input_config()?;
+        let device_config = device
+            .default_input_config()
+            .context("Failed to read input device configuration")?;
         let device_sample_rate = device_config.sample_rate().0;
         let num_channels = device_config.channels() as usize;
 
@@ -100,22 +102,26 @@ impl AudioRecorder {
         let pause_arc = Arc::clone(&self.is_paused);
         let callback_channels = num_channels;
 
-        let stream = device.build_input_stream(
-            &device_config.into(),
-            move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                let is_paused = *pause_arc.lock().unwrap();
-                if !is_paused {
-                    Self::handle_audio_callback(data, &samples_arc, callback_channels);
-                }
-            },
-            |err| {
-                tracing::error!("Audio stream error: {}", err);
-            },
-            None,
-        )?;
+        let stream = device
+            .build_input_stream(
+                &device_config.into(),
+                move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                    let is_paused = *pause_arc.lock().unwrap();
+                    if !is_paused {
+                        Self::handle_audio_callback(data, &samples_arc, callback_channels);
+                    }
+                },
+                |err| {
+                    tracing::error!("Audio stream error: {}", err);
+                },
+                None,
+            )
+            .context("Failed to create audio input stream")?;
 
         // Start playback and store stream
-        stream.play()?;
+        stream
+            .play()
+            .context("Failed to start audio input stream")?;
         self.stream = Some(stream);
 
         tracing::debug!("Audio stream started");
@@ -161,12 +167,13 @@ impl AudioRecorder {
             let temp_wav = self.create_temp_wav_path();
 
             self.save_wav(&samples, &temp_wav)?;
-            self.convert_with_ffmpeg(&temp_wav, &output_file, format)?;
+            let conversion_result = self.convert_with_ffmpeg(&temp_wav, &output_file, format);
 
-            // Clean up temporary file
             if let Err(e) = std::fs::remove_file(&temp_wav) {
                 tracing::debug!("Failed to remove temp file: {}", e);
             }
+
+            conversion_result?;
 
             // Log final file info
             let file_size = std::fs::metadata(&output_file)?.len();

@@ -72,6 +72,7 @@ pub struct RecordingTui {
     visualization_type: VisualizationType,
     /// Spectrum analyzer (used when visualization_type is Spectrum)
     spectrum_analyzer: Option<SpectrumAnalyzer>,
+    cleaned_up: bool,
 }
 
 impl RecordingTui {
@@ -121,6 +122,7 @@ impl RecordingTui {
             pause_start_time: None,
             visualization_type: config.audio.visualization,
             spectrum_analyzer,
+            cleaned_up: false,
         })
     }
 
@@ -502,6 +504,11 @@ impl RecordingTui {
     /// - If terminal mode cannot be disabled
     /// - If cursor cannot be shown
     pub fn cleanup(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.cleaned_up {
+            return Ok(());
+        }
+
+        self.cleaned_up = true;
         disable_raw_mode()?;
         execute!(
             self.terminal.backend_mut(),
@@ -509,5 +516,11 @@ impl RecordingTui {
         )?;
         self.terminal.show_cursor()?;
         Ok(())
+    }
+}
+
+impl Drop for RecordingTui {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
     }
 }
