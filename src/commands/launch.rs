@@ -88,7 +88,7 @@ impl TerminalEmulator {
     /// Detection order: preferred terminals first, then platform defaults as fallbacks.
     fn detection_order() -> &'static [Self] {
         &[
-            // Preferred: modern, feature-rich, cross-platform
+            // Preferred: modern, feature-rich terminals
             Self::Ghostty,
             Self::Kitty,
             Self::Alacritty,

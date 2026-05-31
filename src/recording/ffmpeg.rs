@@ -1,7 +1,7 @@
 //! FFmpeg locator utility.
 //!
-//! Provides cross-platform ffmpeg binary discovery. Checks standard installation
-//! locations before falling back to PATH search. This ensures ffmpeg can be found
+//! Provides ffmpeg binary discovery. Checks standard installation locations
+//! before falling back to PATH search. This ensures ffmpeg can be found
 //! even when running in environments with limited PATH setup (e.g., iTerm commands).
 
 use anyhow::{anyhow, Result};
@@ -12,8 +12,7 @@ use std::path::PathBuf;
 /// Checks in this order:
 /// 1. macOS homebrew locations: `/opt/homebrew/bin/ffmpeg`, `/usr/local/bin/ffmpeg`
 /// 2. Linux standard locations: `/usr/bin/ffmpeg`, `/usr/local/bin/ffmpeg`
-/// 3. Windows standard locations: `C:\ffmpeg\bin\ffmpeg.exe`
-/// 4. Falls back to PATH search via `which` or `where` command
+/// 3. Falls back to PATH search via `which`
 ///
 /// # Returns
 /// The path to the ffmpeg binary, or an error if not found.
@@ -30,12 +29,6 @@ pub fn find_ffmpeg() -> Result<PathBuf> {
             PathBuf::from("/usr/bin/ffmpeg"),       // Standard Linux
             PathBuf::from("/usr/local/bin/ffmpeg"), // Manual install
             PathBuf::from("/snap/bin/ffmpeg"),      // Snap installation
-        ]
-    } else if cfg!(target_os = "windows") {
-        vec![
-            PathBuf::from("C:\\ffmpeg\\bin\\ffmpeg.exe"),
-            PathBuf::from("C:\\Program Files\\ffmpeg\\bin\\ffmpeg.exe"),
-            PathBuf::from("C:\\Program Files (x86)\\ffmpeg\\bin\\ffmpeg.exe"),
         ]
     } else {
         vec![] // For other platforms, rely on PATH search
@@ -56,19 +49,11 @@ pub fn find_ffmpeg() -> Result<PathBuf> {
 }
 
 /// Searches for a binary in the system PATH.
-///
-/// Uses `which` on Unix systems and `where` on Windows.
 fn find_in_path(binary_name: &str) -> Result<PathBuf> {
-    let search_cmd = if cfg!(target_os = "windows") {
-        "where"
-    } else {
-        "which"
-    };
-
-    let output = std::process::Command::new(search_cmd)
+    let output = std::process::Command::new("which")
         .arg(binary_name)
         .output()
-        .map_err(|e| anyhow!("Failed to search PATH for {binary_name}: {e}"))?;
+        .map_err(|e| anyhow!("failed to search PATH for {binary_name}: {e}"))?;
 
     if output.status.success() {
         let path_str = String::from_utf8_lossy(&output.stdout);
@@ -78,12 +63,7 @@ fn find_in_path(binary_name: &str) -> Result<PathBuf> {
         }
     }
 
-    Err(anyhow!(
-        "ffmpeg not found. Please install ffmpeg:\n\
-         macOS: brew install ffmpeg\n\
-         Linux: apt install ffmpeg (Debian/Ubuntu) or dnf install ffmpeg (Fedora)\n\
-         Windows: Download from https://ffmpeg.org/download.html"
-    ))
+    Err(anyhow!("ffmpeg not found. Please install ffmpeg."))
 }
 
 #[cfg(test)]

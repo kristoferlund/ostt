@@ -270,7 +270,7 @@ impl AudioRecorder {
 
         let codec = format_parts[0];
 
-        // Find ffmpeg binary with cross-platform support
+        // Find ffmpeg binary before building the conversion command.
         let ffmpeg_path = find_ffmpeg()?;
 
         // Build ffmpeg command
