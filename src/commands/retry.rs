@@ -22,6 +22,7 @@ pub async fn handle_retry(
     output_file: Option<String>,
     process: Option<String>,
     model_override: Option<config::SelectedModel>,
+    model_option_overrides: &[String],
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Retry Command ===");
 
@@ -51,7 +52,8 @@ pub async fn handle_retry(
 
     tracing::info!("Retrying transcription for recording #{}", index);
 
-    let context = transcription::build_context(config_data, model_override)?;
+    let context =
+        transcription::build_context(config_data, model_override, model_option_overrides)?;
 
     // Transcribe
     tracing::debug!("Starting transcription for retry...");

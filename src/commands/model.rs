@@ -106,6 +106,46 @@ pub fn handle_model_current() -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn handle_model_options(model: Option<String>, json: bool) -> anyhow::Result<()> {
+    let selected = match model {
+        Some(model) => crate::config::parse_provider_model(&model)?,
+        None => crate::config::get_selected_model_entry()?.ok_or_else(|| {
+            anyhow::anyhow!("No model selected. Pass PROVIDER/MODEL or run 'ostt model' first.")
+        })?,
+    };
+    let full_model_id = format!("{}/{}", selected.provider_id, selected.model_id);
+    let schema = transcription::api::option_schema(&selected.provider_id, &selected.model_id)
+        .ok_or_else(|| anyhow::anyhow!("No model options are supported for {full_model_id}."))?;
+
+    if json {
+        let options: Vec<_> = schema
+            .options()
+            .iter()
+            .map(|option| {
+                serde_json::json!({
+                    "name": option.name,
+                    "type": option.kind.name(),
+                })
+            })
+            .collect();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "provider": selected.provider_id,
+                "model": selected.model_id,
+                "options": options,
+            }))?
+        );
+        return Ok(());
+    }
+
+    for option in schema.options() {
+        println!("{}: {}", option.name, option.kind.name());
+    }
+
+    Ok(())
+}
+
 pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
     let selected = crate::config::parse_provider_model(&model)?;
     if selected.provider_id == "local" {

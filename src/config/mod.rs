@@ -14,8 +14,8 @@ pub use file::{
     ProcessConfig,
 };
 pub use file::{
-    AudioConfig, OsttConfig, PopupConfig, ProvidersConfig, TranscriptionSelectionConfig,
-    VisualizationType,
+    AudioConfig, ModelOptionValue, ModelOptionsConfig, OsttConfig, PopupConfig, ProvidersConfig,
+    TranscriptionSelectionConfig, VisualizationType,
 };
 pub use secrets::{
     clear_api_key, clear_selected_model, get_api_key, get_authorized_providers, get_selected_model,

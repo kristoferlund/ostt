@@ -39,3 +39,15 @@ reference_level_db = -20
 #
 # Add more formats as needed - ffmpeg handles the rest!
 output_format = "mp3 -ab 16k -ar 12000"
+
+# Per-model transcription request options.
+# Keys must use the full provider/model id and options are validated against that model.
+#
+# Examples:
+# [model_options."deepgram/nova-3"]
+# detect_language = true
+# smart_format = true
+# keyterm = ["OSTT"]
+#
+# [model_options."berget/openai/whisper-large-v3"]
+# language = "sv"

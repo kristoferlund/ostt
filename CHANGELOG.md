@@ -13,10 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added per-run transcription model selection with `-m, --model <PROVIDER/MODEL>` for `ostt`, `ostt record`, `ostt transcribe`, `ostt retry`, and `ostt launch`. The override applies only to the current invocation and does not change the saved default model.
 - Added scriptable CLI actions for models, keywords, auth, history, config helpers, logs, and local model download/removal.
+- Added per-run model option overrides with repeatable `--mo key=value`, validated against the selected provider/model option schema for supported transcription providers.
+- Added `ostt model options [PROVIDER/MODEL] --format table|json` to list supported model option keys for scripting.
+- Added OpenAI `gpt-4o-transcribe-diarize` and validated JSON-safe OpenAI transcription options for logprobs, Whisper timestamp metadata, and diarization requests.
+- Added validated JSON-safe Groq transcription options for `response_format` and `timestamp_granularities` based on Groq's speech-to-text documentation.
+- Added more DeepInfra speech-recognition models and validated DeepInfra-native options including `initial_prompt`, `task`, `chunk_level`, and `chunk_length_s`.
+- Added validated Berget transcription options for JSON-safe response format, word alignment, diarization, speaker embeddings, chunk size, and batch size.
+- Added validated ElevenLabs Scribe options for timestamps, file format, entity detection/redaction, diarization rules, and speaker-role detection rules.
+- Added validated Mistral Voxtral transcription options for `language`, `temperature`, `timestamp_granularities`, `diarize`, and `context_bias`.
 
 ### Changed
 
 - Cloud transcription models now use provider/model identities such as `deepgram/nova-3`, `deepinfra/openai/whisper-large-v3`, and `berget/KBLab/kb-whisper-large`, replacing older OSTT-invented model IDs.
+- Transcription request options are now model-scoped under `[model_options."provider/model"]` instead of provider-scoped settings under `[providers.*]`.
 - Local model UI and error messages now show full public IDs such as `local/turbo`.
 - Cleaned up command syntax: `ostt keyword` replaces `ostt keywords`, `ostt config list-devices` replaces `ostt list-devices`, `ostt process list` replaces `ostt process --list`, and `ostt completions install <shell>` replaces `ostt completions <shell> --install`.
 - Record-only options no longer appear in unrelated management command help.

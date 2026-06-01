@@ -110,6 +110,10 @@ struct Cli {
     #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
     model: Option<String>,
 
+    /// Override a model option for this run, as key=value
+    #[arg(long = "mo", value_name = "KEY=VALUE", global = true)]
+    model_options: Vec<String>,
+
     #[command(subcommand)]
     command: Option<Commands>,
 }
@@ -384,6 +388,15 @@ enum ModelCommand {
     },
     /// Show the currently selected transcription model
     Current,
+    /// List supported model options for a transcription model
+    Options {
+        /// Model to inspect. Defaults to the currently selected model.
+        #[arg(value_name = "PROVIDER/MODEL")]
+        model: Option<String>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
+    },
     /// Select the active transcription model
     Select {
         #[arg(value_name = "PROVIDER/MODEL")]
@@ -660,8 +673,15 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 .as_deref()
                 .map(crate::config::parse_provider_model)
                 .transpose()?;
-            commands::handle_record(&config_data, clipboard, output, process, model_override)
-                .await?;
+            commands::handle_record(
+                &config_data,
+                clipboard,
+                output,
+                process,
+                model_override,
+                &cli.model_options,
+            )
+            .await?;
         }
         Some(Commands::Retry {
             index,
@@ -682,6 +702,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 output,
                 process,
                 model_override,
+                &cli.model_options,
             )
             .await?;
         }
@@ -704,6 +725,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 output,
                 process,
                 model_override,
+                &cli.model_options,
             )
             .await?;
         }
@@ -741,6 +763,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 format,
             }) => commands::model::handle_model_list(provider, installed, format.is_json()).await?,
             Some(ModelCommand::Current) => commands::model::handle_model_current()?,
+            Some(ModelCommand::Options { model, format }) => {
+                commands::model::handle_model_options(model, format.is_json())?
+            }
             Some(ModelCommand::Select { model }) => {
                 commands::model::handle_model_select(model).await?
             }
@@ -817,6 +842,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
             if let Some(ref model) = cli.model {
                 full_args.insert(0, model.clone());
                 full_args.insert(0, "-m".to_string());
+            }
+            for model_option in cli.model_options.iter().rev() {
+                full_args.insert(0, model_option.clone());
+                full_args.insert(0, "--mo".to_string());
             }
             commands::handle_launch(&config_data, full_args).await?;
         }
@@ -928,6 +957,33 @@ mod tests {
     }
 
     #[test]
+    fn cli_accepts_model_options_listing_format() {
+        let cli = Cli::try_parse_from([
+            "ostt",
+            "model",
+            "options",
+            "openai/gpt-4o-transcribe",
+            "--format",
+            "json",
+        ])
+        .expect("parse cli");
+
+        match cli.command {
+            Some(Commands::Model {
+                command:
+                    Some(ModelCommand::Options {
+                        model: Some(model),
+                        format,
+                    }),
+            }) => {
+                assert_eq!(model, "openai/gpt-4o-transcribe");
+                assert_eq!(format, ListFormat::Json);
+            }
+            _ => panic!("expected model options command"),
+        }
+    }
+
+    #[test]
     fn cli_uses_singular_keyword_command() {
         assert!(Cli::try_parse_from(["ostt", "keywords"]).is_err());
 
@@ -982,5 +1038,66 @@ mod tests {
             }) => assert_eq!(shell, Shell::Bash),
             _ => panic!("expected completions install command"),
         }
+    }
+
+    #[test]
+    fn cli_accepts_repeatable_model_options_for_default_record() {
+        let cli = Cli::try_parse_from([
+            "ostt",
+            "--mo",
+            "detect_language=false",
+            "--mo",
+            "smart_format=true",
+        ])
+        .expect("parse cli");
+
+        assert_eq!(
+            cli.model_options,
+            vec!["detect_language=false", "smart_format=true"]
+        );
+    }
+
+    #[test]
+    fn cli_accepts_model_options_for_transcribe() {
+        let cli = Cli::try_parse_from(["ostt", "transcribe", "audio.ogg", "--mo", "language=sv"])
+            .expect("parse cli");
+
+        assert_eq!(cli.model_options, vec!["language=sv"]);
+        match cli.command {
+            Some(Commands::Transcribe { .. }) => {}
+            _ => panic!("expected transcribe command"),
+        }
+    }
+
+    #[test]
+    fn cli_collects_model_options_once_for_subcommands() {
+        let cli = Cli::try_parse_from([
+            "ostt",
+            "transcribe",
+            "audio.ogg",
+            "--mo",
+            "diarize=true",
+            "--mo",
+            "language=sv",
+        ])
+        .expect("parse cli");
+
+        assert_eq!(cli.model_options, vec!["diarize=true", "language=sv"]);
+    }
+
+    #[test]
+    fn cli_accepts_model_options_for_launch() {
+        let cli =
+            Cli::try_parse_from(["ostt", "launch", "--mo", "language=sv"]).expect("parse cli");
+
+        assert_eq!(cli.model_options, vec!["language=sv"]);
+    }
+
+    #[test]
+    fn cli_accepts_global_model_options_before_subcommand() {
+        let cli = Cli::try_parse_from(["ostt", "--mo", "language=sv", "transcribe", "audio.ogg"])
+            .expect("parse cli");
+
+        assert_eq!(cli.model_options, vec!["language=sv"]);
     }
 }

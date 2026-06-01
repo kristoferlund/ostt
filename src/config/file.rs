@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+use crate::transcription::{api, model};
+
 fn current_config_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
@@ -72,139 +74,8 @@ fn default_reference_level_db() -> i8 {
     -20
 }
 
-/// Deepgram API configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DeepgramConfig {
-    /// Include filler words in transcript (uh, um, etc.)
-    #[serde(default)]
-    pub filler_words: bool,
-    /// Convert spoken measurements to abbreviations
-    #[serde(default)]
-    pub measurements: bool,
-    /// Convert numbers from written to numerical format
-    #[serde(default)]
-    pub numerals: bool,
-    /// Split audio into paragraphs for readability
-    #[serde(default)]
-    pub paragraphs: bool,
-    /// Apply profanity filtering
-    #[serde(default)]
-    pub profanity_filter: bool,
-    /// Add punctuation and capitalization
-    #[serde(default)]
-    pub punctuate: bool,
-    /// Apply smart formatting to transcript
-    #[serde(default)]
-    pub smart_format: bool,
-    /// Segment speech into meaningful semantic units
-    #[serde(default)]
-    pub utterances: bool,
-    /// Seconds to wait before detecting pause between words
-    #[serde(default = "default_utt_split")]
-    pub utt_split: f64,
-    /// Enable automatic language detection
-    #[serde(default = "default_true")]
-    pub detect_language: bool,
-    /// Restrict language detection to specific languages (e.g., ["en", "es"])
-    /// When empty, all languages can be detected
-    #[serde(default)]
-    pub detect_language_codes: Vec<String>,
-    /// Opt out from Deepgram Model Improvement Program
-    #[serde(default)]
-    pub mip_opt_out: bool,
-}
-
 fn default_true() -> bool {
     true
-}
-
-fn default_utt_split() -> f64 {
-    0.8
-}
-
-impl Default for DeepgramConfig {
-    fn default() -> Self {
-        Self {
-            filler_words: false,
-            measurements: false,
-            numerals: false,
-            paragraphs: false,
-            profanity_filter: false,
-            punctuate: false,
-            smart_format: false,
-            utterances: false,
-            utt_split: default_utt_split(),
-            detect_language: true,
-            detect_language_codes: Vec::new(),
-            mip_opt_out: false,
-        }
-    }
-}
-
-/// OpenAI API configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct OpenAiConfig {
-    // Currently no additional parameters beyond what's in API
-    // Add here as OpenAI features become configurable
-}
-
-/// Options for AssemblyAI automatic language detection.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct LanguageDetectionOptions {
-    /// List of languages expected in the audio file.
-    /// Defaults to ["all"] when unspecified.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expected_languages: Option<Vec<String>>,
-    /// Fallback language if detected language is not in expected_languages.
-    /// Use "auto" to let the model choose from expected_languages with highest confidence.
-    /// Defaults to "auto".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fallback_language: Option<String>,
-}
-
-/// AssemblyAI API configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AssemblyAIConfig {
-    /// Apply text formatting (punctuation, casing, numerals)
-    #[serde(default = "default_true")]
-    pub format_text: bool,
-    /// Include disfluencies (uh, um) in transcript
-    #[serde(default)]
-    pub disfluencies: bool,
-    /// Filter profanity from transcript
-    #[serde(default)]
-    pub filter_profanity: bool,
-    /// Enable automatic language detection
-    #[serde(default = "default_true")]
-    pub language_detection: bool,
-    /// Options for automatic language detection
-    #[serde(default)]
-    pub language_detection_options: LanguageDetectionOptions,
-    /// Enable automatic punctuation
-    #[serde(default = "default_true")]
-    pub punctuate: bool,
-}
-
-impl Default for AssemblyAIConfig {
-    fn default() -> Self {
-        Self {
-            format_text: true,
-            disfluencies: false,
-            filter_profanity: false,
-            language_detection: true,
-            language_detection_options: LanguageDetectionOptions::default(),
-            punctuate: true,
-        }
-    }
-}
-
-/// ElevenLabs Scribe API configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct ElevenLabsConfig {
-    /// Optional ISO-639-1 or ISO-639-3 language code (e.g. "eng", "swe").
-    /// When set, can improve accuracy for known languages.
-    /// Defaults to null (auto-detect).
-    pub language_code: Option<String>,
 }
 
 /// Local transcription provider configuration.
@@ -263,42 +134,25 @@ fn validate_local_values(
     Ok(())
 }
 
-/// Mistral Voxtral API configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct MistralConfig {
-    /// Optional language code for transcription (e.g. "en", "sv").
-    /// When set, can improve accuracy for known languages.
-    /// Defaults to null (auto-detect).
-    pub language: Option<String>,
-}
-
-/// Provider-specific configuration
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ProviderConfig {
-    /// Deepgram provider configuration
-    #[serde(rename = "deepgram")]
-    Deepgram(DeepgramConfig),
-    /// OpenAI provider configuration
-    #[serde(rename = "openai")]
-    OpenAi(OpenAiConfig),
-}
-
 /// All provider configurations
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
 pub struct ProvidersConfig {
     #[serde(default)]
-    pub deepgram: DeepgramConfig,
-    #[serde(default)]
-    pub openai: OpenAiConfig,
-    #[serde(default)]
-    pub assemblyai: AssemblyAIConfig,
-    #[serde(default)]
-    pub elevenlabs: ElevenLabsConfig,
-    #[serde(default)]
     pub local: LocalTranscriptionConfig,
-    #[serde(default)]
-    pub mistral: MistralConfig,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum ModelOptionValue {
+    Bool(bool),
+    Integer(i64),
+    Number(f64),
+    String(String),
+    StringList(Vec<String>),
+}
+
+pub type ModelOptionsConfig = IndexMap<String, IndexMap<String, ModelOptionValue>>;
 
 /// Popup window configuration for the `launch` subcommand.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -688,6 +542,8 @@ pub struct OsttConfig {
     #[serde(default)]
     pub providers: ProvidersConfig,
     #[serde(default)]
+    pub model_options: ModelOptionsConfig,
+    #[serde(default)]
     pub process: ProcessConfig,
     #[serde(default)]
     pub popup: PopupConfig,
@@ -705,6 +561,7 @@ impl OsttConfig {
         let config_content = fs::read_to_string(&config_path)?;
         let config: OsttConfig = toml::from_str(&config_content)?;
         config.providers.local.validate()?;
+        validate_model_options(&config.model_options)?;
         for action in &config.process.actions {
             action.validate()?;
         }
@@ -738,6 +595,7 @@ impl OsttConfig {
             },
             transcription: TranscriptionSelectionConfig::default(),
             providers: ProvidersConfig::default(),
+            model_options: ModelOptionsConfig::default(),
             process: ProcessConfig::default(),
             popup: PopupConfig::default(),
         }
@@ -762,6 +620,105 @@ pub(crate) fn get_config_path() -> Result<PathBuf, std::io::Error> {
 /// - If the config file cannot be written
 pub fn save_config(config: &OsttConfig) -> anyhow::Result<()> {
     config.save()
+}
+
+pub fn validate_model_options(model_options: &ModelOptionsConfig) -> anyhow::Result<()> {
+    for (full_model_id, options) in model_options {
+        let (provider_id, model_id) = full_model_id.split_once('/').ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid model_options key '{}'. Use 'provider/model'.",
+                full_model_id
+            )
+        })?;
+
+        if provider_id != "local" && model::find_model(provider_id, model_id).is_none() {
+            anyhow::bail!(
+                "Invalid model_options key '{}'. Unknown provider/model.",
+                full_model_id
+            );
+        }
+
+        let schema = api::option_schema(provider_id, model_id).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Invalid model_options key '{}'. No options are supported for this model.",
+                full_model_id
+            )
+        })?;
+
+        for (option_name, value) in options {
+            let Some(spec) = schema.option(option_name) else {
+                anyhow::bail!(
+                    "Invalid option '{}' for '{}'. Supported options: {}.",
+                    option_name,
+                    full_model_id,
+                    schema.option_names().join(", ")
+                );
+            };
+            validate_model_option_type(full_model_id, option_name, value, spec.kind)?;
+        }
+
+        api::validate_model_options(provider_id, full_model_id, options)?;
+    }
+
+    Ok(())
+}
+
+fn validate_model_option_type(
+    full_model_id: &str,
+    option_name: &str,
+    value: &ModelOptionValue,
+    expected: model::ModelOptionKind,
+) -> anyhow::Result<()> {
+    let matches = matches!(
+        (expected, value),
+        (model::ModelOptionKind::Bool, ModelOptionValue::Bool(_))
+            | (
+                model::ModelOptionKind::BoolOrString,
+                ModelOptionValue::Bool(_)
+            )
+            | (
+                model::ModelOptionKind::BoolOrString,
+                ModelOptionValue::String(_)
+            )
+            | (
+                model::ModelOptionKind::BoolOrStringList,
+                ModelOptionValue::Bool(_),
+            )
+            | (
+                model::ModelOptionKind::BoolOrStringList,
+                ModelOptionValue::StringList(_),
+            )
+            | (
+                model::ModelOptionKind::Integer,
+                ModelOptionValue::Integer(_)
+            )
+            | (model::ModelOptionKind::Number, ModelOptionValue::Number(_))
+            | (model::ModelOptionKind::Number, ModelOptionValue::Integer(_))
+            | (model::ModelOptionKind::String, ModelOptionValue::String(_))
+            | (
+                model::ModelOptionKind::StringOrStringList,
+                ModelOptionValue::String(_),
+            )
+            | (
+                model::ModelOptionKind::StringOrStringList,
+                ModelOptionValue::StringList(_),
+            )
+            | (
+                model::ModelOptionKind::StringList,
+                ModelOptionValue::StringList(_)
+            )
+    );
+
+    if !matches {
+        anyhow::bail!(
+            "Invalid value for option '{}' in '{}'. Expected {}.",
+            option_name,
+            full_model_id,
+            expected.name()
+        );
+    }
+
+    Ok(())
 }
 
 pub fn ensure_local_transcription_audio_config() -> anyhow::Result<()> {
@@ -893,6 +850,7 @@ model = "whisper-1"
 
     fn validate_ostt_config(config: &OsttConfig) -> anyhow::Result<()> {
         config.providers.local.validate()?;
+        validate_model_options(&config.model_options)?;
         for action in &config.process.actions {
             action
                 .validate()
@@ -1081,6 +1039,602 @@ model = "whisper-1"
 
         let config = parse_ostt_config(toml_str).unwrap();
         validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_validate_against_model_schema() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepgram/nova-3"]
+            detect_language = ["sv", "en"]
+            smart_format = true
+            keyterm = ["OSTT"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_wrong_value_types() {
+        let cases = [
+            (
+                "deepgram/nova-3",
+                "smart_format = \"true\"",
+                "smart_format",
+                "boolean",
+            ),
+            (
+                "openai/gpt-4o-transcribe",
+                "temperature = \"0.2\"",
+                "temperature",
+                "number",
+            ),
+            (
+                "openai/gpt-4o-transcribe",
+                "prompt = [\"OSTT\"]",
+                "prompt",
+                "string",
+            ),
+            (
+                "deepgram/nova-3",
+                "keyterm = \"OSTT\"",
+                "keyterm",
+                "string list",
+            ),
+            (
+                "elevenlabs/scribe_v2",
+                "num_speakers = \"2\"",
+                "num_speakers",
+                "integer",
+            ),
+        ];
+
+        for (model_id, setting, option_name, expected_type) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."{model_id}"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(option_name), "{err}");
+            assert!(err.contains(expected_type), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_accept_bool_or_string_list_shapes() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepgram/nova-3"]
+            detect_language = true
+
+            [model_options."deepgram/nova-2"]
+            detect_language = ["en", "sv"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_invalid_bool_or_string_list_shape() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepgram/nova-3"]
+            detect_language = "en,sv"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("detect_language"));
+        assert!(err.contains("boolean or string list"));
+    }
+
+    #[test]
+    fn model_options_reject_duplicate_config_keys_at_parse_time() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepgram/nova-3"]
+            smart_format = true
+            smart_format = false
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("duplicate key") || err.contains("duplicate field"));
+    }
+
+    #[test]
+    fn model_options_reject_unknown_option_for_model() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."openai/gpt-4o-transcribe"]
+            smart_format = true
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("Invalid option 'smart_format'"));
+    }
+
+    #[test]
+    fn model_options_allow_openai_documented_json_safe_options() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."openai/gpt-4o-transcribe"]
+            include = ["logprobs"]
+
+            [model_options."openai/whisper-1"]
+            response_format = "verbose_json"
+            timestamp_granularities = ["word", "segment"]
+
+            [model_options."openai/gpt-4o-transcribe-diarize"]
+            response_format = "diarized_json"
+            chunking_strategy = "auto"
+            known_speaker_names = ["agent"]
+            known_speaker_references = ["data:audio/wav;base64,AAA..."]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_openai_options_that_break_json_parsing_or_api_rules() {
+        let cases = [
+            (
+                "openai/gpt-4o-transcribe",
+                "include = [\"timestamps\"]",
+                "include",
+            ),
+            (
+                "openai/whisper-1",
+                "response_format = \"srt\"",
+                "response_format",
+            ),
+            (
+                "openai/whisper-1",
+                "timestamp_granularities = [\"sentence\"]",
+                "timestamp_granularities",
+            ),
+            (
+                "openai/whisper-1",
+                "response_format = \"json\"\ntimestamp_granularities = [\"word\"]",
+                "verbose_json",
+            ),
+            (
+                "openai/gpt-4o-transcribe-diarize",
+                "chunking_strategy = \"none\"",
+                "chunking_strategy",
+            ),
+        ];
+
+        for (model_id, setting, expected) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."{model_id}"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_reject_model_specific_deepgram_keyterm() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepgram/nova-2"]
+            keyterm = ["OSTT"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("Invalid option 'keyterm'"));
+    }
+
+    #[test]
+    fn model_options_allow_deepgram_nova_2_keywords() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepgram/nova-2"]
+            keywords = ["OSTT"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_model_specific_elevenlabs_v2_option_on_v1() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."elevenlabs/scribe_v1"]
+            no_verbatim = true
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("Invalid option 'no_verbatim'"));
+    }
+
+    #[test]
+    fn model_options_allow_elevenlabs_documented_options() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."elevenlabs/scribe_v2"]
+            language_code = "en"
+            tag_audio_events = true
+            timestamps_granularity = "word"
+            diarize = true
+            detect_speaker_roles = true
+            diarization_threshold = 0.2
+            temperature = 1.5
+            file_format = "other"
+            seed = 42
+            use_multi_channel = false
+            keyterms = ["OSTT"]
+            no_verbatim = true
+            entity_detection = ["pii", "phi"]
+            entity_redaction = "pii"
+            entity_redaction_mode = "enumerated_entity_type"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_invalid_elevenlabs_values() {
+        let cases = [
+            (
+                "timestamps_granularity = \"sentence\"",
+                "timestamps_granularity",
+            ),
+            ("file_format = \"wav\"", "file_format"),
+            (
+                "entity_redaction_mode = \"masked\"",
+                "entity_redaction_mode",
+            ),
+            (
+                "diarize = false\ndiarization_threshold = 0.2",
+                "diarization_threshold requires diarize",
+            ),
+            (
+                "diarize = true\nnum_speakers = 2\ndiarization_threshold = 0.2",
+                "diarization_threshold cannot be used with num_speakers",
+            ),
+            (
+                "detect_speaker_roles = true",
+                "detect_speaker_roles requires diarize",
+            ),
+            (
+                "diarize = true\ndetect_speaker_roles = true\nuse_multi_channel = true",
+                "detect_speaker_roles cannot be used with use_multi_channel",
+            ),
+        ];
+
+        for (setting, expected) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."elevenlabs/scribe_v2"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_reject_berget_only_hotwords_on_groq() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."groq/whisper-large-v3"]
+            hotwords = ["OSTT"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("Invalid option 'hotwords'"));
+    }
+
+    #[test]
+    fn model_options_allow_berget_openapi_options() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."berget/KBLab/kb-whisper-large"]
+            language = "sv"
+            hotwords = ["OSTT", "Berget"]
+            prompt = "Swedish technical dictation."
+            temperature = 0.0
+            response_format = "verbose_json"
+            timestamp_granularities = ["word", "segment"]
+            align = true
+            diarize = true
+            speaker_embeddings = true
+            chunk_size = 30
+            batch_size = 8
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_invalid_berget_values() {
+        let cases = [
+            ("response_format = \"srt\"", "response_format"),
+            (
+                "timestamp_granularities = [\"sentence\"]",
+                "timestamp_granularities",
+            ),
+            ("chunk_size = 0", "chunk_size"),
+            ("chunk_size = 61", "chunk_size"),
+            ("batch_size = 0", "batch_size"),
+            ("batch_size = 33", "batch_size"),
+            ("stream = true", "Invalid option 'stream'"),
+        ];
+
+        for (setting, expected) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."berget/openai/whisper-large-v3"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_allow_deepinfra_documented_options_and_models() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepinfra/openai/whisper-large-v3-turbo"]
+            task = "transcribe"
+            initial_prompt = "Names: OSTT, DeepInfra, Whisper."
+            language = "en"
+            temperature = 0.0
+            chunk_level = "word"
+            chunk_length_s = 30
+
+            [model_options."deepinfra/mistralai/Voxtral-Mini-3B-2507"]
+            task = "transcribe"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_invalid_deepinfra_values() {
+        let cases = [
+            ("task = \"summarize\"", "task"),
+            ("chunk_level = \"sentence\"", "chunk_level"),
+            ("chunk_length_s = 31", "chunk_length_s"),
+            ("prompt = \"OSTT\"", "Invalid option 'prompt'"),
+        ];
+
+        for (setting, expected) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."deepinfra/openai/whisper-large-v3"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_allow_groq_documented_json_safe_options() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."groq/whisper-large-v3-turbo"]
+            response_format = "verbose_json"
+            timestamp_granularities = ["word", "segment"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_groq_options_that_break_json_parsing_or_api_rules() {
+        let cases = [
+            ("response_format = \"text\"", "response_format"),
+            (
+                "timestamp_granularities = [\"sentence\"]",
+                "timestamp_granularities",
+            ),
+            (
+                "response_format = \"json\"\ntimestamp_granularities = [\"word\"]",
+                "verbose_json",
+            ),
+        ];
+
+        for (setting, expected) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."groq/whisper-large-v3"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_allow_mistral_documented_options() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."mistral/voxtral-mini-latest"]
+            language = "sv"
+            diarize = true
+            context_bias = ["OSTT"]
+            temperature = 0.2
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_allow_mistral_timestamp_granularities() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."mistral/voxtral-mini-latest"]
+            context_bias = ["OSTT"]
+            diarize = true
+            timestamp_granularities = ["word"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_invalid_mistral_values() {
+        let cases = [
+            (
+                "timestamp_granularities = [\"sentence\"]",
+                "timestamp_granularities",
+            ),
+            (
+                "language = \"en\"\ntimestamp_granularities = [\"word\"]",
+                "not compatible with language",
+            ),
+        ];
+
+        for (setting, expected) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."mistral/voxtral-mini-latest"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_reject_assemblyai_prompt_with_keyterms_prompt() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."assemblyai/universal-3-pro"]
+            prompt = "Use Swedish spelling."
+            keyterms_prompt = ["OSTT"]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("prompt"));
+        assert!(err.contains("keyterms_prompt"));
+    }
+
+    #[test]
+    fn model_options_reject_out_of_range_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."openai/gpt-4o-transcribe"]
+            temperature = 1.5
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("Expected 0-1"));
+    }
+
+    #[test]
+    fn old_provider_level_request_options_fail_deserialization() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [providers.deepgram]
+            smart_format = true
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("unknown field `deepgram`"));
     }
 
     #[test]

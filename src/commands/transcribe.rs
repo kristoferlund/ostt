@@ -25,6 +25,7 @@ pub async fn handle_transcribe(
     output_file: Option<String>,
     process: Option<String>,
     model_override: Option<config::SelectedModel>,
+    model_option_overrides: &[String],
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Transcribe Command ===");
 
@@ -35,7 +36,8 @@ pub async fn handle_transcribe(
 
     tracing::info!("Transcribing file: {}", file.display());
 
-    let context = transcription::build_context(config_data, model_override)?;
+    let context =
+        transcription::build_context(config_data, model_override, model_option_overrides)?;
 
     // Transcribe
     tracing::debug!("Starting transcription...");
