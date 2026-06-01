@@ -397,7 +397,7 @@ fn find_device_by_name(host: &cpal::Host, device_spec: &str) -> Result<cpal::Dev
     }
 
     Err(anyhow!(
-        "Audio input device '{device_spec}' not found. Use 'ostt list-devices' to see available devices."
+        "Audio input device '{device_spec}' not found. Use 'ostt config list-devices' to see available devices."
     ))
 }
 

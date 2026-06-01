@@ -73,7 +73,7 @@ If you prefer platform package managers, see the docs for Homebrew, AUR, `.deb`,
 ## Quick Start
 
 ```bash
-ostt auth           # Choose provider/model and save API key
+ostt auth           # Save cloud provider credentials
 ostt model          # Choose cloud or local transcription model
 ostt                # Record, transcribe, print to stdout
 ostt -c             # Record, transcribe, copy to clipboard
@@ -93,7 +93,7 @@ ostt launch -c -p clean       # Popup hotkey workflow with processing
 ostt process                  # Process most recent history item, show picker
 ostt process clean            # Process most recent history item with clean action
 ostt process 3 clean -c       # Process history item #3 with clean action
-ostt process --list           # List configured actions
+ostt process list             # List configured actions
 ```
 
 Actions are configured in `~/.config/ostt/ostt.toml` and can run either bash commands or AI CLI tools. See [Processing Actions](https://ostt.ai/guide/processing) for examples.
@@ -111,17 +111,17 @@ ostt retry 2 -m groq/whisper-large-v3 -c
 ostt replay                  # Play most recent recording
 ostt model                   # Choose cloud or local transcription model
 ostt history                 # Browse transcription history
-ostt keywords                # Manage transcription keywords
+ostt keyword                 # Manage transcription keywords
 ostt config                  # Open config file
-ostt list-devices            # List audio input devices
+ostt config list-devices     # List audio input devices
 ostt logs                    # View recent logs
 ostt completions zsh         # Generate shell completions
-ostt completions bash --install  # Install completions system-wide
+ostt completions install bash    # Install completions system-wide
 ostt --version               # Show version
 ostt --help                  # Show help
 ```
 
-Common aliases: `r` for `record`, `t` for `transcribe`, `l` for `launch`, `p` for `process`, `a` for `auth`, `h` for `history`, `k` for `keywords`, `c` for `config`, and `rp` for `replay`.
+Common aliases: `r` for `record`, `t` for `transcribe`, `l` for `launch`, `p` for `process`, `a` for `auth`, `h` for `history`, `k` for `keyword`, `c` for `config`, and `rp` for `replay`.
 
 ## Providers
 

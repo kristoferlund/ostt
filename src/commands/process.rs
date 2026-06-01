@@ -64,7 +64,7 @@ pub async fn handle_process(
             .get_action(id)
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
+                    "Unknown action '{id}'. Use 'ostt process list' to see available actions."
                 )
             })?
             .clone();
@@ -110,5 +110,38 @@ pub async fn handle_process(
     output::write_text(&result, output_file, clipboard, "Processed result")?;
 
     tracing::info!("=== ostt Process Command Completed ===");
+    Ok(())
+}
+
+pub fn handle_process_list(
+    config_data: &config::OsttConfig,
+    json: bool,
+) -> Result<(), anyhow::Error> {
+    if config_data.process.actions.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
+        ));
+    }
+
+    if json {
+        let actions: Vec<_> = config_data
+            .process
+            .actions
+            .iter()
+            .map(|action| {
+                serde_json::json!({
+                    "id": action.id,
+                    "name": action.name,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&actions)?);
+        return Ok(());
+    }
+
+    for action in &config_data.process.actions {
+        println!("{} — {}", action.id, action.name);
+    }
+
     Ok(())
 }
