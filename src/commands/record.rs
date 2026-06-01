@@ -79,6 +79,7 @@ pub async fn handle_record(
     let model_id = transcription_context.selected_model.model_id.clone();
     let filepath_str = filepath.to_string_lossy().to_string();
 
+    let mut transcription_error = None;
     let maybe_transcribed_text = match transcribe_recording_with_animation(
         &mut tui,
         transcription_context.config,
@@ -90,7 +91,7 @@ pub async fn handle_record(
         Ok(text) => Some(text),
         Err(e) => {
             tracing::warn!("Transcription failed: {}", e);
-            eprintln!("Warning: Transcription failed: {e}");
+            transcription_error = Some(e.to_string());
             None
         }
     };
@@ -126,7 +127,13 @@ pub async fn handle_record(
         Some(output_text) => {
             finish_recording_with_output(&mut tui, &output_text, output_file, clipboard)
         }
-        None => finish_recording_without_output(&mut tui),
+        None => {
+            finish_recording_without_output(&mut tui)?;
+            if let Some(error) = transcription_error {
+                eprintln!("Warning: Transcription failed: {error}");
+            }
+            Ok(())
+        }
     }
 }
 
