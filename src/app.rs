@@ -5,7 +5,7 @@
 use crate::commands;
 use crate::logging;
 use anyhow::anyhow;
-use clap::{CommandFactory, Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::{generate, Shell};
 use std::env;
 use std::fs;
@@ -88,18 +88,18 @@ fn load_config() -> anyhow::Result<crate::config::OsttConfig> {
 #[command(version)]
 #[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
 #[command(
-    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    $ ostt -m deepgram/nova-3 -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    $ ostt transcribe recording.ogg -m openai/gpt-4o-transcribe\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication for cloud providers\n    $ ostt auth\n    \n    # Choose cloud or local transcription model\n    $ ostt model\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
+    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    $ ostt -m deepgram/nova-3 -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    $ ostt transcribe recording.ogg -m openai/gpt-4o-transcribe\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication for cloud providers\n    $ ostt auth\n    \n    # Choose cloud or local transcription model\n    $ ostt model\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Manage transcription keywords\n    $ ostt keyword\n    \n    # Edit configuration file\n    $ ostt config"
 )]
 #[command(
     after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
 )]
 struct Cli {
     /// Copy transcription to clipboard instead of stdout (record default command)
-    #[arg(short, long, global = true)]
+    #[arg(short, long)]
     clipboard: bool,
 
     /// Write transcription to file instead of stdout (record default command)
-    #[arg(short, long, value_name = "FILE", global = true)]
+    #[arg(short, long, value_name = "FILE")]
     output: Option<String>,
 
     /// Enable processing after transcription
@@ -107,16 +107,23 @@ struct Cli {
     process: Option<String>,
 
     /// Override transcription model for this run
-    #[arg(
-        short = 'm',
-        long = "model",
-        value_name = "PROVIDER/MODEL",
-        global = true
-    )]
+    #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
     model: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+enum ListFormat {
+    Table,
+    Json,
+}
+
+impl ListFormat {
+    fn is_json(self) -> bool {
+        matches!(self, Self::Json)
+    }
 }
 
 #[derive(Subcommand)]
@@ -228,41 +235,50 @@ enum Commands {
     /// Opens an interactive model picker. Choose a cloud model from authenticated
     /// providers, download and activate local models, or add a custom local model.
     #[command(name = "model")]
-    Model,
+    Model {
+        #[command(subcommand)]
+        command: Option<ModelCommand>,
+    },
 
     /// View and browse transcription history
     ///
     /// Browse previous transcriptions, select one to copy to clipboard.
     /// Use arrow keys to navigate, Enter to copy, Esc to exit.
     #[command(visible_alias = "h")]
-    History,
+    History {
+        #[command(subcommand)]
+        command: Option<HistoryCommand>,
+    },
 
     /// Manage keywords for improved transcription accuracy
     ///
     /// Add technical terms, names, or domain-specific vocabulary to help
     /// the AI transcribe more accurately.
     #[command(visible_alias = "k")]
-    Keywords,
+    #[command(name = "keyword")]
+    Keyword {
+        #[command(subcommand)]
+        command: Option<KeywordCommand>,
+    },
 
     /// Open configuration file in your preferred editor
     ///
     /// Edit audio settings, provider options, and other configuration.
     /// Uses $EDITOR environment variable or falls back to nano/vim.
     #[command(visible_alias = "c")]
-    Config,
-
-    /// List available audio input devices
-    ///
-    /// Shows device IDs, names, and configurations to help configure
-    /// the correct input device in ostt.toml.
-    #[command(name = "list-devices")]
-    ListDevices,
+    Config {
+        #[command(subcommand)]
+        command: Option<ConfigCommand>,
+    },
 
     /// Show recent log entries from the application
     ///
     /// Display the last 50 lines of the most recent log file.
     /// Useful for troubleshooting issues.
-    Logs,
+    Logs {
+        #[command(subcommand)]
+        command: Option<LogsCommand>,
+    },
 
     /// Post-process a transcription from history
     ///
@@ -270,7 +286,7 @@ enum Commands {
     /// Shows the action picker if no action is specified.
     ///
     #[command(
-        after_help = "EXAMPLES:\n    ostt process                      Process most recent, show picker\n    ostt process clean                Process most recent with the clean action\n    ostt process 5                    Process #5, show picker\n    ostt process 5 clean -c           Process #5 with clean, copy to clipboard\n    ostt process --list               List configured actions"
+        after_help = "EXAMPLES:\n    ostt process                      Process most recent, show picker\n    ostt process clean                Process most recent with the clean action\n    ostt process 5                    Process #5, show picker\n    ostt process 5 clean -c           Process #5 with clean, copy to clipboard\n    ostt process list                 List configured actions"
     )]
     #[command(visible_alias = "p")]
     Process {
@@ -282,10 +298,6 @@ enum Commands {
         #[arg(value_name = "ACTION")]
         action: Option<String>,
 
-        /// List all configured actions and exit
-        #[arg(long)]
-        list: bool,
-
         /// Copy result to clipboard instead of stdout (shadows global -c)
         #[arg(short, long)]
         clipboard: bool,
@@ -293,6 +305,10 @@ enum Commands {
         /// Write result to file instead of stdout (shadows global -o)
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Output format for `ostt process list`
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
     },
 
     /// Launch ostt in a popup terminal window
@@ -323,14 +339,13 @@ enum Commands {
     ///   ostt completions bash > ostt.bash
     ///   ostt completions zsh > _ostt
     ///   ostt completions fish > ostt.fish
-    ///   ostt completions bash --install
+    ///   ostt completions install bash
     Completions {
         /// The shell to generate completions for
         #[arg(value_enum)]
-        shell: Shell,
-        /// Install completions to the standard system directory
-        #[arg(long, short)]
-        install: bool,
+        shell: Option<Shell>,
+        #[command(subcommand)]
+        command: Option<CompletionsCommand>,
     },
 
     /// Manage the local model daemon
@@ -350,6 +365,118 @@ enum Commands {
     Daemon {
         #[command(subcommand)]
         command: DaemonCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModelCommand {
+    /// List available transcription models
+    List {
+        /// Filter by provider ID
+        #[arg(long)]
+        provider: Option<String>,
+        /// Show only downloaded local models
+        #[arg(long)]
+        installed: bool,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
+    },
+    /// Show the currently selected transcription model
+    Current,
+    /// Select the active transcription model
+    Select {
+        #[arg(value_name = "PROVIDER/MODEL")]
+        model: String,
+    },
+    /// Manage local transcription models
+    Local {
+        #[command(subcommand)]
+        command: LocalModelCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum LocalModelCommand {
+    /// Download a local model
+    Download {
+        #[arg(value_name = "MODEL_ID")]
+        model_id: String,
+    },
+    /// Remove a downloaded local model
+    Remove {
+        #[arg(value_name = "MODEL_ID")]
+        model_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeywordCommand {
+    /// List transcription keywords
+    List {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
+    },
+    /// Add transcription keywords
+    Add {
+        #[arg(value_name = "KEYWORD", required = true)]
+        keywords: Vec<String>,
+    },
+    /// Remove transcription keywords
+    Remove {
+        #[arg(value_name = "KEYWORD", required = true)]
+        keywords: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommand {
+    /// Print the config file path
+    Path,
+    /// List audio input devices for config selection
+    ListDevices,
+}
+
+#[derive(Subcommand)]
+enum LogsCommand {
+    /// Follow the latest log file
+    Follow,
+    /// Print the latest log file path
+    Path,
+}
+
+#[derive(Subcommand)]
+enum HistoryCommand {
+    /// List transcription history
+    List {
+        /// Limit to N most recent entries
+        #[arg(long)]
+        limit: Option<usize>,
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
+    },
+    /// Show a transcription from history
+    Show {
+        /// History index (1 = most recent)
+        #[arg(value_name = "N")]
+        index: Option<usize>,
+    },
+    /// Copy a transcription from history to clipboard
+    Copy {
+        /// History index (1 = most recent)
+        #[arg(value_name = "N")]
+        index: Option<usize>,
+    },
+}
+
+#[derive(Subcommand)]
+enum CompletionsCommand {
+    /// Install completions to the standard system directory
+    Install {
+        #[arg(value_enum)]
+        shell: Shell,
     },
 }
 
@@ -382,9 +509,23 @@ enum DaemonCommand {
 #[derive(Subcommand)]
 enum AuthCommand {
     /// Add or update a cloud provider credential
-    Login,
+    Login {
+        /// Provider ID to log in to
+        provider: Option<String>,
+    },
     /// Remove a cloud provider credential
-    Logout,
+    Logout {
+        /// Provider ID to log out from
+        provider: Option<String>,
+    },
+    /// List authenticated providers
+    List {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
+    },
+    /// Show authentication status
+    Status,
 }
 
 fn resolve_process_args(
@@ -438,32 +579,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
         return commands::daemon::handle_daemon_run(model_id.clone(), idle_timeout_secs).await;
     }
 
-    // Print logo only for plain-text informational commands where it adds context
-    // without interfering with TUI rendering or piped output.
-    let show_logo = matches!(
-        &cli.command,
-        Some(Commands::ListDevices) | Some(Commands::Logs) | Some(Commands::Auth { .. })
-    );
-    let show_logo = show_logo
-        || matches!(
-            &cli.command,
-            Some(Commands::Daemon {
-                command: DaemonCommand::Start
-                    | DaemonCommand::Stop
-                    | DaemonCommand::Restart
-                    | DaemonCommand::Status
-                    | DaemonCommand::Install
-                    | DaemonCommand::Uninstall,
-            })
-        );
-    if show_logo {
-        eprintln!("\n ┏┓┏╋╋ \n ┗┛┛┗┗\n");
-    }
-
     match &cli.command {
         Some(Commands::Completions {
-            shell,
-            install: true,
+            command: Some(CompletionsCommand::Install { shell }),
+            ..
         }) => {
             let dir = completion_dir(*shell);
             let filename = completion_filename(*shell);
@@ -481,22 +600,21 @@ pub async fn run() -> Result<(), anyhow::Error> {
             return Ok(());
         }
         Some(Commands::Completions {
-            shell,
-            install: false,
+            shell: Some(shell),
+            command: None,
         }) => {
             generate(*shell, &mut Cli::command(), "ostt", &mut io::stdout());
             return Ok(());
         }
-        Some(Commands::ListDevices) => {
-            return match commands::handle_list_devices() {
-                Ok(()) => Ok(()),
-                Err(e) => {
-                    eprintln!("Error: {e}");
-                    process::exit(1);
-                }
-            };
+        Some(Commands::Completions {
+            shell: None,
+            command: None,
+        }) => {
+            return Err(anyhow!(
+                "Use 'ostt completions <SHELL>' or 'ostt completions install <SHELL>'."
+            ));
         }
-        Some(Commands::Logs) => {
+        Some(Commands::Logs { command: None }) => {
             return match commands::handle_logs() {
                 Ok(()) => Ok(()),
                 Err(e) => {
@@ -505,6 +623,12 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 }
             };
         }
+        Some(Commands::Logs {
+            command: Some(LogsCommand::Path),
+        }) => return commands::logs::handle_logs_path(),
+        Some(Commands::Logs {
+            command: Some(LogsCommand::Follow),
+        }) => return commands::logs::handle_logs_follow(),
         _ => {}
     }
 
@@ -587,9 +711,15 @@ pub async fn run() -> Result<(), anyhow::Error> {
             commands::handle_replay(index).await?;
         }
         Some(Commands::Auth { command }) => {
-            let result = match command.unwrap_or(AuthCommand::Login) {
-                AuthCommand::Login => commands::handle_auth().await,
-                AuthCommand::Logout => commands::auth::handle_logout(&config_data).await,
+            let result = match command.unwrap_or(AuthCommand::Login { provider: None }) {
+                AuthCommand::Login { provider } => {
+                    commands::auth::handle_auth_login(provider).await
+                }
+                AuthCommand::Logout { provider } => {
+                    commands::auth::handle_logout(&config_data, provider).await
+                }
+                AuthCommand::List { format } => commands::auth::handle_auth_list(format.is_json()),
+                AuthCommand::Status => commands::auth::handle_auth_status(),
             };
 
             if let Err(e) = result {
@@ -603,27 +733,68 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 }
             }
         }
-        Some(Commands::Model) => {
-            commands::handle_model().await?;
-        }
-        Some(Commands::History) => {
-            commands::handle_history().await?;
-        }
-        Some(Commands::Keywords) => {
-            commands::handle_keywords().await?;
-        }
-        Some(Commands::Config) => {
-            commands::handle_config()?;
+        Some(Commands::Model { command }) => match command {
+            None => commands::handle_model().await?,
+            Some(ModelCommand::List {
+                provider,
+                installed,
+                format,
+            }) => commands::model::handle_model_list(provider, installed, format.is_json()).await?,
+            Some(ModelCommand::Current) => commands::model::handle_model_current()?,
+            Some(ModelCommand::Select { model }) => {
+                commands::model::handle_model_select(model).await?
+            }
+            Some(ModelCommand::Local { command }) => match command {
+                LocalModelCommand::Download { model_id } => {
+                    commands::model::handle_model_local_download(model_id).await?
+                }
+                LocalModelCommand::Remove { model_id } => {
+                    commands::model::handle_model_local_remove(model_id).await?
+                }
+            },
+        },
+        Some(Commands::History { command }) => match command {
+            None => commands::handle_history().await?,
+            Some(HistoryCommand::List { limit, format }) => {
+                commands::history::handle_history_list(limit, format.is_json())?
+            }
+            Some(HistoryCommand::Show { index }) => commands::history::handle_history_show(index)?,
+            Some(HistoryCommand::Copy { index }) => commands::history::handle_history_copy(index)?,
+        },
+        Some(Commands::Keyword { command }) => match command {
+            None => commands::handle_keywords().await?,
+            Some(KeywordCommand::List { format }) => {
+                commands::keywords::handle_keyword_list(format.is_json())?
+            }
+            Some(KeywordCommand::Add { keywords }) => {
+                commands::keywords::handle_keyword_add(keywords)?
+            }
+            Some(KeywordCommand::Remove { keywords }) => {
+                commands::keywords::handle_keyword_remove(keywords)?
+            }
+        },
+        Some(Commands::Config { command }) => match command {
+            None => commands::handle_config()?,
+            Some(ConfigCommand::Path) => commands::config::handle_config_path()?,
+            Some(ConfigCommand::ListDevices) => commands::handle_list_devices()?,
+        },
+        Some(Commands::Process {
+            index_or_action,
+            action,
+            format,
+            ..
+        }) if index_or_action.as_deref() == Some("list") && action.is_none() => {
+            commands::process::handle_process_list(&config_data, format.is_json())?;
         }
         Some(Commands::Process {
             index_or_action,
             action,
-            list,
             clipboard,
             output,
+            ..
         }) => {
             let (index, action) = resolve_process_args(index_or_action, action)?;
-            commands::handle_process(&config_data, index, action, list, clipboard, output).await?;
+            commands::handle_process(&config_data, index, action, false, clipboard, output).await?;
         }
         Some(Commands::Launch { args }) => {
             // Reconstruct the full ostt args list. Global flags (-c, -o, -p) are
@@ -660,7 +831,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 unreachable!("daemon run is handled before logging init")
             }
         },
-        Some(Commands::Completions { .. }) | Some(Commands::ListDevices) | Some(Commands::Logs) => {
+        Some(Commands::Completions { .. }) | Some(Commands::Logs { .. }) => {
             unreachable!("These commands are handled earlier")
         }
     }
@@ -748,7 +919,68 @@ mod tests {
     fn cli_accepts_model_override_for_launch() {
         let cli = Cli::try_parse_from(["ostt", "launch", "-m", "deepgram/nova-3", "-c"])
             .expect("parse cli");
-        assert_eq!(cli.model.as_deref(), Some("deepgram/nova-3"));
-        assert!(cli.clipboard);
+        match cli.command {
+            Some(Commands::Launch { args }) => {
+                assert_eq!(args, ["-m", "deepgram/nova-3", "-c"]);
+            }
+            _ => panic!("expected launch command"),
+        }
+    }
+
+    #[test]
+    fn cli_uses_singular_keyword_command() {
+        assert!(Cli::try_parse_from(["ostt", "keywords"]).is_err());
+
+        let cli = Cli::try_parse_from(["ostt", "keyword", "list", "--format", "json"])
+            .expect("parse cli");
+        match cli.command {
+            Some(Commands::Keyword {
+                command: Some(KeywordCommand::List { format }),
+            }) => assert_eq!(format, ListFormat::Json),
+            _ => panic!("expected keyword list command"),
+        }
+    }
+
+    #[test]
+    fn cli_moves_device_listing_under_config() {
+        assert!(Cli::try_parse_from(["ostt", "list-devices"]).is_err());
+
+        let cli = Cli::try_parse_from(["ostt", "config", "list-devices"]).expect("parse cli");
+        match cli.command {
+            Some(Commands::Config {
+                command: Some(ConfigCommand::ListDevices),
+            }) => {}
+            _ => panic!("expected config list-devices command"),
+        }
+    }
+
+    #[test]
+    fn cli_uses_subcommands_for_process_and_completion_listing_actions() {
+        assert!(Cli::try_parse_from(["ostt", "process", "--list"]).is_err());
+        assert!(Cli::try_parse_from(["ostt", "completions", "bash", "--install"]).is_err());
+
+        let cli = Cli::try_parse_from(["ostt", "process", "list", "--format", "json"])
+            .expect("parse cli");
+        match cli.command {
+            Some(Commands::Process {
+                index_or_action,
+                format,
+                ..
+            }) => {
+                assert_eq!(index_or_action.as_deref(), Some("list"));
+                assert_eq!(format, ListFormat::Json);
+            }
+            _ => panic!("expected process list command"),
+        }
+
+        let cli =
+            Cli::try_parse_from(["ostt", "completions", "install", "bash"]).expect("parse cli");
+        match cli.command {
+            Some(Commands::Completions {
+                command: Some(CompletionsCommand::Install { shell }),
+                ..
+            }) => assert_eq!(shell, Shell::Bash),
+            _ => panic!("expected completions install command"),
+        }
     }
 }

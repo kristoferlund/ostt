@@ -2,7 +2,10 @@
 
 use anyhow::anyhow;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
 
 const DEFAULT_LINES: usize = 50;
 
@@ -62,6 +65,38 @@ pub fn handle_logs() -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+pub fn handle_logs_path() -> Result<(), anyhow::Error> {
+    let log_dir = crate::app_dirs::log_dir()?;
+    let log_file = find_latest_log(&log_dir).unwrap_or_else(|_| log_dir.join("ostt.log"));
+    println!("{}", log_file.display());
+    Ok(())
+}
+
+pub fn handle_logs_follow() -> Result<(), anyhow::Error> {
+    let log_dir = crate::app_dirs::log_dir()?;
+    let log_file = find_latest_log(&log_dir)?;
+    let mut file = fs::File::open(&log_file)
+        .map_err(|e| anyhow!("Failed to open log file {}: {e}", log_file.display()))?;
+    let mut position = file.seek(SeekFrom::End(0))?;
+
+    loop {
+        thread::sleep(Duration::from_millis(500));
+        let len = file.metadata()?.len();
+        if len < position {
+            position = file.seek(SeekFrom::Start(0))?;
+        }
+        if len == position {
+            continue;
+        }
+
+        file.seek(SeekFrom::Start(position))?;
+        let mut buffer = String::new();
+        file.read_to_string(&mut buffer)?;
+        print!("{buffer}");
+        position = file.stream_position()?;
+    }
 }
 
 /// Finds the latest (most recently modified) log file in the directory.

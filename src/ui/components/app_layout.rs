@@ -12,7 +12,7 @@ pub struct AppLayout {
 }
 
 pub fn render_app_layout(frame: &mut Frame<'_>, area: Rect) -> AppLayout {
-    let padding_block = Block::default().padding(Padding::new(1, 1, 1, 0));
+    let padding_block = Block::default().padding(Padding::new(0, 0, 1, 0));
     frame.render_widget(&padding_block, area);
     let padded_area = padding_block.inner(area);
 

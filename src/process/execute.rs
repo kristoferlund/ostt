@@ -134,7 +134,7 @@ fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Resul
         .cloned()
         .ok_or_else(|| {
             anyhow::anyhow!(
-                "Unknown action '{action_id}'. Use 'ostt process --list' to see available actions."
+                "Unknown action '{action_id}'. Use 'ostt process list' to see available actions."
             )
         })
 }

@@ -41,6 +41,11 @@ pub fn handle_config() -> anyhow::Result<()> {
     Ok(())
 }
 
+pub fn handle_config_path() -> anyhow::Result<()> {
+    println!("{}", crate::app_dirs::config_path()?.display());
+    Ok(())
+}
+
 /// Finds the best available editor to use.
 ///
 /// Tries in order: $EDITOR, nano, vi

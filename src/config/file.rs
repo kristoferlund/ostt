@@ -37,8 +37,8 @@ impl std::fmt::Display for VisualizationType {
 pub struct AudioConfig {
     /// Audio device to use. Options:
     /// - "default" for system default device
-    /// - numeric index (0, 1, 2, etc.) from `ostt list-devices`
-    /// - device name from `ostt list-devices`
+    /// - numeric index (0, 1, 2, etc.) from `ostt config list-devices`
+    /// - device name from `ostt config list-devices`
     pub device: String,
     /// Peak volume threshold for visual indicator (0-100, percentage of reference level)
     #[serde(default = "default_peak_volume_threshold")]

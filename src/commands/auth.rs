@@ -7,6 +7,10 @@ use std::collections::HashSet;
 
 /// Handles cloud provider API key management.
 pub async fn handle_auth() -> Result<(), anyhow::Error> {
+    handle_auth_login(None).await
+}
+
+pub async fn handle_auth_login(provider_id: Option<String>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Authentication ===");
 
     ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
@@ -18,7 +22,10 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
         return Err(anyhow::anyhow!("No cloud providers available"));
     }
 
-    let selected_provider = select_provider("Select provider:", &providers)?;
+    let selected_provider = match provider_id {
+        Some(provider_id) => provider_by_id(&provider_id, &providers)?,
+        None => select_provider("Select provider:", &providers)?,
+    };
     let current_api_key = config::get_api_key(selected_provider.id()).ok().flatten();
 
     let api_key = if current_api_key.is_some() {
@@ -59,7 +66,10 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-pub async fn handle_logout(config_data: &config::OsttConfig) -> Result<(), anyhow::Error> {
+pub async fn handle_logout(
+    config_data: &config::OsttConfig,
+    provider_id: Option<String>,
+) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Logout ===");
 
     ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
@@ -76,7 +86,10 @@ pub async fn handle_logout(config_data: &config::OsttConfig) -> Result<(), anyho
         return Ok(());
     }
 
-    let selected_provider = select_provider("Select provider to log out:", &providers)?;
+    let selected_provider = match provider_id {
+        Some(provider_id) => provider_by_id(&provider_id, &providers)?,
+        None => select_provider("Select provider to log out:", &providers)?,
+    };
     let confirmed = confirm(format!(
         "Remove stored credential for {}?",
         selected_provider.name()
@@ -104,6 +117,36 @@ pub async fn handle_logout(config_data: &config::OsttConfig) -> Result<(), anyho
     Ok(())
 }
 
+pub fn handle_auth_list(json: bool) -> Result<(), anyhow::Error> {
+    let provider_ids = config::get_authorized_providers()?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&provider_ids)?);
+        return Ok(());
+    }
+
+    if provider_ids.is_empty() {
+        println!("No cloud credentials found.");
+        return Ok(());
+    }
+
+    for provider_id in provider_ids {
+        println!("{provider_id}");
+    }
+
+    Ok(())
+}
+
+pub fn handle_auth_status() -> Result<(), anyhow::Error> {
+    let provider_ids = config::get_authorized_providers()?;
+    if provider_ids.is_empty() {
+        println!("No cloud credentials found.");
+    } else {
+        println!("Authenticated providers: {}", provider_ids.join(", "));
+    }
+    Ok(())
+}
+
 fn select_provider(
     prompt: &str,
     providers: &[transcription::TranscriptionProvider],
@@ -117,6 +160,17 @@ fn select_provider(
         .map_err(|e| anyhow::anyhow!("Selection cancelled: {e}"))?;
 
     Ok(providers[selected_idx].clone())
+}
+
+fn provider_by_id(
+    provider_id: &str,
+    providers: &[transcription::TranscriptionProvider],
+) -> Result<transcription::TranscriptionProvider, anyhow::Error> {
+    providers
+        .iter()
+        .find(|provider| provider.id() == provider_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("Unknown or unavailable provider: {provider_id}"))
 }
 
 fn cloud_providers() -> Vec<transcription::TranscriptionProvider> {
