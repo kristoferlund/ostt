@@ -42,10 +42,10 @@ pub(super) async fn transcribe(
 
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", config.api_model_name().to_string());
+        .text("model", config.model_id.clone());
 
     // Debug log: Log the API call details (without the audio data)
-    let mut debug_params = vec![format!("model={}", config.api_model_name())];
+    let mut debug_params = vec![format!("model={}", config.model_id)];
 
     // Add keywords as hotwords (Berget-specific) and prompt (Whisper-compatible)
     if !config.keywords.is_empty() {

@@ -48,7 +48,7 @@ pub(super) async fn transcribe(
     let client = reqwest::Client::new();
 
     // Build the API URL with query parameters
-    let mut url = format!("{}?model={}", config.endpoint(), config.api_model_name());
+    let mut url = format!("{}?model={}", config.endpoint(), config.model_id);
 
     // Add Deepgram feature flags from provider configuration
     let deepgram_config = &config.providers.deepgram;

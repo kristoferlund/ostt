@@ -78,10 +78,6 @@ impl TranscriptionConfig {
         }
     }
 
-    pub fn api_model_name(&self) -> &str {
-        &self.model_id
-    }
-
     /// Returns the local-specific config only for local transcription requests.
     pub fn local_config(&self) -> Option<&LocalTranscriptionConfig> {
         if self.provider == TranscriptionProvider::Local {

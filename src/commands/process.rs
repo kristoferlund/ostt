@@ -30,23 +30,18 @@ pub async fn handle_process(
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Process Command ===");
 
-    // --list mode: print configured actions and exit
-    if list {
-        if config_data.process.actions.is_empty() {
-            println!("No process actions configured. Add actions to ~/.config/ostt/ostt.toml");
-            return Ok(());
-        }
-        for action in &config_data.process.actions {
-            println!("{} \u{2014} {}", action.id, action.name);
-        }
-        return Ok(());
-    }
-
-    // Normal mode: validate actions exist
     if config_data.process.actions.is_empty() {
         return Err(anyhow::anyhow!(
             "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
         ));
+    }
+
+    // --list mode: print configured actions and exit
+    if list {
+        for action in &config_data.process.actions {
+            println!("{} \u{2014} {}", action.id, action.name);
+        }
+        return Ok(());
     }
 
     // Load transcription from history

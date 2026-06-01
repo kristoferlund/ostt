@@ -128,7 +128,7 @@ pub(super) async fn transcribe(
 
     let mut request = TranscriptRequest {
         audio_url: upload_url,
-        speech_models: Some(vec![config.api_model_name().to_string()]),
+        speech_models: Some(vec![config.model_id.clone()]),
         format_text: Some(assemblyai_config.format_text),
         disfluencies: Some(assemblyai_config.disfluencies),
         filter_profanity: Some(assemblyai_config.filter_profanity),
