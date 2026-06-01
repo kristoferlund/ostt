@@ -1,6 +1,6 @@
 use crate::config::{self, SelectedModel};
 use crate::model::UserQuit;
-use crate::transcription::{TranscriptionModel, TranscriptionProvider};
+use crate::transcription::{self, TranscriptionProvider};
 use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::CrosstermBackend;
@@ -24,7 +24,6 @@ pub(crate) struct CloudModelEntry {
     pub(crate) description: String,
     pub(crate) languages: Vec<String>,
     pub(crate) is_active: bool,
-    pub(crate) model: TranscriptionModel,
 }
 
 #[derive(Debug, Clone)]
@@ -121,7 +120,7 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
                     KeyCode::Down => selected = (selected + 1).min(model_count.saturating_sub(1)),
                     KeyCode::Enter => {
                         if let Some(entry) = cloud_model_at(&sections, selected).cloned() {
-                            save_cloud_selection(&entry.provider_id, &entry.model)?;
+                            save_cloud_selection(&entry.provider_id, &entry.model_id)?;
                             mark_active_cloud_model(
                                 &mut sections,
                                 &entry.provider_id,
@@ -162,24 +161,24 @@ pub(crate) fn build_cloud_provider_sections(
         .filter(|provider| **provider != TranscriptionProvider::Local)
         .filter(|provider| authorized.contains(provider.id()))
         .filter_map(|provider| {
-            let models: Vec<CloudModelEntry> = TranscriptionModel::models_for_provider(provider)
+            let models: Vec<CloudModelEntry> = transcription::models_for_provider(provider)
                 .into_iter()
                 .map(|model| CloudModelEntry {
                     provider_id: provider.id().to_string(),
-                    model_id: model.id().to_string(),
-                    name: model.name().to_string(),
-                    description: model.detailed_description().to_string(),
+                    model_id: model.model_id.to_string(),
+                    name: model.display_name.to_string(),
+                    description: model.description.to_string(),
                     languages: model
-                        .languages()
+                        .languages
                         .iter()
                         .map(|language| language.to_string())
                         .collect(),
                     is_active: selected_model
                         .map(|selected| {
-                            selected.provider_id == provider.id() && selected.model_id == model.id()
+                            selected.provider_id == provider.id()
+                                && selected.model_id == model.model_id
                         })
                         .unwrap_or(false),
-                    model,
                 })
                 .collect();
 
@@ -191,11 +190,8 @@ pub(crate) fn build_cloud_provider_sections(
         .collect()
 }
 
-pub(crate) fn save_cloud_selection(
-    provider_id: &str,
-    model: &TranscriptionModel,
-) -> anyhow::Result<()> {
-    config::save_selected_model(provider_id, model.id())
+pub(crate) fn save_cloud_selection(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
+    config::save_selected_model(provider_id, model_id)
 }
 
 fn cloud_model_list_item(entry: &CloudModelEntry, is_selected: bool) -> ListItem<'static> {

@@ -39,7 +39,7 @@ pub(super) async fn transcribe(
         .map_err(|e| anyhow::anyhow!("Failed to create file part for upload: {e}"))?;
 
     let mut form = reqwest::multipart::Form::new()
-        .text("model_id", config.model.api_model_name().to_string())
+        .text("model_id", config.model_id.clone())
         .part("file", file_part);
 
     // Add optional language code from provider config
@@ -57,12 +57,12 @@ pub(super) async fn transcribe(
     }
 
     let client = reqwest::Client::new();
-    let url = config.model.endpoint();
+    let url = config.endpoint();
 
     tracing::debug!(
         "ElevenLabs API Call:\n  URL: {}\n  Method: POST\n  Model: {}\n  Keyterms: {:?}",
         url,
-        config.model.api_model_name(),
+        config.model_id,
         config.keywords,
     );
 

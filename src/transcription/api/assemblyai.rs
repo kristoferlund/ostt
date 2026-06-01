@@ -94,7 +94,7 @@ pub(super) async fn transcribe(
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
 
-    let base_url = config.model.endpoint();
+    let base_url = config.endpoint();
 
     // Step 1: Upload audio with retry logic for transient failures
     let upload_url = upload_with_retry(&client, base_url, &config.api_key, audio_data).await?;
@@ -128,7 +128,7 @@ pub(super) async fn transcribe(
 
     let mut request = TranscriptRequest {
         audio_url: upload_url,
-        speech_models: Some(vec![config.model.api_model_name().to_string()]),
+        speech_models: Some(vec![config.model_id.clone()]),
         format_text: Some(assemblyai_config.format_text),
         disfluencies: Some(assemblyai_config.disfluencies),
         filter_profanity: Some(assemblyai_config.filter_profanity),

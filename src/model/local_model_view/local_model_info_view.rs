@@ -2,7 +2,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Wrap};
 use ratatui::Frame;
 
-use crate::transcription::local_models::{model_destination, RegistryEntry};
+use crate::transcription::local_models::{full_model_id, model_destination, RegistryEntry};
 use crate::ui::{render_app_layout, render_footer, render_title};
 
 use super::types::LocalModelEntry;
@@ -16,7 +16,7 @@ impl LocalModelInfoView {
 
         let path = local_model_path(entry);
         let mut lines = vec![
-            Line::from(format!("ID: {}", entry.id)),
+            Line::from(format!("ID: {}", full_model_id(&entry.id))),
             Line::from(""),
             Line::from(entry.description.clone()),
             Line::from(""),

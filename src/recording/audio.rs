@@ -4,8 +4,10 @@
 //! format conversion using ffmpeg. Audio is captured from the system's default
 //! input device, converted to mono, and saved in the requested format.
 
+use crate::config::OsttConfig;
+
 use super::ffmpeg::find_ffmpeg;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
 use std::path::{Path, PathBuf};
@@ -26,7 +28,7 @@ use std::os::unix::io::AsRawFd;
 /// - Automatic cleanup of temporary files
 /// - Pause and resume support
 pub struct AudioRecorder {
-    /// Actual recording sample rate from device
+    /// Actual recording sample rate from device, set after recording starts.
     sample_rate: u32,
     /// Recorded audio samples (i16 PCM mono)
     samples: Arc<Mutex<Vec<i16>>>,
@@ -37,26 +39,20 @@ pub struct AudioRecorder {
     /// Whether recording is currently paused
     is_paused: Arc<Mutex<bool>>,
     /// Device name or "default" to use the system default device
-    device_name: String,
+    device: String,
 }
 
 impl AudioRecorder {
-    /// Creates a new audio recorder with requested sample rate and device.
-    ///
-    /// # Arguments
-    /// * `requested_sample_rate` - The desired sample rate in Hz (actual may differ based on device)
-    /// * `device_name` - Device name/ID to use. Use "default" for system default device
-    ///
-    /// Note: The actual recording sample rate may differ based on device capabilities.
-    /// Call `get_sample_rate()` after `start_recording()` to get the actual rate.
-    pub fn new(requested_sample_rate: u32, device_name: String) -> Self {
+    /// Creates a new audio recorder for the configured input device.
+    /// Call `sample_rate()` after `start_recording()` to get the device rate.
+    pub fn new(config: &OsttConfig) -> Self {
         Self {
-            sample_rate: requested_sample_rate,
+            sample_rate: 0,
             samples: Arc::new(Mutex::new(Vec::new())),
             stream: None,
             device_channels: 1,
             is_paused: Arc::new(Mutex::new(false)),
-            device_name,
+            device: config.audio.device.clone(),
         }
     }
 
@@ -71,12 +67,12 @@ impl AudioRecorder {
         let device = suppress_alsa_warnings(|| {
             let host = cpal::default_host();
 
-            if self.device_name == "default" {
+            if self.device == "default" {
                 host.default_input_device()
                     .ok_or_else(|| anyhow!("No audio input device available"))
             } else {
                 // Try to find device by name or index
-                find_device_by_name(&host, &self.device_name)
+                find_device_by_name(&host, &self.device)
             }
         })?;
 
@@ -85,18 +81,11 @@ impl AudioRecorder {
             .unwrap_or_else(|_| "Unknown device".to_string());
         tracing::info!("Recording device: {}", device_name);
 
-        let device_config = device.default_input_config()?;
+        let device_config = device
+            .default_input_config()
+            .context("Failed to read input device configuration")?;
         let device_sample_rate = device_config.sample_rate().0;
         let num_channels = device_config.channels() as usize;
-
-        // Warn if requested sample rate doesn't match device
-        if device_sample_rate != self.sample_rate {
-            tracing::warn!(
-                "Requested sample rate {}Hz but device uses {}Hz. Recording at device rate.",
-                self.sample_rate,
-                device_sample_rate
-            );
-        }
 
         tracing::debug!(
             "Device configuration: {}Hz, {} channels",
@@ -113,22 +102,26 @@ impl AudioRecorder {
         let pause_arc = Arc::clone(&self.is_paused);
         let callback_channels = num_channels;
 
-        let stream = device.build_input_stream(
-            &device_config.into(),
-            move |data: &[i16], _: &cpal::InputCallbackInfo| {
-                let is_paused = *pause_arc.lock().unwrap();
-                if !is_paused {
-                    Self::handle_audio_callback(data, &samples_arc, callback_channels);
-                }
-            },
-            |err| {
-                tracing::error!("Audio stream error: {}", err);
-            },
-            None,
-        )?;
+        let stream = device
+            .build_input_stream(
+                &device_config.into(),
+                move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                    let is_paused = *pause_arc.lock().unwrap();
+                    if !is_paused {
+                        Self::handle_audio_callback(data, &samples_arc, callback_channels);
+                    }
+                },
+                |err| {
+                    tracing::error!("Audio stream error: {}", err);
+                },
+                None,
+            )
+            .context("Failed to create audio input stream")?;
 
         // Start playback and store stream
-        stream.play()?;
+        stream
+            .play()
+            .context("Failed to start audio input stream")?;
         self.stream = Some(stream);
 
         tracing::debug!("Audio stream started");
@@ -174,12 +167,13 @@ impl AudioRecorder {
             let temp_wav = self.create_temp_wav_path();
 
             self.save_wav(&samples, &temp_wav)?;
-            self.convert_with_ffmpeg(&temp_wav, &output_file, format)?;
+            let conversion_result = self.convert_with_ffmpeg(&temp_wav, &output_file, format);
 
-            // Clean up temporary file
             if let Err(e) = std::fs::remove_file(&temp_wav) {
                 tracing::debug!("Failed to remove temp file: {}", e);
             }
+
+            conversion_result?;
 
             // Log final file info
             let file_size = std::fs::metadata(&output_file)?.len();
@@ -276,7 +270,7 @@ impl AudioRecorder {
 
         let codec = format_parts[0];
 
-        // Find ffmpeg binary with cross-platform support
+        // Find ffmpeg binary before building the conversion command.
         let ffmpeg_path = find_ffmpeg()?;
 
         // Build ffmpeg command
@@ -359,19 +353,6 @@ impl AudioRecorder {
         } else {
             tracing::debug!("Recording resumed");
         }
-    }
-}
-
-// Maintain backward compatibility with existing API
-impl AudioRecorder {
-    /// Deprecated: Use `samples()` instead.
-    pub fn get_samples(&self) -> Vec<i16> {
-        self.samples()
-    }
-
-    /// Deprecated: Use `sample_rate()` instead.
-    pub fn get_sample_rate(&self) -> u32 {
-        self.sample_rate()
     }
 }
 

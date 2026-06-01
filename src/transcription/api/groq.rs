@@ -41,10 +41,10 @@ pub(super) async fn transcribe(
 
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", config.model.api_model_name().to_string());
+        .text("model", config.model_id.clone());
 
     // Debug log: Log the API call details (without the audio data)
-    let mut debug_params = vec![format!("model={}", config.model.api_model_name())];
+    let mut debug_params = vec![format!("model={}", config.model_id)];
 
     // Add keywords as prompt for better transcription context
     if !config.keywords.is_empty() {
@@ -57,7 +57,7 @@ pub(super) async fn transcribe(
         );
     }
 
-    let endpoint = config.model.endpoint();
+    let endpoint = config.endpoint();
 
     tracing::debug!(
         "Groq API Call:\n  URL: {}\n  Method: POST\n  Headers:\n    Authorization: Bearer <redacted>\n    Content-Type: multipart/form-data\n  Body parameters: {}",

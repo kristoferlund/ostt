@@ -14,7 +14,7 @@ impl CloudModelInfoView {
         render_title(frame, layout.title, "Cloud Model Info");
 
         let lines = vec![
-            Line::from(format!("ID: {}", entry.model_id)),
+            Line::from(format!("ID: {}/{}", entry.provider_id, entry.model_id)),
             Line::from(format!("Name: {}", entry.name)),
             Line::from(""),
             Line::from(entry.description.clone()),

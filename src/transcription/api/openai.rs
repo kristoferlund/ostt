@@ -41,15 +41,15 @@ pub(super) async fn transcribe(
 
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", config.model.api_model_name().to_string());
+        .text("model", config.model_id.clone());
 
     // Debug log: Log the API call details (without the audio data)
-    let mut debug_params = vec![format!("model={}", config.model.api_model_name())];
+    let mut debug_params = vec![format!("model={}", config.model_id)];
 
     // Add keywords as prompt for better transcription context
     // Note: gpt-4o-transcribe doesn't support prompt parameter, only whisper-1 and gpt-4o-mini-transcribe do
     if !config.keywords.is_empty() {
-        let should_use_prompt = match config.model.api_model_name() {
+        let should_use_prompt = match config.model_id.as_str() {
             "gpt-4o-transcribe" => false, // gpt-4o-transcribe doesn't support prompt
             _ => true,                    // whisper-1 and gpt-4o-mini-transcribe support it
         };
@@ -65,13 +65,13 @@ pub(super) async fn transcribe(
         } else {
             tracing::debug!(
                 "Keywords defined but {} does not support prompt parameter. Keywords: {:?}",
-                config.model.api_model_name(),
+                config.model_id,
                 config.keywords
             );
         }
     }
 
-    let endpoint = config.model.endpoint();
+    let endpoint = config.endpoint();
     let url = format!("{endpoint}?response_format=json");
     debug_params.push("response_format=json".to_string());
 

@@ -43,11 +43,7 @@ pub(super) async fn transcribe(
     let mut debug_params = vec![];
 
     // Build the URL with model name in the path
-    let endpoint = format!(
-        "{}/{}",
-        config.model.endpoint(),
-        config.model.api_model_name()
-    );
+    let endpoint = format!("{}/{}", config.endpoint(), config.model_id);
 
     // Add keywords as prompt for better transcription context (similar to OpenAI)
     if !config.keywords.is_empty() {

@@ -39,10 +39,10 @@ pub(super) async fn transcribe(
 
     let mut form = reqwest::multipart::Form::new()
         .part("file", file_part)
-        .text("model", config.model.api_model_name().to_string());
+        .text("model", config.model_id.clone());
 
     // Debug log: Log the API call details (without the audio data)
-    let debug_params = [format!("model={}", config.model.api_model_name())];
+    let debug_params = [format!("model={}", config.model_id)];
 
     // Add keywords as context_bias for better transcription accuracy
     // Mistral supports up to 100 words/phrases for context biasing
@@ -65,7 +65,7 @@ pub(super) async fn transcribe(
         }
     }
 
-    let endpoint = config.model.endpoint();
+    let endpoint = config.endpoint();
 
     let client = reqwest::Client::new();
 

@@ -6,7 +6,6 @@ use serde::Deserialize;
 use std::path::Path;
 use urlencoding;
 
-use super::super::model::TranscriptionModel;
 use super::TranscriptionConfig;
 
 /// Deepgram response structure (kept for potential future use)
@@ -49,11 +48,7 @@ pub(super) async fn transcribe(
     let client = reqwest::Client::new();
 
     // Build the API URL with query parameters
-    let mut url = format!(
-        "{}?model={}",
-        config.model.endpoint(),
-        config.model.api_model_name()
-    );
+    let mut url = format!("{}?model={}", config.endpoint(), config.model_id);
 
     // Add Deepgram feature flags from provider configuration
     let deepgram_config = &config.providers.deepgram;
@@ -97,10 +92,10 @@ pub(super) async fn transcribe(
 
     // Add keywords/keyterms if any (nova-3 uses keyterms, nova-2 uses keywords)
     if !config.keywords.is_empty() {
-        let param_name = match config.model {
-            TranscriptionModel::DeepgramNova3 => "keyterm",
-            TranscriptionModel::DeepgramNova2 => "keywords",
-            _ => "keywords", // fallback
+        let param_name = if config.model_id == "nova-3" {
+            "keyterm"
+        } else {
+            "keywords"
         };
         for keyword in &config.keywords {
             url.push_str(&format!("&{}={}", param_name, urlencoding::encode(keyword)));

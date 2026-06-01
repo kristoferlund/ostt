@@ -40,8 +40,6 @@ pub struct AudioConfig {
     /// - numeric index (0, 1, 2, etc.) from `ostt list-devices`
     /// - device name from `ostt list-devices`
     pub device: String,
-    /// Recording sample rate in Hz (16000 recommended for speech recognition)
-    pub sample_rate: u32,
     /// Peak volume threshold for visual indicator (0-100, percentage of reference level)
     #[serde(default = "default_peak_volume_threshold")]
     pub peak_volume_threshold: u8,
@@ -61,11 +59,9 @@ fn default_output_format() -> String {
 }
 
 const LOCAL_TRANSCRIPTION_OUTPUT_FORMAT: &str = "pcm_s16le -ar 16000";
-const LOCAL_TRANSCRIPTION_SAMPLE_RATE: u32 = 16000;
 
 pub fn is_local_transcription_audio_compatible(audio: &AudioConfig) -> bool {
-    audio.sample_rate == LOCAL_TRANSCRIPTION_SAMPLE_RATE
-        && audio.output_format == LOCAL_TRANSCRIPTION_OUTPUT_FORMAT
+    audio.output_format == LOCAL_TRANSCRIPTION_OUTPUT_FORMAT
 }
 
 fn default_peak_volume_threshold() -> u8 {
@@ -735,7 +731,6 @@ impl OsttConfig {
             config_version: current_config_version(),
             audio: AudioConfig {
                 device: "default".to_string(),
-                sample_rate: 16000,
                 peak_volume_threshold: default_peak_volume_threshold(),
                 reference_level_db: default_reference_level_db(),
                 output_format: default_output_format(),
@@ -781,7 +776,6 @@ fn ensure_local_transcription_audio_config_content(content: &str) -> String {
     let mut output = Vec::new();
     let mut in_audio = false;
     let mut saw_audio = false;
-    let mut wrote_sample_rate = false;
     let mut wrote_output_format = false;
 
     for line in content.lines() {
@@ -789,16 +783,12 @@ fn ensure_local_transcription_audio_config_content(content: &str) -> String {
         if trimmed == "[audio]" {
             in_audio = true;
             saw_audio = true;
-            wrote_sample_rate = false;
             wrote_output_format = false;
             output.push(line.to_string());
             continue;
         }
 
         if in_audio && trimmed.starts_with('[') && trimmed.ends_with(']') {
-            if !wrote_sample_rate {
-                output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
-            }
             if !wrote_output_format {
                 output.push(format!(
                     "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
@@ -808,8 +798,7 @@ fn ensure_local_transcription_audio_config_content(content: &str) -> String {
         }
 
         if in_audio && trimmed.starts_with("sample_rate") {
-            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
-            wrote_sample_rate = true;
+            continue;
         } else if in_audio && trimmed.starts_with("output_format") {
             output.push(format!(
                 "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
@@ -821,9 +810,6 @@ fn ensure_local_transcription_audio_config_content(content: &str) -> String {
     }
 
     if in_audio {
-        if !wrote_sample_rate {
-            output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
-        }
         if !wrote_output_format {
             output.push(format!(
                 "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
@@ -832,7 +818,6 @@ fn ensure_local_transcription_audio_config_content(content: &str) -> String {
     } else if !saw_audio {
         output.push(String::new());
         output.push("[audio]".to_string());
-        output.push(format!("sample_rate = {LOCAL_TRANSCRIPTION_SAMPLE_RATE}"));
         output.push(format!(
             "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
         ));
@@ -863,7 +848,6 @@ mod tests {
     fn local_transcription_audio_requires_wav_16khz() {
         let mut audio = AudioConfig {
             device: "default".to_string(),
-            sample_rate: 16000,
             peak_volume_threshold: default_peak_volume_threshold(),
             reference_level_db: default_reference_level_db(),
             output_format: "pcm_s16le -ar 16000".to_string(),
@@ -874,10 +858,6 @@ mod tests {
 
         audio.output_format = default_output_format();
         assert!(!is_local_transcription_audio_compatible(&audio));
-
-        audio.output_format = "pcm_s16le -ar 16000".to_string();
-        audio.sample_rate = 12000;
-        assert!(!is_local_transcription_audio_compatible(&audio));
     }
 
     #[test]
@@ -885,20 +865,19 @@ mod tests {
         let content = r#"# ostt
 [audio]
 device = "default"
-sample_rate = 12000
 peak_volume_threshold = 90
 output_format = "mp3 -ab 16k -ar 12000"
 visualization = "spectrum"
 
 [transcription]
 provider = "openai"
-model = "whisper"
+model = "whisper-1"
 "#;
 
         let updated = ensure_local_transcription_audio_config_content(content);
 
         assert!(updated.contains("device = \"default\""));
-        assert!(updated.contains("sample_rate = 16000"));
+        assert!(!updated.contains("sample_rate"));
         assert!(updated.contains("peak_volume_threshold = 90"));
         assert!(updated.contains("output_format = \"pcm_s16le -ar 16000\""));
         assert!(updated.contains("[transcription]"));
@@ -1013,7 +992,6 @@ model = "whisper"
         let toml_str = r#"
             [audio]
             device = "default"
-            sample_rate = 16000
         "#;
         let config: OsttConfig = toml::from_str(toml_str).unwrap();
         assert!(config.process.actions.is_empty());
@@ -1024,7 +1002,6 @@ model = "whisper"
         let toml_str = r#"
             [audio]
             device = "default"
-            sample_rate = 16000
         "#;
 
         let config = parse_ostt_config(toml_str).unwrap();
@@ -1042,7 +1019,6 @@ model = "whisper"
         let toml_str = r#"
             [audio]
             device = "default"
-            sample_rate = 16000
 
             [providers.local]
             language = "sv"
@@ -1077,7 +1053,6 @@ model = "whisper"
                 r#"
                     [audio]
                     device = "default"
-                    sample_rate = 16000
 
                     [providers.local]
                     {local_setting}
@@ -1097,7 +1072,6 @@ model = "whisper"
         let toml_str = r#"
             [audio]
             device = "default"
-            sample_rate = 16000
 
             [providers.local]
             temperature = 1.0
@@ -1114,7 +1088,6 @@ model = "whisper"
         let toml_str = r#"
             [audio]
             device = "default"
-            sample_rate = 16000
 
             [providers.local]
             language = "auto"

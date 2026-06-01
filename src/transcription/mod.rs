@@ -12,6 +12,7 @@ use std::ffi::CStr;
 
 pub mod animation;
 pub mod api;
+pub(crate) mod context;
 pub mod daemon;
 pub mod daemon_client;
 pub mod local_models;
@@ -20,8 +21,53 @@ pub mod provider;
 
 pub use animation::TranscriptionAnimation;
 pub use api::{transcribe, TranscriptionConfig, TranscriptionResponse};
-pub use model::TranscriptionModel;
+pub(crate) use context::build_context;
+pub use model::{all_models, find_model, models_for_provider, ModelSpec};
 pub use provider::TranscriptionProvider;
+
+pub fn config_for_selected_model(
+    selected_model: &crate::config::SelectedModel,
+    api_key: Option<String>,
+    keywords: Vec<String>,
+    providers: crate::config::file::ProvidersConfig,
+) -> anyhow::Result<TranscriptionConfig> {
+    let provider =
+        TranscriptionProvider::from_id(&selected_model.provider_id).ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown provider '{}'. Supported providers: {}.",
+                selected_model.provider_id,
+                TranscriptionProvider::supported_ids().join(", ")
+            )
+        })?;
+
+    if provider == TranscriptionProvider::Local {
+        return Ok(TranscriptionConfig::new_local(
+            selected_model.model_id.clone(),
+            keywords,
+            providers,
+        ));
+    }
+
+    find_model(&selected_model.provider_id, &selected_model.model_id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
+            selected_model.model_id,
+            selected_model.provider_id
+        )
+    })?;
+
+    let api_key = api_key.ok_or_else(|| {
+        anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
+    })?;
+
+    Ok(TranscriptionConfig::new_cloud(
+        provider,
+        selected_model.model_id.clone(),
+        api_key,
+        keywords,
+        providers,
+    ))
+}
 
 pub(crate) fn local_inference_backend() -> &'static str {
     #[cfg(feature = "whisper-cuda")]

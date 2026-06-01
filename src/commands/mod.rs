@@ -23,6 +23,7 @@ pub mod launch;
 pub mod list_devices;
 pub mod logs;
 pub mod model;
+pub(crate) mod output;
 pub mod process;
 pub mod record;
 pub mod replay;

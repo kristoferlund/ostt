@@ -26,6 +26,13 @@ pub(crate) fn data_dir() -> PathBuf {
         .join("ostt")
 }
 
+/// Returns the recordings directory and ensures it exists.
+pub(crate) fn recordings_dir() -> Result<PathBuf, anyhow::Error> {
+    let dir = data_dir().join("recordings");
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
 /// Returns `~/.config/ostt` (XDG_CONFIG_HOME/ostt if set).
 pub(crate) fn config_dir() -> PathBuf {
     if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {

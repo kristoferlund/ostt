@@ -10,6 +10,11 @@ pub mod keywords_view;
 
 pub use keywords_view::KeywordsView;
 
+pub(crate) fn load_keywords() -> Result<Vec<String>> {
+    let keywords_manager = KeywordsManager::new(&crate::app_dirs::config_dir())?;
+    keywords_manager.load_keywords()
+}
+
 /// Manages the keywords list stored in the config directory.
 pub struct KeywordsManager {
     /// Path to the keywords file

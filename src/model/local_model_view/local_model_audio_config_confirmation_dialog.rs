@@ -2,6 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
+use crate::transcription::local_models::full_model_id;
 use crate::ui::{render_dialog_content, DialogAction};
 
 use super::types::LocalModelEntry;
@@ -19,10 +20,10 @@ impl LocalModelAudioConfigConfirmationDialog {
             "Update Audio Config",
             vec![
                 Line::from(format!("Activate \"{}\"?", entry.name)),
+                Line::from(format!("ID: {}", full_model_id(&entry.id))),
                 Line::from(""),
                 Line::from("Local transcription requires WAV audio:"),
                 Line::from("output_format = \"pcm_s16le -ar 16000\""),
-                Line::from("sample_rate = 16000"),
                 Line::from(""),
                 Line::from(Span::styled(
                     "<Update>",

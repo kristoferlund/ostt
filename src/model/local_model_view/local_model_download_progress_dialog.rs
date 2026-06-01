@@ -2,6 +2,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::Frame;
 
+use crate::transcription::local_models::full_model_id;
 use crate::ui::render_dialog_content;
 
 use super::local_model_view_helpers::{format_bytes, progress_bar};
@@ -26,7 +27,7 @@ impl LocalModelDownloadProgressDialog {
                 state.status.as_str()
             },
             vec![
-                Line::from(format!("Model: {}", state.model_id)),
+                Line::from(format!("Model: {}", full_model_id(&state.model_id))),
                 if state.is_custom {
                     Line::from(format!("Status: {}", state.status))
                 } else {

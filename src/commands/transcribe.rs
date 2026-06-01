@@ -3,13 +3,9 @@
 //! Accepts an audio file path and transcribes it using the configured provider/model,
 //! reusing the same transcription pipeline as the `record` command.
 
-use crate::clipboard::copy_to_clipboard;
-use crate::config;
-use crate::history::HistoryManager;
-use crate::keywords::KeywordsManager;
+use super::output;
 use crate::process;
-use crate::transcription;
-use dirs;
+use crate::{config, history, transcription};
 use std::path::PathBuf;
 
 /// Handles transcription of a pre-recorded audio file.
@@ -23,10 +19,12 @@ use std::path::PathBuf;
 /// * `output_file` - Optional file path to write output to instead of stdout
 /// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
 pub async fn handle_transcribe(
+    config_data: &config::OsttConfig,
     file: PathBuf,
     clipboard: bool,
     output_file: Option<String>,
     process: Option<String>,
+    model_override: Option<config::SelectedModel>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Transcribe Command ===");
 
@@ -37,163 +35,29 @@ pub async fn handle_transcribe(
 
     tracing::info!("Transcribing file: {}", file.display());
 
-    // Load configuration
-    let config_data = config::OsttConfig::load().map_err(|err| {
-        tracing::error!("Failed to load configuration: {err}");
-        anyhow::anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
-    })?;
-
-    let selected_model = config::get_selected_model_entry()?.ok_or_else(|| {
-        anyhow::anyhow!("No model selected. Please run 'ostt auth' to select a transcription model")
-    })?;
-
-    // Load keywords
-    let config_dir = crate::app_dirs::config_dir();
-    let keywords_manager = KeywordsManager::new(&config_dir)?;
-    let keywords = keywords_manager.load_keywords()?;
-
-    let transcription_config = if selected_model.provider_id == "local" {
-        transcription::TranscriptionConfig::new_local(
-            selected_model.model_id.clone(),
-            keywords,
-            config_data.providers.clone(),
-        )
-    } else {
-        let model = transcription::TranscriptionModel::from_id(&selected_model.model_id)
-            .ok_or_else(|| anyhow::anyhow!("Unknown model: {}", selected_model.model_id))?;
-        let provider = model.provider();
-        let api_key = config::get_api_key(provider.id())?.ok_or_else(|| {
-            anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
-        })?;
-        transcription::TranscriptionConfig::new(
-            model,
-            api_key,
-            keywords,
-            config_data.providers.clone(),
-        )
-    };
+    let context = transcription::build_context(config_data, model_override)?;
 
     // Transcribe
     tracing::debug!("Starting transcription...");
-    let text = transcription::transcribe(&transcription_config, &file)
+    let text = transcription::transcribe(&context.config, &file)
         .await
         .map_err(|e| {
             tracing::error!("Transcription failed: {e}");
             anyhow::anyhow!("Transcription failed: {e}")
         })?;
 
-    let trimmed_text = text.trim().to_string();
-    tracing::debug!("Transcription completed: {}", trimmed_text);
+    let transcription_text = text.trim().to_string();
+    tracing::debug!("Transcription completed: {}", transcription_text);
 
-    // Save raw transcription to history
-    let data_dir = crate::app_dirs::data_dir();
-    let mut history_manager = HistoryManager::new(&data_dir)?;
-    if let Err(e) = history_manager.save_transcription(&trimmed_text) {
-        tracing::warn!("Failed to save transcription to history: {}", e);
-    }
-
-    // Processing flow: if -p was passed, chain processing after transcription
-    let output_text = match process.as_deref() {
-        None => {
-            // No processing requested, output raw transcription
-            trimmed_text
-        }
-        Some("") => {
-            // Show action picker
-            let config_data = config::OsttConfig::load().map_err(|err| {
-                tracing::error!("Failed to load configuration: {err}");
-                anyhow::anyhow!("Configuration error: {err}")
-            })?;
-
-            if config_data.process.actions.is_empty() {
-                return Err(anyhow::anyhow!(
-                    "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
-                ));
-            }
-
-            match process::process_view::show_action_picker(&config_data.process.actions)? {
-                process::process_view::PickerResult::Selected(selected_id) => {
-                    let action = config_data
-                        .process
-                        .get_action(&selected_id)
-                        .expect("Picker returned an ID not in config")
-                        .clone();
-
-                    let config_dir = dirs::config_dir()
-                        .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
-                    let keywords_manager = KeywordsManager::new(&config_dir)?;
-                    let keywords = keywords_manager.load_keywords()?;
-
-                    match process::execute_action_with_animation(&action, &trimmed_text, &keywords)
-                        .await?
-                    {
-                        Some(result) => result,
-                        None => {
-                            // Cancelled — fall through to output raw transcription
-                            trimmed_text
-                        }
-                    }
-                }
-                process::process_view::PickerResult::Cancelled => {
-                    // Cancelled — fall through to output raw transcription
-                    trimmed_text
-                }
-            }
-        }
-        Some(id) => {
-            // Look up action by ID
-            let config_data = config::OsttConfig::load().map_err(|err| {
-                tracing::error!("Failed to load configuration: {err}");
-                anyhow::anyhow!("Configuration error: {err}")
-            })?;
-
-            let action = config_data
-                .process
-                .get_action(id)
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "Unknown action '{id}'. Use 'ostt process --list' to see available actions."
-                    )
-                })?
-                .clone();
-
-            let config_dir = dirs::config_dir()
-                .ok_or_else(|| anyhow::anyhow!("Could not determine config directory"))?;
-            let keywords_manager = KeywordsManager::new(&config_dir)?;
-            let keywords = keywords_manager.load_keywords()?;
-
-            // Action specified directly — no TUI flow, execute without animation
-            process::execute_action(&action, &trimmed_text, &keywords).await?
-        }
-    };
-
-    // Determine output destination: file > clipboard > stdout (default)
-    if let Some(file_path) = output_file {
-        match std::fs::write(&file_path, &output_text) {
-            Ok(_) => {
-                tracing::debug!("Output text written to file: {file_path}");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to write to file '{file_path}': {e}");
-                return Err(anyhow::anyhow!(
-                    "Failed to write to file '{file_path}': {e}"
-                ));
-            }
-        }
-    } else if clipboard {
-        match copy_to_clipboard(&output_text) {
-            Ok(_) => {
-                tracing::debug!("Output text copied to clipboard");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to copy to clipboard: {e}");
-            }
-        }
-    } else {
-        // Default: stdout
-        println!("{output_text}");
-        tracing::debug!("Output text printed to stdout");
-    }
+    history::save_transcription(&transcription_text)?;
+    let output_text = process::apply_requested_action(
+        &config_data.process,
+        &transcription_text,
+        &context.keywords,
+        process.as_deref(),
+    )
+    .await?;
+    output::write_text(&output_text, output_file, clipboard, "Output text")?;
 
     Ok(())
 }

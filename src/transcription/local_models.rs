@@ -101,9 +101,9 @@ pub fn model_files_dir() -> PathBuf {
 /// Error type for local model-related failures.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
-    #[error("Model '{0}' was not found in the local model registry or custom models.")]
+    #[error("Local model 'local/{0}' was not found in the local model registry or custom models.")]
     NotFound(String),
-    #[error("Model '{0}' is not downloaded. Run `ostt models download {0}` first.")]
+    #[error("Local model 'local/{0}' is not downloaded. Run `ostt model` to download it.")]
     NotDownloaded(String),
     #[error("Model file not found at {0}")]
     FileNotFound(PathBuf),
@@ -228,6 +228,10 @@ pub fn is_safe_model_id(id: &str) -> bool {
         && id
             .bytes()
             .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
+}
+
+pub fn full_model_id(id: &str) -> String {
+    format!("local/{id}")
 }
 
 pub fn installed_models(

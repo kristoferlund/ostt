@@ -17,7 +17,6 @@ mod openai;
 use serde::Deserialize;
 use std::path::Path;
 
-use super::model::TranscriptionModel;
 use super::provider::TranscriptionProvider;
 use crate::config::file::{LocalTranscriptionConfig, ProvidersConfig};
 
@@ -28,10 +27,6 @@ pub struct TranscriptionConfig {
     pub provider: TranscriptionProvider,
     /// The selected model ID, including data-driven local model IDs
     pub model_id: String,
-    /// The enum model variant. For cloud providers this is authoritative.
-    /// For local transcription (`provider == Local`) this is a placeholder —
-    /// dispatch must use `provider`, not this field.
-    pub model: TranscriptionModel,
     /// The API key for authentication
     pub api_key: String,
     /// Keywords to improve transcription accuracy
@@ -42,19 +37,16 @@ pub struct TranscriptionConfig {
 
 impl TranscriptionConfig {
     /// Creates a new transcription configuration
-    pub fn new(
-        model: TranscriptionModel,
+    pub fn new_cloud(
+        provider: TranscriptionProvider,
+        model_id: String,
         api_key: String,
         keywords: Vec<String>,
         providers: ProvidersConfig,
     ) -> Self {
-        let provider = model.provider();
-        let model_id = model.id().to_string();
-
         Self {
             provider,
             model_id,
-            model,
             api_key,
             keywords,
             providers,
@@ -66,10 +58,23 @@ impl TranscriptionConfig {
         Self {
             provider: TranscriptionProvider::Local,
             model_id,
-            model: TranscriptionModel::Whisper,
             api_key: String::new(),
             keywords,
             providers,
+        }
+    }
+
+    pub fn endpoint(&self) -> &'static str {
+        match self.provider {
+            TranscriptionProvider::OpenAI => "https://api.openai.com/v1/audio/transcriptions",
+            TranscriptionProvider::Deepgram => "https://api.deepgram.com/v1/listen",
+            TranscriptionProvider::DeepInfra => "https://api.deepinfra.com/v1/inference",
+            TranscriptionProvider::Groq => "https://api.groq.com/openai/v1/audio/transcriptions",
+            TranscriptionProvider::AssemblyAI => "https://api.assemblyai.com/v2",
+            TranscriptionProvider::Berget => "https://api.berget.ai/v1/audio/transcriptions",
+            TranscriptionProvider::ElevenLabs => "https://api.elevenlabs.io/v1/speech-to-text",
+            TranscriptionProvider::Mistral => "https://api.mistral.ai/v1/audio/transcriptions",
+            TranscriptionProvider::Local => "",
         }
     }
 

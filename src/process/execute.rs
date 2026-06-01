@@ -5,10 +5,10 @@
 //! `execute_action_with_animation` which wraps the action in an animated
 //! progress indicator.
 
-use crate::config::{ActionDetails, ProcessAction};
+use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
+use crate::ui::cancel_requested;
 use crossterm::{
-    event::{self, Event, KeyCode, KeyModifiers},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -83,6 +83,60 @@ pub async fn execute_action(
     }
 
     result
+}
+
+pub fn select_requested_action<F>(
+    process_config: &ProcessConfig,
+    process_arg: Option<&str>,
+    pick_action_id: F,
+) -> anyhow::Result<Option<ProcessAction>>
+where
+    F: FnOnce(&[ProcessAction]) -> anyhow::Result<Option<String>>,
+{
+    match process_arg {
+        None => Ok(None),
+        Some("") => pick_action_id(&process_config.actions)?.map_or(Ok(None), |action_id| {
+            find_action(process_config, &action_id).map(Some)
+        }),
+        Some(action_id) => find_action(process_config, action_id).map(Some),
+    }
+}
+
+pub async fn apply_requested_action(
+    process_config: &ProcessConfig,
+    transcription: &str,
+    keywords: &[String],
+    process_arg: Option<&str>,
+) -> anyhow::Result<String> {
+    let Some(action) = select_requested_action(process_config, process_arg, |actions| {
+        match super::process_view::show_action_picker(actions)? {
+            super::process_view::PickerResult::Selected(action_id) => Ok(Some(action_id)),
+            super::process_view::PickerResult::Cancelled => Ok(None),
+        }
+    })?
+    else {
+        return Ok(transcription.to_string());
+    };
+
+    if process_arg == Some("") {
+        return match execute_action_with_animation(&action, transcription, keywords).await? {
+            Some(result) => Ok(result),
+            None => Ok(transcription.to_string()),
+        };
+    }
+
+    execute_action(&action, transcription, keywords).await
+}
+
+fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Result<ProcessAction> {
+    process_config
+        .get_action(action_id)
+        .cloned()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown action '{action_id}'. Use 'ostt process --list' to see available actions."
+            )
+        })
 }
 
 /// Drop-based cleanup guard that ensures the terminal is restored even on
@@ -169,25 +223,11 @@ pub async fn execute_action_with_animation(
             break;
         }
 
-        // Poll for cancel input (Esc/q/Ctrl+C)
-        if event::poll(std::time::Duration::from_millis(0)).unwrap_or(false) {
-            if let Ok(Event::Key(key)) = event::read() {
-                match key.code {
-                    KeyCode::Esc | KeyCode::Char('q') => {
-                        tracing::info!("Processing cancelled by user");
-                        task_handle.abort();
-                        cancelled = true;
-                        break;
-                    }
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        tracing::info!("Processing cancelled by user (Ctrl+C)");
-                        task_handle.abort();
-                        cancelled = true;
-                        break;
-                    }
-                    _ => {}
-                }
-            }
+        if cancel_requested() {
+            tracing::info!("Processing cancelled by user");
+            task_handle.abort();
+            cancelled = true;
+            break;
         }
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

@@ -9,11 +9,45 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::config::file::{get_config_path, OsttConfig};
+use crate::transcription::{find_model, TranscriptionProvider};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SelectedModel {
     pub provider_id: String,
     pub model_id: String,
+}
+
+pub fn parse_provider_model(value: &str) -> anyhow::Result<SelectedModel> {
+    let (provider_id, model_id) = value.split_once('/').ok_or_else(|| {
+        anyhow::anyhow!("Expected model in PROVIDER/MODEL format, for example deepgram/nova-3")
+    })?;
+
+    if provider_id.trim().is_empty() || model_id.trim().is_empty() {
+        anyhow::bail!("Expected model in PROVIDER/MODEL format, for example deepgram/nova-3");
+    }
+
+    let provider = TranscriptionProvider::from_id(provider_id);
+    if provider.is_none() {
+        anyhow::bail!(
+            "Unknown provider '{}'. Supported providers: {}.",
+            provider_id,
+            TranscriptionProvider::supported_ids().join(", ")
+        );
+    }
+
+    if provider != Some(TranscriptionProvider::Local) && find_model(provider_id, model_id).is_none()
+    {
+        anyhow::bail!(
+            "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
+            model_id,
+            provider_id
+        );
+    }
+
+    Ok(SelectedModel {
+        provider_id: provider_id.to_string(),
+        model_id: model_id.to_string(),
+    })
 }
 
 /// Returns the path to the secrets directory (~/.local/share/ostt).
@@ -261,4 +295,42 @@ fn toml_basic_string(value: &str) -> String {
 /// - If the model file cannot be read
 pub fn get_selected_model() -> anyhow::Result<Option<String>> {
     Ok(get_selected_model_entry()?.map(|selected| selected.model_id))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_provider_model_accepts_simple_model_ids() {
+        let selected = parse_provider_model("deepgram/nova-3").expect("parse model");
+        assert_eq!(selected.provider_id, "deepgram");
+        assert_eq!(selected.model_id, "nova-3");
+    }
+
+    #[test]
+    fn parse_provider_model_splits_on_first_slash_only() {
+        let selected = parse_provider_model("berget/openai/whisper-large-v3").expect("parse model");
+        assert_eq!(selected.provider_id, "berget");
+        assert_eq!(selected.model_id, "openai/whisper-large-v3");
+
+        let selected = parse_provider_model("deepinfra/openai/whisper-base").expect("parse model");
+        assert_eq!(selected.provider_id, "deepinfra");
+        assert_eq!(selected.model_id, "openai/whisper-base");
+    }
+
+    #[test]
+    fn parse_provider_model_rejects_missing_provider_or_model() {
+        assert!(parse_provider_model("openai/").is_err());
+        assert!(parse_provider_model("/nova-3").is_err());
+        assert!(parse_provider_model("nova-3").is_err());
+    }
+
+    #[test]
+    fn parse_provider_model_rejects_unknown_cloud_tuple() {
+        let err = parse_provider_model("openai/nova-3").expect_err("reject mismatch");
+        assert!(err
+            .to_string()
+            .contains("Unknown model 'nova-3' for provider 'openai'"));
+    }
 }

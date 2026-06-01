@@ -76,4 +76,8 @@ impl TranscriptionProvider {
             TranscriptionProvider::Mistral,
         ]
     }
+
+    pub fn supported_ids() -> Vec<&'static str> {
+        Self::all().iter().map(Self::id).collect()
+    }
 }

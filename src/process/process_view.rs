@@ -4,13 +4,10 @@
 //! and lets the user select one via keyboard navigation.
 
 use crate::config::file::ProcessAction;
-use crate::ui::{render_app_layout, render_footer, render_title};
+use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
-        MouseEventKind,
-    },
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -23,7 +20,7 @@ use std::io::{self, Stdout};
 /// Renders the action picker UI into the given frame area.
 ///
 /// Shared rendering logic used by both the standalone `ProcessView`
-/// and `OsttTui::render_action_picker()`.
+/// and `RecordingTui::render_action_picker()`.
 pub fn render_process_view(
     frame: &mut Frame,
     area: Rect,
@@ -64,8 +61,81 @@ pub fn render_process_view(
 pub enum PickerResult {
     /// User selected an action — contains the action's ID.
     Selected(String),
-    /// User cancelled (Esc/q).
+    /// User cancelled (Esc/q/Ctrl+C).
     Cancelled,
+}
+
+pub(crate) fn handle_picker_event(
+    event: Event,
+    actions: &[ProcessAction],
+    list_state: &mut ListState,
+    hovered_index: Option<&mut Option<usize>>,
+    list_area: Rect,
+) -> Option<PickerResult> {
+    match event {
+        Event::Key(key) => match key.code {
+            _ if is_cancel_key(&key) => Some(PickerResult::Cancelled),
+            KeyCode::Up | KeyCode::Char('k') => {
+                list_state.select_previous();
+                None
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                list_state.select_next();
+                None
+            }
+            KeyCode::Enter => list_state
+                .selected()
+                .and_then(|idx| actions.get(idx))
+                .map(|action| PickerResult::Selected(action.id.clone())),
+            _ => None,
+        },
+        Event::Mouse(mouse) => match mouse.kind {
+            MouseEventKind::ScrollUp => {
+                list_state.select_previous();
+                None
+            }
+            MouseEventKind::ScrollDown => {
+                list_state.select_next();
+                None
+            }
+            MouseEventKind::Moved => {
+                if let Some(hovered_index) = hovered_index {
+                    update_hovered_index(
+                        hovered_index,
+                        list_area,
+                        actions.len(),
+                        list_state.offset(),
+                        mouse.row,
+                    );
+                }
+                None
+            }
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn update_hovered_index(
+    hovered_index: &mut Option<usize>,
+    list_area: Rect,
+    action_count: usize,
+    list_offset: usize,
+    mouse_row: u16,
+) {
+    let list_bottom = list_area.y + list_area.height;
+    if mouse_row < list_area.y || mouse_row >= list_bottom {
+        *hovered_index = None;
+        return;
+    }
+
+    let visible_index = (mouse_row - list_area.y) as usize;
+    let actual_index = visible_index + list_offset;
+    if actual_index < action_count {
+        *hovered_index = Some(actual_index);
+    } else {
+        *hovered_index = None;
+    }
 }
 
 /// Interactive process-action view for selecting a processing action.
@@ -142,92 +212,34 @@ impl ProcessView {
     /// Runs the interactive action picker loop.
     ///
     /// Draws the UI, reads keyboard events, and dispatches actions.
-    /// Returns `PickerResult::Selected(id)` on Enter or `PickerResult::Cancelled` on Esc/q.
+    /// Returns `PickerResult::Selected(id)` on Enter or `PickerResult::Cancelled` on Esc/q/Ctrl+C.
     fn run(&mut self) -> Result<PickerResult> {
         let result = loop {
             self.draw()?;
 
-            match event::read()? {
-                Event::Key(key) => {
-                    if let Some(action) = self.handle_key(key) {
-                        match action {
-                            PickerAction::Exit => {
-                                tracing::info!("Action picker cancelled by user");
-                                break PickerResult::Cancelled;
-                            }
-                            PickerAction::Select(id) => {
-                                tracing::info!("User selected action '{}'", id);
-                                break PickerResult::Selected(id);
-                            }
-                        }
+            if let Some(result) = handle_picker_event(
+                event::read()?,
+                &self.actions,
+                &mut self.list_state,
+                Some(&mut self.hovered_index),
+                self.list_area,
+            ) {
+                match result {
+                    PickerResult::Cancelled => {
+                        tracing::info!("Action picker cancelled by user");
+                        break PickerResult::Cancelled;
+                    }
+                    PickerResult::Selected(id) => {
+                        tracing::info!("User selected action '{}'", id);
+                        break PickerResult::Selected(id);
                     }
                 }
-                Event::Mouse(mouse) => match mouse.kind {
-                    MouseEventKind::ScrollUp => {
-                        self.list_state.select_previous();
-                    }
-                    MouseEventKind::ScrollDown => {
-                        self.list_state.select_next();
-                    }
-                    MouseEventKind::Moved => {
-                        let inner_top = self.list_area.y;
-                        let inner_bottom = self.list_area.y + self.list_area.height;
-                        if mouse.row < inner_top || mouse.row >= inner_bottom {
-                            self.hovered_index = None;
-                        } else {
-                            let relative_y = mouse.row - inner_top;
-                            let visible_index = relative_y as usize; // picker items are 1 line tall
-                            let actual_index = visible_index + self.list_state.offset();
-                            if actual_index < self.actions.len() {
-                                self.hovered_index = Some(actual_index);
-                            } else {
-                                self.hovered_index = None;
-                            }
-                        }
-                    }
-                    _ => {}
-                },
-                _ => {}
             }
         };
 
         self.cleanup()?;
         Ok(result)
     }
-
-    /// Handles keyboard input and returns an optional action.
-    fn handle_key(&mut self, key: KeyEvent) -> Option<PickerAction> {
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => Some(PickerAction::Exit),
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                Some(PickerAction::Exit)
-            }
-            KeyCode::Up | KeyCode::Char('k') => {
-                self.list_state.select_previous();
-                None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                self.list_state.select_next();
-                None
-            }
-            KeyCode::Enter => {
-                if let Some(idx) = self.list_state.selected() {
-                    Some(PickerAction::Select(self.actions[idx].id.clone()))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-}
-
-/// Actions that can result from keyboard input in the picker.
-enum PickerAction {
-    /// User wants to exit/cancel.
-    Exit,
-    /// User selected an action — contains the action's ID.
-    Select(String),
 }
 
 impl Drop for ProcessView {
@@ -242,7 +254,7 @@ impl Drop for ProcessView {
 /// * `actions` - List of available actions to display
 ///
 /// # Returns
-/// The ID of the selected action, or `Cancelled` if the user presses Esc/q.
+/// The ID of the selected action, or `Cancelled` if the user presses Esc/q/Ctrl+C.
 ///
 /// # Edge cases
 /// - Returns an error if `actions` is empty

@@ -75,13 +75,20 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
+fn load_config() -> anyhow::Result<crate::config::OsttConfig> {
+    crate::config::OsttConfig::load().map_err(|err| {
+        tracing::error!("Failed to load configuration: {err}");
+        anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
+    })
+}
+
 /// A terminal-based speech-to-text recorder with real-time waveform visualization
 #[derive(Parser)]
 #[command(name = "ostt")]
 #[command(version)]
 #[command(about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗")]
 #[command(
-    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication for cloud providers\n    $ ostt auth\n    \n    # Choose cloud or local transcription model\n    $ ostt model\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
+    long_about = "\n\n ┏┓┏╋╋ \n ┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    $ ostt -m deepgram/nova-3 -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    $ ostt transcribe recording.ogg -m openai/gpt-4o-transcribe\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication for cloud providers\n    $ ostt auth\n    \n    # Choose cloud or local transcription model\n    $ ostt model\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Edit configuration file\n    $ ostt config"
 )]
 #[command(
     after_help = "CONFIGURATION:\n    Config file:        ~/.config/ostt/ostt.toml\n    Logs:               ~/.local/state/ostt/ostt.log.*\n\nFor more information, visit: https://github.com/kristoferlund/ostt"
@@ -98,6 +105,15 @@ struct Cli {
     /// Enable processing after transcription
     #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
     process: Option<String>,
+
+    /// Override transcription model for this run
+    #[arg(
+        short = 'm',
+        long = "model",
+        value_name = "PROVIDER/MODEL",
+        global = true
+    )]
+    model: Option<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -122,6 +138,10 @@ enum Commands {
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
+
+        /// Override transcription model for this run
+        #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
+        model: Option<String>,
     },
 
     /// Retry transcription of a previous recording
@@ -144,6 +164,10 @@ enum Commands {
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
+
+        /// Override transcription model for this run
+        #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
+        model: Option<String>,
     },
 
     /// Transcribe a pre-recorded audio file
@@ -173,6 +197,10 @@ enum Commands {
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
+
+        /// Override transcription model for this run
+        #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
+        model: Option<String>,
     },
 
     /// Replay a previous recording using system audio player
@@ -486,38 +514,74 @@ pub async fn run() -> Result<(), anyhow::Error> {
     // Check if setup is needed (version check or missing config)
     check_and_run_setup().await?;
 
+    let config_data = load_config()?;
+
     // Route to appropriate command handler
     match cli.command {
         None | Some(Commands::Record { .. }) => {
             // Default command is record
             // Merge top-level options with explicit record command options
             // If both are specified, the explicit record command options take precedence
-            let (clipboard, output, process) = match cli.command {
+            let (clipboard, output, process, model) = match cli.command {
                 Some(Commands::Record {
                     clipboard,
                     output,
                     process,
-                }) => (clipboard, output, process),
-                None => (cli.clipboard, cli.output, cli.process),
+                    model,
+                }) => (clipboard, output, process, model.or(cli.model)),
+                None => (cli.clipboard, cli.output, cli.process, cli.model),
                 _ => unreachable!(),
             };
-            commands::handle_record(clipboard, output, process).await?;
+            let model_override = model
+                .as_deref()
+                .map(crate::config::parse_provider_model)
+                .transpose()?;
+            commands::handle_record(&config_data, clipboard, output, process, model_override)
+                .await?;
         }
         Some(Commands::Retry {
             index,
             clipboard,
             output,
             process,
+            model,
         }) => {
-            commands::handle_retry(index, clipboard, output, process).await?;
+            let model_override = model
+                .or(cli.model)
+                .as_deref()
+                .map(crate::config::parse_provider_model)
+                .transpose()?;
+            commands::handle_retry(
+                &config_data,
+                index,
+                clipboard,
+                output,
+                process,
+                model_override,
+            )
+            .await?;
         }
         Some(Commands::Transcribe {
             file,
             clipboard,
             output,
             process,
+            model,
         }) => {
-            commands::handle_transcribe(file, clipboard, output, process).await?;
+            let model_override = model
+                .or(cli.model)
+                .as_deref()
+                .map(crate::config::parse_provider_model)
+                .transpose()?;
+            commands::handle_transcribe(
+                &config_data,
+                file,
+                clipboard,
+                output,
+                process,
+                model_override,
+            )
+            .await?;
         }
         Some(Commands::Replay { index }) => {
             commands::handle_replay(index).await?;
@@ -525,7 +589,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Auth { command }) => {
             let result = match command.unwrap_or(AuthCommand::Login) {
                 AuthCommand::Login => commands::handle_auth().await,
-                AuthCommand::Logout => commands::auth::handle_logout().await,
+                AuthCommand::Logout => commands::auth::handle_logout(&config_data).await,
             };
 
             if let Err(e) = result {
@@ -559,7 +623,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
             output,
         }) => {
             let (index, action) = resolve_process_args(index_or_action, action)?;
-            commands::handle_process(index, action, list, clipboard, output).await?;
+            commands::handle_process(&config_data, index, action, list, clipboard, output).await?;
         }
         Some(Commands::Launch { args }) => {
             // Reconstruct the full ostt args list. Global flags (-c, -o, -p) are
@@ -579,13 +643,17 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 full_args.insert(0, out.clone());
                 full_args.insert(0, "-o".to_string());
             }
-            commands::handle_launch(full_args).await?;
+            if let Some(ref model) = cli.model {
+                full_args.insert(0, model.clone());
+                full_args.insert(0, "-m".to_string());
+            }
+            commands::handle_launch(&config_data, full_args).await?;
         }
         Some(Commands::Daemon { command }) => match command {
-            DaemonCommand::Start => commands::daemon::handle_daemon_start().await?,
+            DaemonCommand::Start => commands::daemon::handle_daemon_start(&config_data).await?,
             DaemonCommand::Stop => commands::daemon::handle_daemon_stop().await?,
-            DaemonCommand::Restart => commands::daemon::handle_daemon_restart().await?,
-            DaemonCommand::Status => commands::daemon::handle_daemon_status().await?,
+            DaemonCommand::Restart => commands::daemon::handle_daemon_restart(&config_data).await?,
+            DaemonCommand::Status => commands::daemon::handle_daemon_status(&config_data).await?,
             DaemonCommand::Install => commands::daemon::handle_daemon_install()?,
             DaemonCommand::Uninstall => commands::daemon::handle_daemon_uninstall()?,
             DaemonCommand::Run { .. } => {
@@ -630,5 +698,57 @@ fn completion_filename(shell: Shell) -> String {
         Shell::Fish => "ostt.fish".to_string(),
         Shell::PowerShell => "ostt.ps1".to_string(),
         _ => "ostt".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_accepts_model_override_for_default_record() {
+        let cli = Cli::try_parse_from(["ostt", "-m", "deepgram/nova-3"]).expect("parse cli");
+        assert_eq!(cli.model.as_deref(), Some("deepgram/nova-3"));
+        assert!(cli.command.is_none());
+    }
+
+    #[test]
+    fn cli_accepts_model_override_for_transcribe() {
+        let cli = Cli::try_parse_from([
+            "ostt",
+            "transcribe",
+            "audio.ogg",
+            "-m",
+            "berget/openai/whisper-large-v3",
+        ])
+        .expect("parse cli");
+
+        match cli.command {
+            Some(Commands::Transcribe { model, .. }) => {
+                assert_eq!(model.as_deref(), Some("berget/openai/whisper-large-v3"));
+            }
+            _ => panic!("expected transcribe command"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_model_override_for_retry() {
+        let cli = Cli::try_parse_from(["ostt", "retry", "-m", "groq/whisper-large-v3"])
+            .expect("parse cli");
+
+        match cli.command {
+            Some(Commands::Retry { model, .. }) => {
+                assert_eq!(model.as_deref(), Some("groq/whisper-large-v3"));
+            }
+            _ => panic!("expected retry command"),
+        }
+    }
+
+    #[test]
+    fn cli_accepts_model_override_for_launch() {
+        let cli = Cli::try_parse_from(["ostt", "launch", "-m", "deepgram/nova-3", "-c"])
+            .expect("parse cli");
+        assert_eq!(cli.model.as_deref(), Some("deepgram/nova-3"));
+        assert!(cli.clipboard);
     }
 }

@@ -13,9 +13,6 @@
 # To see available devices, run: ostt list-devices
 device = "default"
 
-# Sample rate in Hz (16000 recommended for speech recognition)
-sample_rate = 16000
-
 # Peak volume threshold for red indicator (0-100, percentage of reference level)
 # Default 90 means warn at 90% of reference_level_db (10% headroom before clipping)
 peak_volume_threshold = 90
