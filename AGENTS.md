@@ -64,3 +64,5 @@ Use the minimum text needed to convey the message.
 Do not write essays about reasoning unless necessary to guide the work.
 Be brief with users and developers without omitting important details.
 
+## Project Notes
+The AUR package repository is checked out at sibling path `../aur-ostt`.
