@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.16 - 2026-06-01
+
 ### Added
 
 - Added per-run transcription model selection with `-m, --model <PROVIDER/MODEL>` for `ostt`, `ostt record`, `ostt transcribe`, `ostt retry`, and `ostt launch`. The override applies only to the current invocation and does not change the saved default model.
