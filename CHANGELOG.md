@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added per-run transcription model selection with `-m, --model <PROVIDER/MODEL>` for `ostt`, `ostt record`, `ostt transcribe`, `ostt retry`, and `ostt launch`. The override applies only to the current invocation and does not change the saved default model.
+
+### Changed
+
+- Cloud transcription models now use provider/model identities such as `deepgram/nova-3`, `deepinfra/openai/whisper-large-v3`, and `berget/KBLab/kb-whisper-large`, replacing older OSTT-invented model IDs.
+- Local model UI and error messages now show full public IDs such as `local/turbo`.
+
+### Removed
+
+- Removed the misleading `audio.sample_rate` configuration setting. Recording now uses the input device sample rate, while local transcription compatibility is controlled by `audio.output_format = "pcm_s16le -ar 16000"`.
+
 ## 0.0.15 - 2026-05-27
 
 ### Fixed
