@@ -7,12 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## 0.0.16 - 2026-06-01
-
 ### Added
 
-- Added per-run transcription model selection with `-m, --model <PROVIDER/MODEL>` for `ostt`, `ostt record`, `ostt transcribe`, `ostt retry`, and `ostt launch`. The override applies only to the current invocation and does not change the saved default model.
-- Added scriptable CLI actions for models, keywords, auth, history, config helpers, logs, and local model download/removal.
 - Added per-run model option overrides with repeatable `--mo key=value`, validated against the selected provider/model option schema for supported transcription providers.
 - Added `ostt model options [PROVIDER/MODEL] --format table|json` to list supported model option keys for scripting.
 - Added per-model local Whisper options under `[model_options."local/<model>"]`, using the same keys as `[providers.local]`.
@@ -25,16 +21,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Cloud transcription models now use provider/model identities such as `deepgram/nova-3`, `deepinfra/openai/whisper-large-v3`, and `berget/KBLab/kb-whisper-large`, replacing older OSTT-invented model IDs.
 - Transcription request options are now model-scoped under `[model_options."provider/model"]` instead of provider-scoped settings under `[providers.*]`.
-- Local model UI and error messages now show full public IDs such as `local/turbo`.
 - `openai/gpt-4o-transcribe` now honors `--mo prompt=...` and saved `ostt keyword` terms as prompt context.
-- Cleaned up command syntax: `ostt keyword` replaces `ostt keywords`, `ostt config list-devices` replaces `ostt list-devices`, `ostt process list` replaces `ostt process --list`, and `ostt completions install <shell>` replaces `ostt completions <shell> --install`.
-- Record-only options no longer appear in unrelated management command help.
 
 ### Removed
 
 - Removed the misleading `audio.sample_rate` configuration setting. Recording now uses the input device sample rate, while local transcription compatibility is controlled by `audio.output_format = "pcm_s16le -ar 16000"`.
+
+## 0.0.16 - 2026-06-01
+
+### Added
+
+- Added per-run transcription model selection with `-m, --model <PROVIDER/MODEL>` for `ostt`, `ostt record`, `ostt transcribe`, `ostt retry`, and `ostt launch`. The override applies only to the current invocation and does not change the saved default model.
+- Added scriptable CLI actions for models, keywords, auth, history, config helpers, logs, and local model download/removal.
+
+### Changed
+
+- Cloud transcription models now use provider/model identities such as `deepgram/nova-3`, `deepinfra/openai/whisper-large-v3`, and `berget/KBLab/kb-whisper-large`, replacing older OSTT-invented model IDs.
+- Local model UI and error messages now show full public IDs such as `local/turbo`.
+- Cleaned up command syntax: `ostt keyword` replaces `ostt keywords`, `ostt config list-devices` replaces `ostt list-devices`, `ostt process list` replaces `ostt process --list`, and `ostt completions install <shell>` replaces `ostt completions <shell> --install`.
+- Record-only options no longer appear in unrelated management command help.
 
 ## 0.0.15 - 2026-05-27
 
