@@ -30,7 +30,7 @@ pub async fn handle_record(
     output_file: Option<String>,
     process: Option<String>,
     model_override: Option<SelectedModel>,
-    model_option_overrides: &[String],
+    param_overrides: &[String],
 ) -> anyhow::Result<()> {
     tracing::info!("=== ostt Audio Recorder Started ===");
     tracing::info!(
@@ -66,7 +66,8 @@ pub async fn handle_record(
     // Once recording has stopped, external triggers should no longer target this process.
     drop(active_recording_guard);
 
-    let Some(filepath) = storage::save_recording(&mut audio_recorder, &config.audio.output_format)
+    let output_format = resolve_recording_output_format(config, model_override.as_ref());
+    let Some(filepath) = storage::save_recording(&mut audio_recorder, &output_format)
         .context("failed to save recording")?
     else {
         return finish_recording_without_output(&mut tui);
@@ -76,7 +77,7 @@ pub async fn handle_record(
     recording_history::prune_old_recordings();
 
     let transcription_context =
-        crate::transcription::build_context(config, model_override, model_option_overrides)
+        crate::transcription::build_context(config, model_override, param_overrides)
             .context("failed to build transcription context")?;
     let model_id = transcription_context.selected_model.model_id.clone();
     let filepath_str = filepath.to_string_lossy().to_string();
@@ -137,6 +138,29 @@ pub async fn handle_record(
             Ok(())
         }
     }
+}
+
+fn resolve_recording_output_format(
+    config: &OsttConfig,
+    model_override: Option<&SelectedModel>,
+) -> String {
+    let selected_model = model_override.cloned().or_else(|| {
+        match (
+            config.transcription.provider.as_ref(),
+            config.transcription.model.as_ref(),
+        ) {
+            (Some(provider_id), Some(model_id)) => Some(SelectedModel {
+                provider_id: provider_id.clone(),
+                model_id: model_id.clone(),
+            }),
+            _ => None,
+        }
+    });
+
+    selected_model
+        .as_ref()
+        .map(|selected_model| crate::config::resolve_output_format(config, selected_model))
+        .unwrap_or_else(|| config.audio.output_format.clone())
 }
 
 fn finish_recording_without_output(tui: &mut RecordingTui) -> anyhow::Result<()> {

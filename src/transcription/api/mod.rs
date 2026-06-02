@@ -19,7 +19,7 @@ use std::path::Path;
 
 use super::model::{ModelOptionSchema, ModelSpec};
 use super::provider::TranscriptionProvider;
-use crate::config::file::{LocalTranscriptionConfig, ModelOptionValue, ProvidersConfig};
+use crate::config::file::{LocalTranscriptionConfig, ModelOptionValue};
 use indexmap::IndexMap;
 use std::ops::RangeInclusive;
 
@@ -36,10 +36,8 @@ pub struct TranscriptionConfig {
     pub api_key: String,
     /// Keywords to improve transcription accuracy
     pub keywords: Vec<String>,
-    /// Provider-specific configurations
-    pub providers: ProvidersConfig,
-    /// Validated request options for the selected model
-    pub model_options: IndexMap<String, ModelOptionValue>,
+    /// Validated request params for the selected model
+    pub params: IndexMap<String, ModelOptionValue>,
 }
 
 impl TranscriptionConfig {
@@ -50,8 +48,7 @@ impl TranscriptionConfig {
         endpoint: &'static str,
         api_key: String,
         keywords: Vec<String>,
-        providers: ProvidersConfig,
-        model_options: IndexMap<String, ModelOptionValue>,
+        params: IndexMap<String, ModelOptionValue>,
     ) -> Self {
         Self {
             provider,
@@ -59,8 +56,7 @@ impl TranscriptionConfig {
             endpoint,
             api_key,
             keywords,
-            providers,
-            model_options,
+            params,
         }
     }
 
@@ -68,45 +64,43 @@ impl TranscriptionConfig {
     pub fn new_local(
         model_id: String,
         keywords: Vec<String>,
-        providers: ProvidersConfig,
-        model_options: IndexMap<String, ModelOptionValue>,
+        params: IndexMap<String, ModelOptionValue>,
     ) -> Self {
         Self {
-            provider: TranscriptionProvider::Local,
+            provider: TranscriptionProvider::Whisper,
             model_id,
             endpoint: "",
             api_key: String::new(),
             keywords,
-            providers,
-            model_options,
+            params,
         }
     }
 
-    /// Returns the local-specific config only for local transcription requests.
+    /// Returns the built-in whisper defaults only for whisper transcription requests.
     pub fn local_config(&self) -> Option<&LocalTranscriptionConfig> {
-        if self.provider == TranscriptionProvider::Local {
-            Some(&self.providers.local)
+        if self.provider == TranscriptionProvider::Whisper {
+            None
         } else {
             None
         }
     }
 
     pub fn option_bool(&self, name: &str) -> Option<bool> {
-        match self.model_options.get(name) {
+        match self.params.get(name) {
             Some(ModelOptionValue::Bool(value)) => Some(*value),
             _ => None,
         }
     }
 
     pub fn option_string(&self, name: &str) -> Option<&str> {
-        match self.model_options.get(name) {
+        match self.params.get(name) {
             Some(ModelOptionValue::String(value)) => Some(value),
             _ => None,
         }
     }
 
     pub fn option_number(&self, name: &str) -> Option<f64> {
-        match self.model_options.get(name) {
+        match self.params.get(name) {
             Some(ModelOptionValue::Number(value)) => Some(*value),
             Some(ModelOptionValue::Integer(value)) => Some(*value as f64),
             _ => None,
@@ -114,14 +108,14 @@ impl TranscriptionConfig {
     }
 
     pub fn option_integer(&self, name: &str) -> Option<i64> {
-        match self.model_options.get(name) {
+        match self.params.get(name) {
             Some(ModelOptionValue::Integer(value)) => Some(*value),
             _ => None,
         }
     }
 
     pub fn option_string_list(&self, name: &str) -> Option<&[String]> {
-        match self.model_options.get(name) {
+        match self.params.get(name) {
             Some(ModelOptionValue::StringList(value)) => Some(value),
             _ => None,
         }
@@ -160,7 +154,7 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::AssemblyAI => assemblyai::transcribe(config, audio_path).await,
         TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
         TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
-        TranscriptionProvider::Local => local::transcribe(config, audio_path).await,
+        TranscriptionProvider::Whisper => local::transcribe(config, audio_path).await,
         TranscriptionProvider::Mistral => mistral::transcribe(config, audio_path).await,
     }?;
 
@@ -177,12 +171,12 @@ pub(crate) fn option_schema(provider_id: &str, model_id: &str) -> Option<ModelOp
         "berget" => berget::option_schema(model_id),
         "elevenlabs" => elevenlabs::option_schema(model_id),
         "mistral" => mistral::option_schema(model_id),
-        "local" => local::option_schema(model_id),
+        "whisper" => local::option_schema(model_id),
         _ => None,
     }
 }
 
-pub(crate) fn validate_model_options(
+pub(crate) fn validate_params(
     provider_id: &str,
     full_model_id: &str,
     options: &IndexMap<String, ModelOptionValue>,
@@ -195,7 +189,7 @@ pub(crate) fn validate_model_options(
         "berget" => berget::validate_options(full_model_id, options),
         "elevenlabs" => elevenlabs::validate_options(full_model_id, options),
         "mistral" => mistral::validate_options(full_model_id, options),
-        "local" => local::validate_options(full_model_id, options),
+        "whisper" => local::validate_options(full_model_id, options),
         _ => Ok(()),
     }
 }
@@ -212,7 +206,7 @@ pub(super) fn validate_string_value(
 
     if !allowed.contains(&value.as_str()) {
         anyhow::bail!(
-            "Invalid value for option '{}' in '{}'. Expected one of: {}.",
+            "Invalid value for param '{}' in '{}'. Expected one of: {}.",
             option_name,
             full_model_id,
             allowed.join(", ")
@@ -235,7 +229,7 @@ pub(super) fn validate_string_list_values(
     for value in values {
         if !allowed.contains(&value.as_str()) {
             anyhow::bail!(
-                "Invalid value for option '{}' in '{}'. Expected one of: {}.",
+                "Invalid value for param '{}' in '{}'. Expected one of: {}.",
                 option_name,
                 full_model_id,
                 allowed.join(", ")
@@ -255,7 +249,7 @@ pub(super) fn validate_integer_range(
     if let Some(ModelOptionValue::Integer(value)) = options.get(option_name) {
         if !range.contains(value) {
             anyhow::bail!(
-                "Invalid value for option '{}' in '{}'. Expected {}-{}.",
+                "Invalid value for param '{}' in '{}'. Expected {}-{}.",
                 option_name,
                 full_model_id,
                 range.start(),
@@ -281,7 +275,7 @@ pub(super) fn validate_number_range(
 
     if !range.contains(&value) {
         anyhow::bail!(
-            "Invalid value for option '{}' in '{}'. Expected {}-{}.",
+            "Invalid value for param '{}' in '{}'. Expected {}-{}.",
             option_name,
             full_model_id,
             range.start(),
@@ -306,7 +300,7 @@ pub(super) fn validate_number_min(
 
     if value < min {
         anyhow::bail!(
-            "Invalid value for option '{}' in '{}'. Expected >= {}.",
+            "Invalid value for param '{}' in '{}'. Expected >= {}.",
             option_name,
             full_model_id,
             min

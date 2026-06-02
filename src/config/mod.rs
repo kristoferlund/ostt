@@ -14,8 +14,9 @@ pub use file::{
     ProcessConfig,
 };
 pub use file::{
-    AudioConfig, ModelOptionValue, ModelOptionsConfig, OsttConfig, PopupConfig, ProvidersConfig,
-    TranscriptionSelectionConfig, VisualizationType,
+    AudioConfig, ModelOptionValue, OsttConfig, ParamsConfig, PopupConfig, ProviderConfig,
+    ProviderConfigs, ProviderModelConfig, ProviderSettings, TranscriptionSelectionConfig,
+    VisualizationType,
 };
 pub use secrets::{
     clear_api_key, clear_selected_model, get_api_key, get_authorized_providers, get_selected_model,
@@ -23,6 +24,4 @@ pub use secrets::{
     SelectedModel,
 };
 
-pub use file::{
-    ensure_local_transcription_audio_config, is_local_transcription_audio_compatible, save_config,
-};
+pub use file::{is_local_transcription_audio_compatible, resolve_output_format, save_config};

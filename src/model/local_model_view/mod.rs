@@ -1,6 +1,5 @@
 pub(crate) mod custom_model_details_dialog;
 pub(crate) mod custom_model_url_input_dialog;
-pub(crate) mod local_model_audio_config_confirmation_dialog;
 pub(crate) mod local_model_delete_confirmation_dialog;
 pub(crate) mod local_model_download_confirmation_dialog;
 pub(crate) mod local_model_download_progress_dialog;
@@ -32,7 +31,6 @@ use crate::ui::{render_error_dialog, render_toast, DialogAction, Toast};
 
 use custom_model_details_dialog::CustomModelDetailsDialog;
 use custom_model_url_input_dialog::CustomModelUrlInputDialog;
-use local_model_audio_config_confirmation_dialog::LocalModelAudioConfigConfirmationDialog;
 use local_model_delete_confirmation_dialog::LocalModelDeleteConfirmationDialog;
 use local_model_download_confirmation_dialog::LocalModelDownloadConfirmationDialog;
 use local_model_download_progress_dialog::LocalModelDownloadProgressDialog;
@@ -135,13 +133,6 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
             LocalModelListView::render(frame, tui);
             LocalModelDownloadConfirmationDialog::render(frame, entry, *selected_action);
         }
-        LocalModelsMode::ConfirmAudioConfig {
-            entry,
-            selected_action,
-        } => {
-            LocalModelListView::render(frame, tui);
-            LocalModelAudioConfigConfirmationDialog::render(frame, entry, *selected_action);
-        }
         LocalModelsMode::CustomModelInput {
             input,
             selected_action,
@@ -199,7 +190,7 @@ fn build_local_model_entries(
         .map(|entry| {
             let is_downloaded = model_destination(entry).exists();
             let is_active = selected_model
-                .map(|selected| selected.provider_id == "local" && selected.model_id == entry.id)
+                .map(|selected| selected.provider_id == "whisper" && selected.model_id == entry.id)
                 .unwrap_or(false);
             let is_daemon_loaded = daemon_model_id == Some(entry.id.as_str());
 
@@ -357,17 +348,6 @@ async fn handle_key(
             start_confirmed_download(tui, running_download, &entry);
         }
         (
-            LocalModelsMode::ConfirmAudioConfig { .. },
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
-        ) => tui.back_to_browse(),
-        (LocalModelsMode::ConfirmAudioConfig { entry, .. }, KeyCode::Enter) => {
-            update_audio_config_and_activate(tui, registry, &entry).await?;
-        }
-        (
-            LocalModelsMode::ConfirmAudioConfig { entry, .. },
-            KeyCode::Char('y') | KeyCode::Char('Y'),
-        ) => update_audio_config_and_activate(tui, registry, &entry).await?,
-        (
             LocalModelsMode::ConfirmDelete { .. },
             KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
         ) => tui.back_to_browse(),
@@ -405,19 +385,6 @@ async fn handle_selected_entry(
         return Ok(());
     }
 
-    let config = config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
-    if !config::is_local_transcription_audio_compatible(&config.audio) {
-        tracing::debug!(
-            "Confirming audio config update before activating local model '{}'",
-            entry.id
-        );
-        tui.mode = LocalModelsMode::ConfirmAudioConfig {
-            entry,
-            selected_action: DialogAction::Ok,
-        };
-        return Ok(());
-    }
-
     match activate_entry(&entry).await {
         Ok(()) => {
             tracing::info!("Activated local model '{}'", entry.id);
@@ -440,40 +407,8 @@ async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     if !path.exists() {
         anyhow::bail!("Download first with [d]");
     }
-    config::save_selected_model("local", &entry.id)?;
+    config::save_selected_model("whisper", &entry.id)?;
     reload_daemon_if_running(&entry.id).await?;
-    Ok(())
-}
-
-async fn update_audio_config_and_activate(
-    tui: &mut LocalModelsTui,
-    registry: &[RegistryEntry],
-    entry: &LocalModelEntry,
-) -> anyhow::Result<()> {
-    match async {
-        config::ensure_local_transcription_audio_config()?;
-        activate_entry(entry).await
-    }
-    .await
-    {
-        Ok(()) => {
-            tracing::info!(
-                "Updated audio config and activated local model '{}'",
-                entry.id
-            );
-            tui.back_to_browse();
-            tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
-            tui.refresh(&load_state(), registry)?;
-        }
-        Err(error) => {
-            tracing::error!(
-                "Failed to update audio config for local model '{}': {}",
-                entry.id,
-                error
-            );
-            tui.toast = Some(Toast::error(error.to_string()));
-        }
-    }
     Ok(())
 }
 
@@ -720,7 +655,7 @@ fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     let path = model_destination(&registry_entry_from_model(entry));
     std::fs::remove_file(&path)?;
     if config::get_selected_model_entry()?
-        .is_some_and(|selected| selected.provider_id == "local" && selected.model_id == entry.id)
+        .is_some_and(|selected| selected.provider_id == "whisper" && selected.model_id == entry.id)
     {
         config::clear_selected_model()?;
     }
@@ -874,7 +809,7 @@ mod tests {
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             fs::write(model_files_dir().join("turbo.bin"), [1, 2, 3]).expect("write model");
             let selected = SelectedModel {
-                provider_id: "local".to_string(),
+                provider_id: "whisper".to_string(),
                 model_id: "turbo".to_string(),
             };
 

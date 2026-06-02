@@ -12,7 +12,7 @@ pub(crate) struct TranscriptionContext {
 pub(crate) fn build_context(
     ostt_config: &OsttConfig,
     model_override: Option<SelectedModel>,
-    model_option_overrides: &[String],
+    param_overrides: &[String],
 ) -> anyhow::Result<TranscriptionContext> {
     let selected_model = resolve_selected_model(ostt_config, model_override)?;
     let keywords = crate::keywords::load_keywords()?;
@@ -20,7 +20,7 @@ pub(crate) fn build_context(
         ostt_config,
         &selected_model,
         keywords.clone(),
-        model_option_overrides,
+        param_overrides,
     )?;
 
     Ok(TranscriptionContext {
@@ -56,51 +56,50 @@ fn config_for_selected_model(
     ostt_config: &OsttConfig,
     selected_model: &SelectedModel,
     keywords: Vec<String>,
-    model_option_overrides: &[String],
+    param_overrides: &[String],
 ) -> anyhow::Result<TranscriptionConfig> {
     let api_key = config::get_api_key(&selected_model.provider_id)?;
-    let full_model_id = format!("{}/{}", selected_model.provider_id, selected_model.model_id);
-    let mut model_options = ostt_config
-        .model_options
-        .get(&full_model_id)
-        .cloned()
+    let mut params = ostt_config
+        .provider_configs
+        .get(&selected_model.provider_id)
+        .map(|provider| provider.params.clone())
         .unwrap_or_default();
-    model_options.extend(parse_model_option_overrides(
-        selected_model,
-        model_option_overrides,
-    )?);
-    let mut options_to_validate = config::ModelOptionsConfig::new();
-    options_to_validate.insert(full_model_id, model_options.clone());
-    config::file::validate_model_options(&options_to_validate)?;
+    if let Some(model_config) = ostt_config
+        .provider_configs
+        .get(&selected_model.provider_id)
+        .and_then(|provider| provider.models.get(&selected_model.model_id))
+    {
+        params.extend(model_config.params.clone());
+    }
+    params.extend(parse_param_overrides(selected_model, param_overrides)?);
+    config::file::validate_params_for_model(
+        &selected_model.provider_id,
+        &selected_model.model_id,
+        &params,
+    )?;
 
-    super::config_for_selected_model(
-        selected_model,
-        api_key,
-        keywords,
-        ostt_config.providers.clone(),
-        model_options,
-    )
+    super::config_for_selected_model(selected_model, api_key, keywords, params)
 }
 
-fn parse_model_option_overrides(
+fn parse_param_overrides(
     selected_model: &SelectedModel,
     overrides: &[String],
 ) -> anyhow::Result<IndexMap<String, config::ModelOptionValue>> {
     let schema = super::api::option_schema(&selected_model.provider_id, &selected_model.model_id)
-        .ok_or_else(|| anyhow::anyhow!("No model options are supported for this model"))?;
+        .ok_or_else(|| anyhow::anyhow!("No params are supported for this model"))?;
     let full_model_id = format!("{}/{}", selected_model.provider_id, selected_model.model_id);
     let mut parsed = IndexMap::new();
 
     for override_value in overrides {
-        let (name, raw_value) = override_value
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("Invalid --mo '{}'. Use key=value.", override_value))?;
+        let (name, raw_value) = override_value.split_once('=').ok_or_else(|| {
+            anyhow::anyhow!("Invalid --param '{}'. Use key=value.", override_value)
+        })?;
         if parsed.contains_key(name) {
-            anyhow::bail!("Duplicate --mo option '{}'.", name);
+            anyhow::bail!("Duplicate --param '{}'.", name);
         }
         let Some(spec) = schema.option(name) else {
             anyhow::bail!(
-                "Invalid option '{}' for '{}'. Supported options: {}.",
+                "Invalid param '{}' for '{}'. Supported params: {}.",
                 name,
                 full_model_id,
                 schema.option_names().join(", ")
@@ -187,68 +186,68 @@ mod tests {
     }
 
     #[test]
-    fn model_option_overrides_reject_duplicate_keys() {
+    fn param_overrides_reject_duplicate_keys() {
         let model = selected_model("deepgram", "nova-3");
-        let err = parse_model_option_overrides(
+        let err = parse_param_overrides(
             &model,
             &["language=sv".to_string(), "language=en".to_string()],
         )
         .unwrap_err()
         .to_string();
 
-        assert!(err.contains("Duplicate --mo option 'language'"));
+        assert!(err.contains("Duplicate --param 'language'"));
     }
 
     #[test]
-    fn model_option_overrides_reject_missing_equals() {
+    fn param_overrides_reject_missing_equals() {
         let model = selected_model("deepgram", "nova-3");
-        let err = parse_model_option_overrides(&model, &["diarize".to_string()])
+        let err = parse_param_overrides(&model, &["diarize".to_string()])
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("Invalid --mo 'diarize'"));
+        assert!(err.contains("Invalid --param 'diarize'"));
         assert!(err.contains("key=value"));
     }
 
     #[test]
-    fn model_option_overrides_reject_unknown_option() {
+    fn param_overrides_reject_unknown_param() {
         let model = selected_model("openai", "gpt-4o-transcribe");
-        let err = parse_model_option_overrides(&model, &["smart_format=true".to_string()])
+        let err = parse_param_overrides(&model, &["smart_format=true".to_string()])
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("Invalid option 'smart_format'"));
-        assert!(err.contains("Supported options"));
+        assert!(err.contains("Invalid param 'smart_format'"));
+        assert!(err.contains("Supported params"));
     }
 
     #[test]
-    fn model_option_overrides_reject_invalid_bool_and_number_values() {
+    fn param_overrides_reject_invalid_bool_and_number_values() {
         let bool_model = selected_model("deepgram", "nova-3");
-        let err = parse_model_option_overrides(&bool_model, &["diarize=yes".to_string()])
+        let err = parse_param_overrides(&bool_model, &["diarize=yes".to_string()])
             .unwrap_err()
             .to_string();
         assert!(err.contains("provided string was not `true` or `false`"));
 
         let number_model = selected_model("openai", "gpt-4o-transcribe");
-        let err = parse_model_option_overrides(&number_model, &["temperature=hot".to_string()])
+        let err = parse_param_overrides(&number_model, &["temperature=hot".to_string()])
             .unwrap_err()
             .to_string();
         assert!(err.contains("invalid float literal"));
     }
 
     #[test]
-    fn model_option_overrides_reject_empty_string_for_string_typed_option() {
+    fn param_overrides_reject_empty_string_for_string_typed_option() {
         let model = selected_model("openai", "gpt-4o-transcribe");
-        let err = parse_model_option_overrides(&model, &["prompt=".to_string()])
+        let err = parse_param_overrides(&model, &["prompt=".to_string()])
             .unwrap_err()
             .to_string();
         assert!(err.contains("must not be empty"));
     }
 
     #[test]
-    fn model_option_overrides_parse_local_whisper_options() {
-        let model = selected_model("local", "turbo");
-        let options = parse_model_option_overrides(
+    fn param_overrides_parse_whisper_params() {
+        let model = selected_model("whisper", "turbo");
+        let options = parse_param_overrides(
             &model,
             &[
                 "language=sv".to_string(),
@@ -273,10 +272,10 @@ mod tests {
     }
 
     #[test]
-    fn model_option_overrides_parse_bool_or_string_list_bool() {
+    fn param_overrides_parse_bool_or_string_list_bool() {
         let model = selected_model("deepgram", "nova-3");
         let options =
-            parse_model_option_overrides(&model, &["detect_language=false".to_string()]).unwrap();
+            parse_param_overrides(&model, &["detect_language=false".to_string()]).unwrap();
 
         assert_eq!(
             options.get("detect_language"),
@@ -285,10 +284,9 @@ mod tests {
     }
 
     #[test]
-    fn model_option_overrides_parse_string_lists() {
+    fn param_overrides_parse_string_lists() {
         let model = selected_model("deepgram", "nova-3");
-        let options =
-            parse_model_option_overrides(&model, &["keyterm=OSTT,whisper".to_string()]).unwrap();
+        let options = parse_param_overrides(&model, &["keyterm=OSTT,whisper".to_string()]).unwrap();
 
         assert_eq!(
             options.get("keyterm"),
@@ -300,10 +298,10 @@ mod tests {
     }
 
     #[test]
-    fn model_option_overrides_parse_bool_or_string_lists() {
+    fn param_overrides_parse_bool_or_string_lists() {
         let model = selected_model("deepgram", "nova-3");
         let options =
-            parse_model_option_overrides(&model, &["detect_language=sv,en".to_string()]).unwrap();
+            parse_param_overrides(&model, &["detect_language=sv,en".to_string()]).unwrap();
 
         assert_eq!(
             options.get("detect_language"),

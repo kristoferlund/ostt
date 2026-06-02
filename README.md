@@ -37,7 +37,7 @@ OSTT is built for people who treat the terminal as a normal place for voice inpu
 
 - **Linux-first voice input** - Global hotkey setup for Omarchy/Hyprland, GNOME, KDE, and other Linux desktops, with macOS support too.
 - **Provider choice** - Bring your own API key and switch between OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, Mistral, and local Whisper-compatible models.
-- **Model-scoped options** - Tune supported provider/model request options persistently or per run with `--mo key=value`.
+- **Model-scoped params** - Tune supported provider/model request params persistently or per run with `--param key=value`.
 - **Local transcription models** - Download curated local models or add custom Hugging Face/direct model files for offline transcription.
 - **Terminal-native workflow** - Use stdout, clipboard, files, aliases, shell completions, logs, and pipes.
 - **Scriptable post-processing** - Transform transcripts with AI prompts or bash commands using `ostt -p` and `ostt process`.
@@ -79,7 +79,7 @@ ostt model          # Choose cloud or local transcription model
 ostt                # Record, transcribe, print to stdout
 ostt -c             # Record, transcribe, copy to clipboard
 ostt -m deepgram/nova-3 -c
-ostt -m local/turbo --mo language=sv -c
+ostt -m whisper/turbo --param language=sv -c
 ostt launch -c      # Popup workflow for global hotkeys
 ```
 
@@ -107,13 +107,13 @@ ostt                         # Record audio, print transcription
 ostt -c                      # Record audio, copy transcription
 ostt -o notes.txt            # Record audio, write transcription to file
 ostt -m openai/whisper-1     # Override model for this run
-ostt --mo language=sv -c     # Override a model option for this run
+ostt --param language=sv -c  # Override a transcription param for this run
 ostt launch -c               # Open popup recorder
 ostt transcribe file.mp3 -m deepinfra/openai/whisper-large-v3
 ostt retry 2 -m groq/whisper-large-v3 -c
 ostt replay                  # Play most recent recording
 ostt model                   # Choose cloud or local transcription model
-ostt model options local/turbo   # List supported options for a model
+ostt model params whisper/turbo  # List supported params for a model
 ostt history                 # Browse transcription history
 ostt keyword                 # Manage transcription keywords
 ostt config                  # Open config file
@@ -135,7 +135,9 @@ Run `ostt auth` to select your provider/model and save credentials securely.
 
 Run `ostt model` to switch between authenticated cloud models and local models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs.
 
-Per-model options are configured under `[model_options."provider/model"]` or passed per run with `--mo key=value`. See [Providers and Models](https://ostt.ai/reference/providers) and [Configuration](https://ostt.ai/guide/configuration) for supported options.
+Per-provider and per-model params are configured under `[provider.params]` and `[provider."model".params]`, or passed per run with `--param key=value`. See [Providers and Models](https://ostt.ai/reference/providers) and [Configuration](https://ostt.ai/guide/configuration) for supported params.
+
+Deprecated config shapes such as `[providers]`, `[model_options]`, `[audio].sample_rate`, `[[process.actions]]`, and `provider = "local"` fail loudly. Update local model IDs from `local/<model>` to `whisper/<model>`.
 
 ## Platform Setup
 

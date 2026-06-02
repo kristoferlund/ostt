@@ -45,7 +45,7 @@ pub async fn handle_model_list(
         }
     }
 
-    if provider.as_deref().is_none_or(|id| id == "local") {
+    if provider.as_deref().is_none_or(|id| id == "whisper") {
         let state = local_models::load_state();
         let registry = local_models::fetch_registry().await.unwrap_or_default();
         for entry in registry.iter().chain(state.custom_models.iter()) {
@@ -54,12 +54,12 @@ pub async fn handle_model_list(
                 continue;
             }
             rows.push(ModelListRow {
-                provider: "local".to_string(),
+                provider: "whisper".to_string(),
                 model: entry.id.clone(),
                 name: entry.name.clone(),
                 installed: Some(is_installed),
                 active: selected.as_ref().is_some_and(|selected| {
-                    selected.provider_id == "local" && selected.model_id == entry.id
+                    selected.provider_id == "whisper" && selected.model_id == entry.id
                 }),
             });
         }
@@ -106,7 +106,7 @@ pub fn handle_model_current() -> anyhow::Result<()> {
     Ok(())
 }
 
-pub fn handle_model_options(model: Option<String>, json: bool) -> anyhow::Result<()> {
+pub fn handle_model_params(model: Option<String>, json: bool) -> anyhow::Result<()> {
     let selected = match model {
         Some(model) => crate::config::parse_provider_model(&model)?,
         None => crate::config::get_selected_model_entry()?.ok_or_else(|| {
@@ -115,7 +115,7 @@ pub fn handle_model_options(model: Option<String>, json: bool) -> anyhow::Result
     };
     let full_model_id = format!("{}/{}", selected.provider_id, selected.model_id);
     let schema = transcription::api::option_schema(&selected.provider_id, &selected.model_id)
-        .ok_or_else(|| anyhow::anyhow!("No model options are supported for {full_model_id}."))?;
+        .ok_or_else(|| anyhow::anyhow!("No params are supported for {full_model_id}."))?;
 
     if json {
         let options: Vec<_> = schema
@@ -133,7 +133,7 @@ pub fn handle_model_options(model: Option<String>, json: bool) -> anyhow::Result
             serde_json::to_string_pretty(&serde_json::json!({
                 "provider": selected.provider_id,
                 "model": selected.model_id,
-                "options": options,
+                    "params": options,
             }))?
         );
         return Ok(());
@@ -148,10 +148,10 @@ pub fn handle_model_options(model: Option<String>, json: bool) -> anyhow::Result
 
 pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
     let selected = crate::config::parse_provider_model(&model)?;
-    if selected.provider_id == "local" {
+    if selected.provider_id == "whisper" {
         local_models::activate_model(&selected.model_id)?;
         reload_daemon_if_running(&selected.model_id).await?;
-        println!("Selected local model: local/{}", selected.model_id);
+        println!("Selected whisper model: whisper/{}", selected.model_id);
         return Ok(());
     }
 
@@ -174,11 +174,11 @@ pub async fn handle_model_local_download(model_id: String) -> anyhow::Result<()>
     let entry = find_local_model_entry(&model_id).await?;
     let destination = local_models::model_destination(&entry);
     if destination.exists() {
-        println!("Local model already downloaded: local/{model_id}");
+        println!("Local model already downloaded: whisper/{model_id}");
         return Ok(());
     }
 
-    eprintln!("Downloading local model: local/{model_id}");
+    eprintln!("Downloading local model: whisper/{model_id}");
     local_models::download_model(
         &entry.url,
         &destination,
@@ -190,7 +190,7 @@ pub async fn handle_model_local_download(model_id: String) -> anyhow::Result<()>
     eprintln!();
     local_models::validate_downloaded_model(&entry)?;
     local_models::mark_downloaded_registry_model(&entry)?;
-    println!("Downloaded local model: local/{model_id}");
+    println!("Downloaded local model: whisper/{model_id}");
     Ok(())
 }
 
@@ -202,7 +202,7 @@ pub async fn handle_model_local_remove(model_id: String) -> anyhow::Result<()> {
     if loaded_model_id.as_deref() == Some(model_id.as_str()) {
         crate::transcription::daemon_client::shutdown_daemon().await?;
     }
-    println!("Removed local model: local/{model_id}");
+    println!("Removed local model: whisper/{model_id}");
     Ok(())
 }
 
@@ -229,7 +229,7 @@ async fn find_local_model_entry(model_id: &str) -> anyhow::Result<local_models::
     registry
         .into_iter()
         .find(|entry| entry.id == model_id)
-        .ok_or_else(|| anyhow::anyhow!("Unknown local model: local/{model_id}"))
+        .ok_or_else(|| anyhow::anyhow!("Unknown local model: whisper/{model_id}"))
 }
 
 async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
