@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replaced public transcription model option terminology with params: use repeatable `--param key=value` and `ostt model params [PROVIDER/MODEL] --format table|json`.
 - Moved persistent transcription params to top-level provider tables: `[provider.params]` for provider defaults and `[provider."model".params]` for model overrides.
 - Renamed the built-in local Whisper provider ID from `local` to `whisper`, so local model IDs use `whisper/<model>`.
+- Local model registry entries now carry `provider_id`, and `ostt model local download/remove` accepts either `MODEL_ID` or `PROVIDER/MODEL`.
 - Local Whisper audio format is now resolved from `[whisper].output_format`, `[whisper."model"].output_format`, or the built-in Whisper default instead of mutating global `[audio].output_format`.
 
 ### Removed

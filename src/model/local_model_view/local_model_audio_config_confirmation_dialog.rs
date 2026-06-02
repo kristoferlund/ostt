@@ -20,7 +20,10 @@ impl LocalModelAudioConfigConfirmationDialog {
             "Update Audio Config",
             vec![
                 Line::from(format!("Activate \"{}\"?", entry.name)),
-                Line::from(format!("ID: {}", full_model_id(&entry.id))),
+                Line::from(format!(
+                    "ID: {}",
+                    full_model_id(&entry.provider_id, &entry.id)
+                )),
                 Line::from(""),
                 Line::from("Local transcription requires WAV audio:"),
                 Line::from("output_format = \"pcm_s16le -ar 16000\""),

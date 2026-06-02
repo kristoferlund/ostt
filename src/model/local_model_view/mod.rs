@@ -190,12 +190,15 @@ fn build_local_model_entries(
         .map(|entry| {
             let is_downloaded = model_destination(entry).exists();
             let is_active = selected_model
-                .map(|selected| selected.provider_id == "whisper" && selected.model_id == entry.id)
+                .map(|selected| {
+                    selected.provider_id == entry.provider_id && selected.model_id == entry.id
+                })
                 .unwrap_or(false);
             let is_daemon_loaded = daemon_model_id == Some(entry.id.as_str());
 
             LocalModelEntry {
                 id: entry.id.clone(),
+                provider_id: entry.provider_id.clone(),
                 name: entry.name.clone(),
                 description: entry.description.clone(),
                 size_mb: entry.size_mb,
@@ -407,7 +410,7 @@ async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     if !path.exists() {
         anyhow::bail!("Download first with [d]");
     }
-    config::save_selected_model("whisper", &entry.id)?;
+    config::save_selected_model(&entry.provider_id, &entry.id)?;
     reload_daemon_if_running(&entry.id).await?;
     Ok(())
 }
@@ -505,6 +508,7 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
 fn initial_download_state(entry: &RegistryEntry, is_custom: bool) -> DownloadState {
     DownloadState {
         model_id: entry.id.clone(),
+        provider_id: entry.provider_id.clone(),
         downloaded_bytes: 0,
         total_bytes: u64::from(entry.size_mb) * 1024 * 1024,
         progress: 0.0,
@@ -654,9 +658,9 @@ fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
 
     let path = model_destination(&registry_entry_from_model(entry));
     std::fs::remove_file(&path)?;
-    if config::get_selected_model_entry()?
-        .is_some_and(|selected| selected.provider_id == "whisper" && selected.model_id == entry.id)
-    {
+    if config::get_selected_model_entry()?.is_some_and(|selected| {
+        selected.provider_id == entry.provider_id && selected.model_id == entry.id
+    }) {
         config::clear_selected_model()?;
     }
     Ok(())
@@ -707,6 +711,7 @@ fn sync_download_progress(tui: &mut LocalModelsTui, running: &RunningDownload) {
 fn registry_entry_from_model(entry: &LocalModelEntry) -> RegistryEntry {
     RegistryEntry {
         id: entry.id.clone(),
+        provider_id: entry.provider_id.clone(),
         name: entry.name.clone(),
         description: entry.description.clone(),
         languages: entry.languages.clone(),
@@ -763,6 +768,7 @@ mod tests {
     fn registry_entry(id: &str) -> RegistryEntry {
         RegistryEntry {
             id: id.to_string(),
+            provider_id: "whisper".to_string(),
             name: format!("{id} model"),
             description: "Test model".to_string(),
             languages: vec!["en".to_string()],
@@ -843,6 +849,7 @@ mod tests {
     fn confirm_delete_only_opens_for_downloaded_models() {
         let mut entries = vec![LocalModelEntry {
             id: "missing".to_string(),
+            provider_id: "whisper".to_string(),
             name: "Missing".to_string(),
             description: String::new(),
             size_mb: 1,
@@ -876,6 +883,7 @@ mod tests {
         let entries = vec![
             LocalModelEntry {
                 id: "a".to_string(),
+                provider_id: "whisper".to_string(),
                 name: "A".to_string(),
                 description: String::new(),
                 size_mb: 1,
@@ -892,6 +900,7 @@ mod tests {
             },
             LocalModelEntry {
                 id: "b".to_string(),
+                provider_id: "whisper".to_string(),
                 name: "B".to_string(),
                 description: String::new(),
                 size_mb: 1,
@@ -923,6 +932,7 @@ mod tests {
         let entries = vec![
             LocalModelEntry {
                 id: "tiny".to_string(),
+                provider_id: "whisper".to_string(),
                 name: "Tiny".to_string(),
                 description: String::new(),
                 size_mb: 1,
@@ -939,6 +949,7 @@ mod tests {
             },
             LocalModelEntry {
                 id: "large".to_string(),
+                provider_id: "whisper".to_string(),
                 name: "Large".to_string(),
                 description: String::new(),
                 size_mb: 1,

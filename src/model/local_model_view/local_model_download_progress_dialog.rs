@@ -27,7 +27,10 @@ impl LocalModelDownloadProgressDialog {
                 state.status.as_str()
             },
             vec![
-                Line::from(format!("Model: {}", full_model_id(&state.model_id))),
+                Line::from(format!(
+                    "Model: {}",
+                    full_model_id(&state.provider_id, &state.model_id)
+                )),
                 if state.is_custom {
                     Line::from(format!("Status: {}", state.status))
                 } else {

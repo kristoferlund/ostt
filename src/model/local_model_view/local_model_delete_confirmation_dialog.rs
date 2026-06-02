@@ -24,7 +24,10 @@ impl LocalModelDeleteConfirmationDialog {
                     entry.name,
                     format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
                 )),
-                Line::from(format!("ID: {}", full_model_id(&entry.id))),
+                Line::from(format!(
+                    "ID: {}",
+                    full_model_id(&entry.provider_id, &entry.id)
+                )),
                 Line::from(""),
                 Line::from("This cannot be undone."),
             ],

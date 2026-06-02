@@ -6,6 +6,7 @@ use tui_input::Input;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LocalModelEntry {
     pub id: String,
+    pub provider_id: String,
     pub name: String,
     pub description: String,
     pub size_mb: u32,
@@ -25,6 +26,7 @@ pub(crate) struct LocalModelEntry {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DownloadState {
     pub model_id: String,
+    pub provider_id: String,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
     pub progress: f64,

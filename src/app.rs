@@ -404,12 +404,12 @@ enum ModelCommand {
 enum LocalModelCommand {
     /// Download a local model
     Download {
-        #[arg(value_name = "MODEL_ID")]
+        #[arg(value_name = "MODEL_ID|PROVIDER/MODEL")]
         model_id: String,
     },
     /// Remove a downloaded local model
     Remove {
-        #[arg(value_name = "MODEL_ID")]
+        #[arg(value_name = "MODEL_ID|PROVIDER/MODEL")]
         model_id: String,
     },
 }
