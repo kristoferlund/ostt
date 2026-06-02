@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.17 - 2026-06-02
+
 ### Added
 
 - Added per-run model option overrides with repeatable `--mo key=value`, validated against the selected provider/model option schema for supported transcription providers.
