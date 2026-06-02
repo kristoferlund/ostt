@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.18 - 2026-06-02
+
 ### Changed
 
 - Replaced public transcription model option terminology with params: use repeatable `--param key=value` and `ostt model params [PROVIDER/MODEL] --format table|json`.
