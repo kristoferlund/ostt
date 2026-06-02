@@ -49,17 +49,23 @@ pub async fn handle_model_list(
         let state = local_models::load_state();
         let registry = local_models::fetch_registry().await.unwrap_or_default();
         for entry in registry.iter().chain(state.custom_models.iter()) {
+            if provider
+                .as_deref()
+                .is_some_and(|id| id != entry.provider_id)
+            {
+                continue;
+            }
             let is_installed = local_models::model_destination(entry).exists();
             if installed && !is_installed {
                 continue;
             }
             rows.push(ModelListRow {
-                provider: "whisper".to_string(),
+                provider: entry.provider_id.clone(),
                 model: entry.id.clone(),
                 name: entry.name.clone(),
                 installed: Some(is_installed),
                 active: selected.as_ref().is_some_and(|selected| {
-                    selected.provider_id == "whisper" && selected.model_id == entry.id
+                    selected.provider_id == entry.provider_id && selected.model_id == entry.id
                 }),
             });
         }
@@ -171,14 +177,16 @@ pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
 }
 
 pub async fn handle_model_local_download(model_id: String) -> anyhow::Result<()> {
-    let entry = find_local_model_entry(&model_id).await?;
+    let requested = parse_local_model_arg(&model_id)?;
+    let entry = find_local_model_entry(&requested).await?;
     let destination = local_models::model_destination(&entry);
+    let full_model_id = format!("{}/{}", entry.provider_id, entry.id);
     if destination.exists() {
-        println!("Local model already downloaded: whisper/{model_id}");
+        println!("Local model already downloaded: {full_model_id}");
         return Ok(());
     }
 
-    eprintln!("Downloading local model: whisper/{model_id}");
+    eprintln!("Downloading local model: {full_model_id}");
     local_models::download_model(
         &entry.url,
         &destination,
@@ -190,19 +198,23 @@ pub async fn handle_model_local_download(model_id: String) -> anyhow::Result<()>
     eprintln!();
     local_models::validate_downloaded_model(&entry)?;
     local_models::mark_downloaded_registry_model(&entry)?;
-    println!("Downloaded local model: whisper/{model_id}");
+    println!("Downloaded local model: {full_model_id}");
     Ok(())
 }
 
 pub async fn handle_model_local_remove(model_id: String) -> anyhow::Result<()> {
+    let requested = parse_local_model_arg(&model_id)?;
     let loaded_model_id = crate::transcription::daemon_client::probe_daemon()
         .await
         .map(|info| info.model_id);
-    local_models::delete_model(&model_id)?;
-    if loaded_model_id.as_deref() == Some(model_id.as_str()) {
+    local_models::delete_model(&requested.model_id)?;
+    if loaded_model_id.as_deref() == Some(requested.model_id.as_str()) {
         crate::transcription::daemon_client::shutdown_daemon().await?;
     }
-    println!("Removed local model: whisper/{model_id}");
+    println!(
+        "Removed local model: {}/{}",
+        requested.provider_id, requested.model_id
+    );
     Ok(())
 }
 
@@ -214,12 +226,37 @@ struct ModelListRow {
     active: bool,
 }
 
-async fn find_local_model_entry(model_id: &str) -> anyhow::Result<local_models::RegistryEntry> {
+struct LocalModelArg {
+    provider_id: String,
+    model_id: String,
+}
+
+fn parse_local_model_arg(value: &str) -> anyhow::Result<LocalModelArg> {
+    if let Some(selected) = value
+        .contains('/')
+        .then(|| crate::config::parse_provider_model(value))
+        .transpose()?
+    {
+        return Ok(LocalModelArg {
+            provider_id: selected.provider_id,
+            model_id: selected.model_id,
+        });
+    }
+
+    Ok(LocalModelArg {
+        provider_id: "whisper".to_string(),
+        model_id: value.to_string(),
+    })
+}
+
+async fn find_local_model_entry(
+    requested: &LocalModelArg,
+) -> anyhow::Result<local_models::RegistryEntry> {
     let state = local_models::load_state();
     if let Some(entry) = state
         .custom_models
         .iter()
-        .find(|entry| entry.id == model_id)
+        .find(|entry| entry.provider_id == requested.provider_id && entry.id == requested.model_id)
         .cloned()
     {
         return Ok(entry);
@@ -228,8 +265,14 @@ async fn find_local_model_entry(model_id: &str) -> anyhow::Result<local_models::
     let registry = local_models::fetch_registry().await?;
     registry
         .into_iter()
-        .find(|entry| entry.id == model_id)
-        .ok_or_else(|| anyhow::anyhow!("Unknown local model: whisper/{model_id}"))
+        .find(|entry| entry.provider_id == requested.provider_id && entry.id == requested.model_id)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown local model: {}/{}",
+                requested.provider_id,
+                requested.model_id
+            )
+        })
 }
 
 async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
@@ -265,5 +308,26 @@ fn format_bytes(bytes: u64) -> String {
         format!("{:.1} GB", mb / 1024.0)
     } else {
         format!("{mb:.0} MB")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_local_model_arg_accepts_short_id() {
+        let parsed = parse_local_model_arg("turbo").unwrap();
+
+        assert_eq!(parsed.provider_id, "whisper");
+        assert_eq!(parsed.model_id, "turbo");
+    }
+
+    #[test]
+    fn parse_local_model_arg_accepts_full_id() {
+        let parsed = parse_local_model_arg("whisper/turbo").unwrap();
+
+        assert_eq!(parsed.provider_id, "whisper");
+        assert_eq!(parsed.model_id, "turbo");
     }
 }

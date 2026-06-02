@@ -32,6 +32,8 @@ pub const REMOTE_REGISTRY_URL: &str =
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {
     pub id: String,
+    #[serde(default = "default_local_provider_id")]
+    pub provider_id: String,
     pub name: String,
     pub description: String,
     pub languages: Vec<String>,
@@ -42,6 +44,10 @@ pub struct RegistryEntry {
     pub category: Option<String>,
     #[serde(default)]
     pub group_id: Option<String>,
+}
+
+fn default_local_provider_id() -> String {
+    "whisper".to_string()
 }
 
 #[derive(Debug, Deserialize)]
@@ -295,6 +301,9 @@ async fn fetch_registry_from_url(url: &str) -> anyhow::Result<Vec<RegistryEntry>
             document.version
         );
     }
+    for entry in &document.models {
+        validate_model_provider(entry)?;
+    }
     Ok(document.models)
 }
 
@@ -457,6 +466,7 @@ async fn resolve_direct_model_file_url(url: Url) -> anyhow::Result<RegistryEntry
     let size_mb = remote_size_mb(url.as_str()).await.unwrap_or(0);
     let entry = RegistryEntry {
         id,
+        provider_id: default_local_provider_id(),
         name: filename.to_string(),
         description: "Custom model file".to_string(),
         languages: Vec::new(),
@@ -548,6 +558,7 @@ async fn resolve_hugging_face_model_page_url_from_api(
     };
     let entry = RegistryEntry {
         id,
+        provider_id: default_local_provider_id(),
         name: repo,
         description: format!("Custom Hugging Face model file {}", file.rfilename),
         languages,
@@ -563,8 +574,20 @@ async fn resolve_hugging_face_model_page_url_from_api(
 }
 
 fn validate_custom_model_id(entry: &RegistryEntry) -> anyhow::Result<()> {
+    validate_model_provider(entry)?;
     if !is_safe_model_id(&entry.id) {
         anyhow::bail!("custom model ID '{}' is not filesystem-safe", entry.id);
+    }
+    Ok(())
+}
+
+fn validate_model_provider(entry: &RegistryEntry) -> anyhow::Result<()> {
+    if entry.provider_id != "whisper" {
+        anyhow::bail!(
+            "local model '{}' uses unsupported provider_id '{}'. Supported local providers: whisper.",
+            entry.id,
+            entry.provider_id
+        );
     }
     Ok(())
 }
@@ -699,10 +722,11 @@ fn find_installed_file_by_id(model_id: &str) -> Result<PathBuf, ModelError> {
 
 pub fn activate_model(model_id: &str) -> anyhow::Result<()> {
     let path = resolve_installed_model_path(model_id)?;
+    let entry = find_model_entry(model_id)?;
     if !path.exists() {
         return Err(ModelError::NotDownloaded(model_id.to_string()).into());
     }
-    config::save_selected_model("whisper", model_id)
+    config::save_selected_model(&entry.provider_id, model_id)
 }
 
 pub fn deactivate_model() -> anyhow::Result<()> {
@@ -710,6 +734,9 @@ pub fn deactivate_model() -> anyhow::Result<()> {
 }
 
 pub fn delete_model(model_id: &str) -> anyhow::Result<()> {
+    let provider_id = find_model_entry(model_id)
+        .ok()
+        .map(|entry| entry.provider_id);
     let file_path = resolve_installed_model_path(model_id)?;
 
     fs::remove_file(&file_path)?;
@@ -721,9 +748,11 @@ pub fn delete_model(model_id: &str) -> anyhow::Result<()> {
         save_state(&state)?;
     }
 
-    if config::get_selected_model_entry()?
-        .is_some_and(|selected| selected.provider_id == "whisper" && selected.model_id == model_id)
-    {
+    if config::get_selected_model_entry()?.is_some_and(|selected| {
+        provider_id.as_deref().is_some_and(|provider_id| {
+            selected.provider_id == provider_id && selected.model_id == model_id
+        })
+    }) {
         config::clear_selected_model()?;
     }
 
@@ -805,6 +834,7 @@ mod tests {
     fn registry_entry(id: &str) -> RegistryEntry {
         RegistryEntry {
             id: id.to_string(),
+            provider_id: default_local_provider_id(),
             name: format!("{id} model"),
             description: format!("{id} model description"),
             languages: vec!["en".to_string()],
@@ -1204,7 +1234,26 @@ mod tests {
         let registry = fetch_registry_from_url(&url).await.expect("fetch registry");
 
         assert_eq!(registry.len(), 1);
+        assert_eq!(registry[0].provider_id, "whisper");
         assert_eq!(registry[0].id, "turbo");
+    }
+
+    #[tokio::test]
+    async fn fetch_registry_from_url_rejects_unsupported_provider_id() {
+        let mut entry = registry_entry("small");
+        entry.provider_id = "parakeet".to_string();
+        let body = serde_json::to_vec(&serde_json::json!({
+            "version": 1,
+            "models": [entry]
+        }))
+        .expect("serialize registry");
+        let url = serve_once("200 OK", "application/json", body);
+
+        let error = fetch_registry_from_url(&url)
+            .await
+            .expect_err("unsupported provider should fail");
+
+        assert!(error.to_string().contains("unsupported provider_id"));
     }
 
     #[tokio::test]

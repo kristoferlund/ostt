@@ -63,6 +63,7 @@ impl LocalModelInfoView {
 fn local_model_path(entry: &LocalModelEntry) -> String {
     model_destination(&RegistryEntry {
         id: entry.id.clone(),
+        provider_id: entry.provider_id.clone(),
         name: entry.name.clone(),
         description: entry.description.clone(),
         languages: entry.languages.clone(),

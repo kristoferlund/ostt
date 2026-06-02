@@ -6,6 +6,7 @@ use tui_input::Input;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LocalModelEntry {
     pub id: String,
+    pub provider_id: String,
     pub name: String,
     pub description: String,
     pub size_mb: u32,
