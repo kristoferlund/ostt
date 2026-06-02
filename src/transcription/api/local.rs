@@ -1,9 +1,14 @@
 use std::path::Path;
 
 use super::TranscriptionConfig;
-use crate::config::ModelOptionValue;
-use crate::transcription::model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec};
+use crate::config::{LocalTranscriptionConfig, ModelOptionValue};
+use crate::transcription::{
+    daemon_client::{probe_daemon, request_transcription},
+    local_models::{resolve_installed_model_path, ModelError},
+    model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec},
+};
 use indexmap::IndexMap;
+use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const OPTIONS: &[ModelOptionSpec] = &[
     ModelOptionSpec {
@@ -46,10 +51,6 @@ pub(super) fn validate_options(
 
     Ok(())
 }
-use crate::config::LocalTranscriptionConfig;
-use crate::transcription::daemon_client::{probe_daemon, request_transcription};
-use crate::transcription::local_models::{resolve_installed_model_path, ModelError};
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 pub(super) async fn transcribe(
     config: &TranscriptionConfig,

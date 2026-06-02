@@ -638,6 +638,14 @@ pub fn validate_model_options(model_options: &ModelOptionsConfig) -> anyhow::Res
             );
         }
 
+        if provider_id == "local" && !crate::transcription::local_models::is_safe_model_id(model_id)
+        {
+            anyhow::bail!(
+                "Invalid model_options key '{}'. Local model id must contain only lowercase letters, digits, '.', '_' or '-'.",
+                full_model_id
+            );
+        }
+
         let schema = api::option_schema(provider_id, model_id).ok_or_else(|| {
             anyhow::anyhow!(
                 "Invalid model_options key '{}'. No options are supported for this model.",
@@ -718,7 +726,24 @@ fn validate_model_option_type(
         );
     }
 
+    if matches_empty_string(expected, value) {
+        anyhow::bail!(
+            "Invalid value for option '{}' in '{}'. Value must not be empty.",
+            option_name,
+            full_model_id,
+        );
+    }
+
     Ok(())
+}
+
+fn matches_empty_string(expected: model::ModelOptionKind, value: &ModelOptionValue) -> bool {
+    match (expected, value) {
+        (model::ModelOptionKind::String, ModelOptionValue::String(s))
+        | (model::ModelOptionKind::BoolOrString, ModelOptionValue::String(s)) => s.is_empty(),
+        (model::ModelOptionKind::StringOrStringList, ModelOptionValue::String(s)) => s.is_empty(),
+        _ => false,
+    }
 }
 
 pub fn ensure_local_transcription_audio_config() -> anyhow::Result<()> {
@@ -1621,6 +1646,38 @@ model = "whisper-1"
         let config = parse_ostt_config(toml_str).unwrap();
         let err = validate_ostt_config(&config).unwrap_err().to_string();
         assert!(err.contains("Expected 0-1"));
+    }
+
+    #[test]
+    fn model_options_reject_empty_string_for_string_typed_option() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."openai/gpt-4o-transcribe"]
+            prompt = ""
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("prompt"));
+        assert!(err.contains("must not be empty"));
+    }
+
+    #[test]
+    fn model_options_reject_empty_string_for_bool_or_string_option() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."deepgram/nova-3"]
+            language = ""
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("language"));
+        assert!(err.contains("must not be empty"));
     }
 
     #[test]

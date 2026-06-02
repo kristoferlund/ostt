@@ -145,9 +145,15 @@ fn parse_model_option_value(
             config::ModelOptionValue::Number(raw_value.parse::<f64>()?)
         }
         super::model::ModelOptionKind::String => {
+            if raw_value.is_empty() {
+                anyhow::bail!("Value must not be empty for string option");
+            }
             config::ModelOptionValue::String(raw_value.to_string())
         }
         super::model::ModelOptionKind::StringOrStringList => {
+            if raw_value.is_empty() {
+                anyhow::bail!("Value must not be empty for string option");
+            }
             if raw_value.contains(',') {
                 config::ModelOptionValue::StringList(parse_comma_separated_strings(raw_value))
             } else {
@@ -228,6 +234,15 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("invalid float literal"));
+    }
+
+    #[test]
+    fn model_option_overrides_reject_empty_string_for_string_typed_option() {
+        let model = selected_model("openai", "gpt-4o-transcribe");
+        let err = parse_model_option_overrides(&model, &["prompt=".to_string()])
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("must not be empty"));
     }
 
     #[test]
