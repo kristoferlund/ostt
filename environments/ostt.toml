@@ -51,3 +51,12 @@ output_format = "mp3 -ab 16k -ar 12000"
 #
 # [model_options."berget/openai/whisper-large-v3"]
 # language = "sv"
+#
+# Local Whisper-compatible models support the same option keys per model.
+# [model_options."local/turbo"]
+# language = "auto"
+# no_timestamps = true
+# no_context = true
+# temperature = 0.0
+# entropy_thold = 2.4
+# no_speech_thold = 0.6

@@ -246,6 +246,33 @@ mod tests {
     }
 
     #[test]
+    fn model_option_overrides_parse_local_whisper_options() {
+        let model = selected_model("local", "turbo");
+        let options = parse_model_option_overrides(
+            &model,
+            &[
+                "language=sv".to_string(),
+                "no_context=false".to_string(),
+                "temperature=0.2".to_string(),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            options.get("language"),
+            Some(&config::ModelOptionValue::String("sv".to_string()))
+        );
+        assert_eq!(
+            options.get("no_context"),
+            Some(&config::ModelOptionValue::Bool(false))
+        );
+        assert_eq!(
+            options.get("temperature"),
+            Some(&config::ModelOptionValue::Number(0.2))
+        );
+    }
+
+    #[test]
     fn model_option_overrides_parse_bool_or_string_list_bool() {
         let model = selected_model("deepgram", "nova-3");
         let options =

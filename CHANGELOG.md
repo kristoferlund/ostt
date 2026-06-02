@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added scriptable CLI actions for models, keywords, auth, history, config helpers, logs, and local model download/removal.
 - Added per-run model option overrides with repeatable `--mo key=value`, validated against the selected provider/model option schema for supported transcription providers.
 - Added `ostt model options [PROVIDER/MODEL] --format table|json` to list supported model option keys for scripting.
+- Added per-model local Whisper options under `[model_options."local/<model>"]`, using the same keys as `[providers.local]`.
 - Added OpenAI `gpt-4o-transcribe-diarize` and validated JSON-safe OpenAI transcription options for logprobs, Whisper timestamp metadata, and diarization requests.
 - Added validated JSON-safe Groq transcription options for `response_format` and `timestamp_granularities` based on Groq's speech-to-text documentation.
 - Added more DeepInfra speech-recognition models and validated DeepInfra-native options including `initial_prompt`, `task`, `chunk_level`, and `chunk_length_s`.

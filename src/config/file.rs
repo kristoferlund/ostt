@@ -1083,6 +1083,69 @@ model = "whisper-1"
     }
 
     #[test]
+    fn model_options_allow_local_whisper_options_per_model() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."local/tiny"]
+            language = "sv"
+            no_timestamps = true
+            no_context = false
+            temperature = 0.0
+            entropy_thold = 2.4
+            no_speech_thold = 0.6
+
+            [model_options."local/turbo"]
+            language = "en"
+            temperature = 0.2
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn model_options_reject_invalid_local_whisper_values() {
+        let cases = [
+            ("temperature = 1.5", "Expected 0-1"),
+            ("entropy_thold = -1.0", "Expected >= 0"),
+            ("no_speech_thold = 1.5", "Expected 0-1"),
+        ];
+
+        for (setting, expected) in cases {
+            let toml_str = format!(
+                r#"
+                    [audio]
+                    device = "default"
+
+                    [model_options."local/turbo"]
+                    {setting}
+                "#
+            );
+
+            let config = parse_ostt_config(&toml_str).unwrap();
+            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    #[test]
+    fn model_options_reject_unsafe_local_model_id() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options."local/Turbo"]
+            language = "en"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let err = validate_ostt_config(&config).unwrap_err().to_string();
+        assert!(err.contains("Local model id"));
+    }
+
+    #[test]
     fn model_options_reject_wrong_value_types() {
         let cases = [
             (

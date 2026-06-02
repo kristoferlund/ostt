@@ -241,3 +241,20 @@ pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn option_schema_is_shared_by_local_whisper_models() {
+        let schema = option_schema("turbo").unwrap();
+
+        assert!(schema.option("language").is_some());
+        assert!(schema.option("temperature").is_some());
+        assert!(schema.option("entropy_thold").is_some());
+        assert!(schema.option("no_speech_thold").is_some());
+        assert!(schema.option("no_context").is_some());
+        assert!(schema.option("no_timestamps").is_some());
+    }
+}
