@@ -508,6 +508,7 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
 fn initial_download_state(entry: &RegistryEntry, is_custom: bool) -> DownloadState {
     DownloadState {
         model_id: entry.id.clone(),
+        provider_id: entry.provider_id.clone(),
         downloaded_bytes: 0,
         total_bytes: u64::from(entry.size_mb) * 1024 * 1024,
         progress: 0.0,
@@ -657,9 +658,9 @@ fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
 
     let path = model_destination(&registry_entry_from_model(entry));
     std::fs::remove_file(&path)?;
-    if config::get_selected_model_entry()?
-        .is_some_and(|selected| selected.provider_id == "whisper" && selected.model_id == entry.id)
-    {
+    if config::get_selected_model_entry()?.is_some_and(|selected| {
+        selected.provider_id == entry.provider_id && selected.model_id == entry.id
+    }) {
         config::clear_selected_model()?;
     }
     Ok(())

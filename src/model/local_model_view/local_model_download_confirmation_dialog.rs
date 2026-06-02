@@ -20,7 +20,10 @@ impl LocalModelDownloadConfirmationDialog {
             "Start Download",
             vec![
                 Line::from(format!("Download \"{}\"?", entry.name)),
-                Line::from(format!("ID: {}", full_model_id(&entry.id))),
+                Line::from(format!(
+                    "ID: {}",
+                    full_model_id(&entry.provider_id, &entry.id)
+                )),
                 Line::from(""),
                 Line::from(format!(
                     "Size: {}",

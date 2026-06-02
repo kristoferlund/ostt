@@ -155,9 +155,13 @@ pub fn handle_model_params(model: Option<String>, json: bool) -> anyhow::Result<
 pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
     let selected = crate::config::parse_provider_model(&model)?;
     if selected.provider_id == "whisper" {
-        local_models::activate_model(&selected.model_id)?;
+        let activated =
+            local_models::activate_model_for_provider(&selected.provider_id, &selected.model_id)?;
         reload_daemon_if_running(&selected.model_id).await?;
-        println!("Selected whisper model: whisper/{}", selected.model_id);
+        println!(
+            "Selected model: {}/{}",
+            activated.provider_id, activated.model_id
+        );
         return Ok(());
     }
 

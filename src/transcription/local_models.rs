@@ -238,8 +238,8 @@ pub fn is_safe_model_id(id: &str) -> bool {
             .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'.' | b'_' | b'-'))
 }
 
-pub fn full_model_id(id: &str) -> String {
-    format!("whisper/{id}")
+pub fn full_model_id(provider_id: &str, id: &str) -> String {
+    format!("{provider_id}/{id}")
 }
 
 pub fn installed_models(
@@ -261,7 +261,7 @@ pub fn installed_models(
                 modified_at: metadata.modified().ok(),
                 is_active: selected_model
                     .map(|selected| {
-                        selected.provider_id == "whisper" && selected.model_id == entry.id
+                        selected.provider_id == entry.provider_id && selected.model_id == entry.id
                     })
                     .unwrap_or(false),
             })
@@ -720,13 +720,24 @@ fn find_installed_file_by_id(model_id: &str) -> Result<PathBuf, ModelError> {
     Err(ModelError::NotDownloaded(model_id.to_string()))
 }
 
-pub fn activate_model(model_id: &str) -> anyhow::Result<()> {
+pub fn activate_model(model_id: &str) -> anyhow::Result<SelectedModel> {
+    activate_model_for_provider("whisper", model_id)
+}
+
+pub fn activate_model_for_provider(
+    provider_id: &str,
+    model_id: &str,
+) -> anyhow::Result<SelectedModel> {
     let path = resolve_installed_model_path(model_id)?;
-    let entry = find_model_entry(model_id)?;
+    let entry = find_model_entry_for_provider(provider_id, model_id)?;
     if !path.exists() {
         return Err(ModelError::NotDownloaded(model_id.to_string()).into());
     }
-    config::save_selected_model(&entry.provider_id, model_id)
+    config::save_selected_model(&entry.provider_id, model_id)?;
+    Ok(SelectedModel {
+        provider_id: entry.provider_id,
+        model_id: model_id.to_string(),
+    })
 }
 
 pub fn deactivate_model() -> anyhow::Result<()> {
@@ -777,6 +788,21 @@ fn find_model_entry(model_id: &str) -> Result<RegistryEntry, ModelError> {
     let state = load_state();
     let registry_entries = load_registry_entries().unwrap_or_default();
     find_model_entry_in(model_id, &registry_entries, &state)
+}
+
+fn find_model_entry_for_provider(
+    provider_id: &str,
+    model_id: &str,
+) -> Result<RegistryEntry, ModelError> {
+    let state = load_state();
+    let registry_entries = load_registry_entries().unwrap_or_default();
+    state
+        .custom_models
+        .iter()
+        .chain(registry_entries.iter())
+        .find(|entry| entry.provider_id == provider_id && entry.id == model_id)
+        .cloned()
+        .ok_or_else(|| ModelError::NotFound(model_id.to_string()))
 }
 
 #[cfg(test)]

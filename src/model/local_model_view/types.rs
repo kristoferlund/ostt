@@ -26,6 +26,7 @@ pub(crate) struct LocalModelEntry {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DownloadState {
     pub model_id: String,
+    pub provider_id: String,
     pub downloaded_bytes: u64,
     pub total_bytes: u64,
     pub progress: f64,

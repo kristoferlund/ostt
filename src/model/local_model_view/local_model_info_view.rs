@@ -16,7 +16,10 @@ impl LocalModelInfoView {
 
         let path = local_model_path(entry);
         let mut lines = vec![
-            Line::from(format!("ID: {}", full_model_id(&entry.id))),
+            Line::from(format!(
+                "ID: {}",
+                full_model_id(&entry.provider_id, &entry.id)
+            )),
             Line::from(""),
             Line::from(entry.description.clone()),
             Line::from(""),
