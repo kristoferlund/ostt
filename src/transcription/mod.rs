@@ -22,7 +22,7 @@ pub mod provider;
 pub use animation::TranscriptionAnimation;
 pub use api::{transcribe, TranscriptionConfig, TranscriptionResponse};
 pub(crate) use context::build_context;
-pub use model::{all_models, find_model, models_for_provider, ModelSpec};
+pub use model::{all_models, find_model, models_for_provider, ModelOptionKind, ModelSpec};
 pub use provider::TranscriptionProvider;
 
 pub fn config_for_selected_model(
@@ -30,6 +30,7 @@ pub fn config_for_selected_model(
     api_key: Option<String>,
     keywords: Vec<String>,
     providers: crate::config::file::ProvidersConfig,
+    model_options: indexmap::IndexMap<String, crate::config::ModelOptionValue>,
 ) -> anyhow::Result<TranscriptionConfig> {
     let provider =
         TranscriptionProvider::from_id(&selected_model.provider_id).ok_or_else(|| {
@@ -45,10 +46,11 @@ pub fn config_for_selected_model(
             selected_model.model_id.clone(),
             keywords,
             providers,
+            model_options,
         ));
     }
 
-    find_model(&selected_model.provider_id, &selected_model.model_id).ok_or_else(|| {
+    let model = find_model(&selected_model.provider_id, &selected_model.model_id).ok_or_else(|| {
         anyhow::anyhow!(
             "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
             selected_model.model_id,
@@ -63,9 +65,11 @@ pub fn config_for_selected_model(
     Ok(TranscriptionConfig::new_cloud(
         provider,
         selected_model.model_id.clone(),
+        model.endpoint,
         api_key,
         keywords,
         providers,
+        model_options,
     ))
 }
 

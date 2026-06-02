@@ -30,6 +30,7 @@ pub async fn handle_record(
     output_file: Option<String>,
     process: Option<String>,
     model_override: Option<SelectedModel>,
+    model_option_overrides: &[String],
 ) -> anyhow::Result<()> {
     tracing::info!("=== ostt Audio Recorder Started ===");
     tracing::info!(
@@ -74,8 +75,9 @@ pub async fn handle_record(
     // Prune only after a real recording was saved so cancellation cannot mutate history.
     recording_history::prune_old_recordings();
 
-    let transcription_context = crate::transcription::build_context(config, model_override)
-        .context("failed to build transcription context")?;
+    let transcription_context =
+        crate::transcription::build_context(config, model_override, model_option_overrides)
+            .context("failed to build transcription context")?;
     let model_id = transcription_context.selected_model.model_id.clone();
     let filepath_str = filepath.to_string_lossy().to_string();
 

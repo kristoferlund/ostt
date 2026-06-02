@@ -16,6 +16,98 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use super::TranscriptionConfig;
+use crate::config::ModelOptionValue;
+use crate::transcription::model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec, ModelSpec};
+use indexmap::IndexMap;
+
+pub(super) const MODELS: &[ModelSpec] = &[ModelSpec {
+    provider_id: "assemblyai",
+    model_id: "universal-3-pro",
+    endpoint: "https://api.assemblyai.com/v2",
+    display_name: "Universal 3 Pro (best accuracy)",
+    description: "AssemblyAI's Universal-3 Pro speech-to-text model for high-accuracy transcription and audio understanding in cloud workflows.",
+    languages: &["Multilingual"],
+}];
+
+const OPTIONS: &[ModelOptionSpec] = &[
+    ModelOptionSpec {
+        name: "boost_param",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "disfluencies",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "filter_profanity",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "format_text",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "language_detection",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "language_code",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "keyterms_prompt",
+        kind: ModelOptionKind::StringList,
+    },
+    ModelOptionSpec {
+        name: "prompt",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "punctuate",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "speaker_labels",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "speakers_expected",
+        kind: ModelOptionKind::Integer,
+    },
+    ModelOptionSpec {
+        name: "speech_threshold",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "temperature",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "word_boost",
+        kind: ModelOptionKind::StringList,
+    },
+];
+
+pub(super) fn option_schema(_model_id: &str) -> Option<ModelOptionSchema> {
+    Some(ModelOptionSchema::new(OPTIONS))
+}
+
+pub(super) fn validate_options(
+    full_model_id: &str,
+    options: &IndexMap<String, ModelOptionValue>,
+) -> anyhow::Result<()> {
+    super::validate_number_range(full_model_id, options, "speech_threshold", 0.0..=1.0)?;
+    super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
+
+    if options.contains_key("prompt") && options.contains_key("keyterms_prompt") {
+        anyhow::bail!(
+            "Invalid options for '{}'. AssemblyAI does not allow 'prompt' and 'keyterms_prompt' together.",
+            full_model_id
+        );
+    }
+
+    Ok(())
+}
 
 /// Maximum number of poll attempts before timing out (5 minutes at 3-second intervals)
 const MAX_POLL_ATTEMPTS: u32 = 100;
@@ -64,6 +156,22 @@ struct TranscriptRequest {
     punctuate: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     keyterms_prompt: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speaker_labels: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speakers_expected: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    speech_threshold: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    word_boost: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    boost_param: Option<String>,
 }
 
 /// Response from the transcription endpoint (both submit and poll)
@@ -94,52 +202,44 @@ pub(super) async fn transcribe(
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
 
-    let base_url = config.endpoint();
+    let base_url = config.endpoint;
 
     // Step 1: Upload audio with retry logic for transient failures
     let upload_url = upload_with_retry(&client, base_url, &config.api_key, audio_data).await?;
 
     // Step 2: Submit transcription request
-    let assemblyai_config = &config.providers.assemblyai;
-
     // Build language_detection_options if any values are set
-    let language_detection_options = if assemblyai_config
-        .language_detection_options
-        .expected_languages
-        .is_some()
-        || assemblyai_config
-            .language_detection_options
-            .fallback_language
-            .is_some()
-    {
-        Some(LanguageDetectionOptionsRequest {
-            expected_languages: assemblyai_config
-                .language_detection_options
-                .expected_languages
-                .clone(),
-            fallback_language: assemblyai_config
-                .language_detection_options
-                .fallback_language
-                .clone(),
-        })
-    } else {
-        None
-    };
+    let language_detection_options = None;
 
     let mut request = TranscriptRequest {
         audio_url: upload_url,
         speech_models: Some(vec![config.model_id.clone()]),
-        format_text: Some(assemblyai_config.format_text),
-        disfluencies: Some(assemblyai_config.disfluencies),
-        filter_profanity: Some(assemblyai_config.filter_profanity),
-        language_detection: Some(assemblyai_config.language_detection),
+        format_text: Some(config.option_bool("format_text").unwrap_or(true)),
+        disfluencies: Some(config.option_bool("disfluencies").unwrap_or(false)),
+        filter_profanity: Some(config.option_bool("filter_profanity").unwrap_or(false)),
+        language_detection: Some(config.option_bool("language_detection").unwrap_or(true)),
         language_detection_options,
-        punctuate: Some(assemblyai_config.punctuate),
-        keyterms_prompt: None,
+        punctuate: Some(config.option_bool("punctuate").unwrap_or(true)),
+        keyterms_prompt: config
+            .option_string_list("keyterms_prompt")
+            .map(ToOwned::to_owned),
+        language_code: config
+            .option_string("language_code")
+            .map(ToString::to_string),
+        prompt: config.option_string("prompt").map(ToString::to_string),
+        speaker_labels: config.option_bool("speaker_labels"),
+        speakers_expected: config.option_integer("speakers_expected"),
+        speech_threshold: config.option_number("speech_threshold"),
+        temperature: config.option_number("temperature"),
+        word_boost: config
+            .option_string_list("word_boost")
+            .map(ToOwned::to_owned),
+        boost_param: config.option_string("boost_param").map(ToString::to_string),
     };
 
-    // Add keywords as keyterms_prompt if any
-    if !config.keywords.is_empty() {
+    // AssemblyAI rejects `prompt` and `keyterms_prompt` together.
+    if request.prompt.is_none() && request.keyterms_prompt.is_none() && !config.keywords.is_empty()
+    {
         request.keyterms_prompt = Some(config.keywords.clone());
     }
 

@@ -6,6 +6,134 @@ use serde::Deserialize;
 use std::path::Path;
 
 use super::TranscriptionConfig;
+use crate::config::ModelOptionValue;
+use crate::transcription::model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec, ModelSpec};
+use indexmap::IndexMap;
+
+pub(super) const MODELS: &[ModelSpec] = &[
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "openai/whisper-large-v3",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "OpenAI Whisper Large V3 (best accuracy)",
+        description: "OpenAI Whisper Large V3 hosted through DeepInfra. A general-purpose multilingual Whisper model suited for high-accuracy transcription and translation workloads.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "openai/whisper-large-v3-turbo",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "OpenAI Whisper Large V3 Turbo (fast)",
+        description: "OpenAI Whisper Large V3 Turbo hosted through DeepInfra. A pruned Large V3 variant designed for faster multilingual transcription with minor quality tradeoffs.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "openai/whisper-large",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "OpenAI Whisper Large (best accuracy)",
+        description: "OpenAI Whisper Large hosted through DeepInfra. DeepInfra documents this as the best-accuracy Whisper option in its speech recognition API.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "openai/whisper-medium",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "OpenAI Whisper Medium",
+        description: "OpenAI Whisper Medium hosted through DeepInfra. A lighter Whisper model for faster multilingual transcription than Whisper Large.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "openai/whisper-small",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "OpenAI Whisper Small",
+        description: "OpenAI Whisper Small hosted through DeepInfra. A smaller Whisper model for lightweight multilingual transcription workloads.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "openai/whisper-base",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "OpenAI Whisper Base (fast, lightweight)",
+        description: "OpenAI Whisper Base hosted through DeepInfra. A smaller Whisper model option for lighter and faster multilingual transcription workloads.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "openai/whisper-timestamped-medium",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "OpenAI Whisper Timestamped Medium",
+        description: "OpenAI Whisper Timestamped Medium hosted through DeepInfra. DeepInfra documents this model for per-word timestamp segmentation.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "mistralai/Voxtral-Mini-3B-2507",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "Mistral Voxtral Mini 3B 2507",
+        description: "Mistral Voxtral Mini hosted through DeepInfra. A 3B audio-capable model for transcription, translation, and audio understanding.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepinfra",
+        model_id: "mistralai/Voxtral-Small-24B-2507",
+        endpoint: "https://api.deepinfra.com/v1/inference",
+        display_name: "Mistral Voxtral Small 24B 2507",
+        description: "Mistral Voxtral Small hosted through DeepInfra. A larger audio-capable model for transcription, translation, and audio understanding.",
+        languages: &["Multilingual"],
+    },
+];
+
+const OPTIONS: &[ModelOptionSpec] = &[
+    ModelOptionSpec {
+        name: "language",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "initial_prompt",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "temperature",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "task",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "chunk_level",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "chunk_length_s",
+        kind: ModelOptionKind::Integer,
+    },
+];
+
+pub(super) fn option_schema(_model_id: &str) -> Option<ModelOptionSchema> {
+    Some(ModelOptionSchema::new(OPTIONS))
+}
+
+pub(super) fn validate_options(
+    full_model_id: &str,
+    options: &IndexMap<String, ModelOptionValue>,
+) -> anyhow::Result<()> {
+    super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
+
+    if let Some(value) = options.get("task") {
+        super::validate_string_value(full_model_id, "task", value, &["transcribe", "translate"])?;
+    }
+
+    if let Some(value) = options.get("chunk_level") {
+        super::validate_string_value(full_model_id, "chunk_level", value, &["segment", "word"])?;
+    }
+
+    super::validate_integer_range(full_model_id, options, "chunk_length_s", 1..=30)?;
+
+    Ok(())
+}
 
 /// DeepInfra API response structure
 #[derive(Debug, Deserialize)]
@@ -43,17 +171,43 @@ pub(super) async fn transcribe(
     let mut debug_params = vec![];
 
     // Build the URL with model name in the path
-    let endpoint = format!("{}/{}", config.endpoint(), config.model_id);
+    let endpoint = format!("{}/{}", config.endpoint, config.model_id);
 
-    // Add keywords as prompt for better transcription context (similar to OpenAI)
-    if !config.keywords.is_empty() {
-        let prompt = config.keywords.join(", ");
-        form = form.text("prompt", prompt.clone());
-        debug_params.push(format!("prompt={prompt}"));
-        tracing::debug!(
-            "Keywords used as prompt for DeepInfra model: {:?}",
-            config.keywords
-        );
+    if let Some(language) = config.option_string("language") {
+        if !language.is_empty() {
+            form = form.text("language", language.to_string());
+            debug_params.push(format!("language={language}"));
+        }
+    }
+
+    if let Some(temperature) = config.option_number("temperature") {
+        form = form.text("temperature", temperature.to_string());
+        debug_params.push(format!("temperature={temperature}"));
+    }
+
+    if let Some(task) = config.option_string("task") {
+        form = form.text("task", task.to_string());
+        debug_params.push(format!("task={task}"));
+    }
+
+    let initial_prompt = config
+        .option_string("initial_prompt")
+        .map(ToString::to_string)
+        .or_else(|| (!config.keywords.is_empty()).then(|| config.keywords.join(", ")));
+    if let Some(initial_prompt) = initial_prompt {
+        form = form.text("initial_prompt", initial_prompt.clone());
+        debug_params.push(format!("initial_prompt={initial_prompt}"));
+        tracing::debug!("Initial prompt used for DeepInfra model: {initial_prompt}");
+    }
+
+    if let Some(chunk_level) = config.option_string("chunk_level") {
+        form = form.text("chunk_level", chunk_level.to_string());
+        debug_params.push(format!("chunk_level={chunk_level}"));
+    }
+
+    if let Some(chunk_length_s) = config.option_integer("chunk_length_s") {
+        form = form.text("chunk_length_s", chunk_length_s.to_string());
+        debug_params.push(format!("chunk_length_s={chunk_length_s}"));
     }
 
     tracing::debug!(

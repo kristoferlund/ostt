@@ -7,6 +7,80 @@ use serde::Deserialize;
 use std::path::Path;
 
 use super::TranscriptionConfig;
+use crate::config::ModelOptionValue;
+use crate::transcription::model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec, ModelSpec};
+use indexmap::IndexMap;
+
+pub(super) const MODELS: &[ModelSpec] = &[
+    ModelSpec {
+        provider_id: "mistral",
+        model_id: "voxtral-mini-latest",
+        endpoint: "https://api.mistral.ai/v1/audio/transcriptions",
+        display_name: "Voxtral Mini Transcribe (fast, efficient, 13 languages)",
+        description: "Mistral's Voxtral Mini transcription model for fast, efficient multilingual speech-to-text via the Mistral API.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "mistral",
+        model_id: "voxtral-mini-2602",
+        endpoint: "https://api.mistral.ai/v1/audio/transcriptions",
+        display_name: "Voxtral Mini 2602 (newer version, improved accuracy)",
+        description: "Pinned Voxtral Mini 2602 transcription model for stable Mistral speech-to-text behavior.",
+        languages: &["Multilingual"],
+    },
+];
+
+const OPTIONS: &[ModelOptionSpec] = &[
+    ModelOptionSpec {
+        name: "language",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "diarize",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "context_bias",
+        kind: ModelOptionKind::StringList,
+    },
+    ModelOptionSpec {
+        name: "temperature",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "timestamp_granularities",
+        kind: ModelOptionKind::StringList,
+    },
+];
+
+pub(super) fn option_schema(_model_id: &str) -> Option<ModelOptionSchema> {
+    Some(ModelOptionSchema::new(OPTIONS))
+}
+
+pub(super) fn validate_options(
+    full_model_id: &str,
+    options: &IndexMap<String, ModelOptionValue>,
+) -> anyhow::Result<()> {
+    super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
+
+    if let Some(value) = options.get("timestamp_granularities") {
+        super::validate_string_list_values(
+            full_model_id,
+            "timestamp_granularities",
+            value,
+            &["segment", "word"],
+        )?;
+    }
+
+    if options.contains_key("language") && options.contains_key("timestamp_granularities") {
+        anyhow::bail!(
+            "Invalid options for '{}'. Mistral timestamp_granularities is not compatible with language.",
+            full_model_id
+        );
+    }
+
+    Ok(())
+}
 
 /// Mistral API response wrapper
 #[derive(Debug, Deserialize)]
@@ -42,11 +116,36 @@ pub(super) async fn transcribe(
         .text("model", config.model_id.clone());
 
     // Debug log: Log the API call details (without the audio data)
-    let debug_params = [format!("model={}", config.model_id)];
+    let mut debug_params = vec![format!("model={}", config.model_id)];
 
-    // Add keywords as context_bias for better transcription accuracy
-    // Mistral supports up to 100 words/phrases for context biasing
-    if !config.keywords.is_empty() {
+    if let Some(language) = config.option_string("language") {
+        form = form.text("language", language.to_string());
+        debug_params.push(format!("language={language}"));
+    }
+
+    if let Some(diarize) = config.option_bool("diarize") {
+        form = form.text("diarize", diarize.to_string());
+        debug_params.push(format!("diarize={diarize}"));
+    }
+
+    if let Some(temperature) = config.option_number("temperature") {
+        form = form.text("temperature", temperature.to_string());
+        debug_params.push(format!("temperature={temperature}"));
+    }
+
+    if let Some(granularities) = config.option_string_list("timestamp_granularities") {
+        for granularity in granularities {
+            form = form.text("timestamp_granularities", granularity.clone());
+            debug_params.push(format!("timestamp_granularities={granularity}"));
+        }
+    }
+
+    if let Some(context_bias) = config.option_string_list("context_bias") {
+        for value in context_bias {
+            form = form.text("context_bias", value.clone());
+            debug_params.push(format!("context_bias={value}"));
+        }
+    } else if !config.keywords.is_empty() {
         for keyword in &config.keywords {
             form = form.text("context_bias", keyword.clone());
         }
@@ -56,16 +155,7 @@ pub(super) async fn transcribe(
         );
     }
 
-    // Add optional language parameter from provider config
-    let mistral_config = &config.providers.mistral;
-    if let Some(ref lang) = mistral_config.language {
-        if !lang.is_empty() {
-            form = form.text("language", lang.clone());
-            tracing::debug!("Language set for Mistral model: {}", lang);
-        }
-    }
-
-    let endpoint = config.endpoint();
+    let endpoint = config.endpoint;
 
     let client = reqwest::Client::new();
 

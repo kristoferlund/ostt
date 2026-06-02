@@ -1,17 +1,64 @@
 use std::path::Path;
 
 use super::TranscriptionConfig;
-use crate::config::LocalTranscriptionConfig;
-use crate::transcription::daemon_client::{probe_daemon, request_transcription};
-use crate::transcription::local_models::{resolve_installed_model_path, ModelError};
+use crate::config::{LocalTranscriptionConfig, ModelOptionValue};
+use crate::transcription::{
+    daemon_client::{probe_daemon, request_transcription},
+    local_models::{resolve_installed_model_path, ModelError},
+    model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec},
+};
+use indexmap::IndexMap;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+const OPTIONS: &[ModelOptionSpec] = &[
+    ModelOptionSpec {
+        name: "entropy_thold",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "language",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "no_context",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "no_speech_thold",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "no_timestamps",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "temperature",
+        kind: ModelOptionKind::Number,
+    },
+];
+
+pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
+    (!model_id.is_empty()).then(|| ModelOptionSchema::new(OPTIONS))
+}
+
+pub(super) fn validate_options(
+    full_model_id: &str,
+    options: &IndexMap<String, ModelOptionValue>,
+) -> anyhow::Result<()> {
+    super::validate_number_min(full_model_id, options, "entropy_thold", 0.0)?;
+    super::validate_number_range(full_model_id, options, "no_speech_thold", 0.0..=1.0)?;
+    super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
+
+    Ok(())
+}
 
 pub(super) async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
 ) -> anyhow::Result<String> {
     validate_local_audio_format(audio_path)?;
-    let local_config = config.local_config().cloned().unwrap_or_default();
+    let mut local_config = config.local_config().cloned().unwrap_or_default();
+    apply_model_options(config, &mut local_config);
 
     if let Some(text) = try_daemon_transcription(&config.model_id, audio_path, &local_config).await
     {
@@ -75,6 +122,27 @@ pub(super) async fn transcribe(
     .map_err(|err| anyhow::anyhow!("Local whisper runtime task failed: {err}"))??;
 
     Ok(filter_obvious_hallucination(&text).unwrap_or_default())
+}
+
+fn apply_model_options(config: &TranscriptionConfig, local_config: &mut LocalTranscriptionConfig) {
+    if let Some(language) = config.option_string("language") {
+        local_config.language = language.to_string();
+    }
+    if let Some(no_timestamps) = config.option_bool("no_timestamps") {
+        local_config.no_timestamps = no_timestamps;
+    }
+    if let Some(no_context) = config.option_bool("no_context") {
+        local_config.no_context = no_context;
+    }
+    if let Some(temperature) = config.option_number("temperature") {
+        local_config.temperature = temperature as f32;
+    }
+    if let Some(entropy_thold) = config.option_number("entropy_thold") {
+        local_config.entropy_thold = entropy_thold as f32;
+    }
+    if let Some(no_speech_thold) = config.option_number("no_speech_thold") {
+        local_config.no_speech_thold = no_speech_thold as f32;
+    }
 }
 
 async fn try_daemon_transcription(
@@ -172,4 +240,21 @@ pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn option_schema_is_shared_by_local_whisper_models() {
+        let schema = option_schema("turbo").unwrap();
+
+        assert!(schema.option("language").is_some());
+        assert!(schema.option("temperature").is_some());
+        assert!(schema.option("entropy_thold").is_some());
+        assert!(schema.option("no_speech_thold").is_some());
+        assert!(schema.option("no_context").is_some());
+        assert!(schema.option("no_timestamps").is_some());
+    }
 }
