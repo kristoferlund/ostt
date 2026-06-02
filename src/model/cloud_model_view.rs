@@ -158,7 +158,7 @@ pub(crate) fn build_cloud_provider_sections(
 
     TranscriptionProvider::all()
         .iter()
-        .filter(|provider| **provider != TranscriptionProvider::Local)
+        .filter(|provider| **provider != TranscriptionProvider::Whisper)
         .filter(|provider| authorized.contains(provider.id()))
         .filter_map(|provider| {
             let models: Vec<CloudModelEntry> = transcription::models_for_provider(provider)

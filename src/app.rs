@@ -48,11 +48,6 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
                 })?;
             }
 
-            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
-                tracing::error!("Config migration failed: {e}");
-                anyhow!("Config migration failed: {e}")
-            })?;
-
             crate::setup::version::update_config_version(&config_path).map_err(|e| {
                 tracing::error!("Failed to update config version: {e}");
                 anyhow!("Failed to update config version: {e}")
@@ -64,10 +59,6 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
         }
         None => {
             // Config exists and version matches, no setup needed
-            crate::setup::version::run_config_migrations(&config_path).map_err(|e| {
-                tracing::error!("Config migration failed: {e}");
-                anyhow!("Config migration failed: {e}")
-            })?;
             tracing::debug!("Config version up to date ({})", env!("CARGO_PKG_VERSION"));
         }
     }
@@ -78,7 +69,7 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
 fn load_config() -> anyhow::Result<crate::config::OsttConfig> {
     crate::config::OsttConfig::load().map_err(|err| {
         tracing::error!("Failed to load configuration: {err}");
-        anyhow!("Configuration error: {err}\n\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
+        anyhow!("Configuration error: {err}\nPlease check your ~/.config/ostt/ostt.toml file and try again.")
     })
 }
 
@@ -110,9 +101,9 @@ struct Cli {
     #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
     model: Option<String>,
 
-    /// Override a model option for this run, as key=value
-    #[arg(long = "mo", value_name = "KEY=VALUE", global = true)]
-    model_options: Vec<String>,
+    /// Override a transcription param for this run, as key=value
+    #[arg(long = "param", value_name = "KEY=VALUE", global = true)]
+    params: Vec<String>,
 
     #[command(subcommand)]
     command: Option<Commands>,
@@ -388,8 +379,8 @@ enum ModelCommand {
     },
     /// Show the currently selected transcription model
     Current,
-    /// List supported model options for a transcription model
-    Options {
+    /// List supported transcription params for a transcription model
+    Params {
         /// Model to inspect. Defaults to the currently selected model.
         #[arg(value_name = "PROVIDER/MODEL")]
         model: Option<String>,
@@ -642,6 +633,13 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Logs {
             command: Some(LogsCommand::Follow),
         }) => return commands::logs::handle_logs_follow(),
+        Some(Commands::Config { command: None }) => {
+            check_and_run_setup().await?;
+            return commands::handle_config();
+        }
+        Some(Commands::Config {
+            command: Some(ConfigCommand::Path),
+        }) => return commands::config::handle_config_path(),
         _ => {}
     }
 
@@ -679,7 +677,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 output,
                 process,
                 model_override,
-                &cli.model_options,
+                &cli.params,
             )
             .await?;
         }
@@ -702,7 +700,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 output,
                 process,
                 model_override,
-                &cli.model_options,
+                &cli.params,
             )
             .await?;
         }
@@ -725,7 +723,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 output,
                 process,
                 model_override,
-                &cli.model_options,
+                &cli.params,
             )
             .await?;
         }
@@ -763,8 +761,8 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 format,
             }) => commands::model::handle_model_list(provider, installed, format.is_json()).await?,
             Some(ModelCommand::Current) => commands::model::handle_model_current()?,
-            Some(ModelCommand::Options { model, format }) => {
-                commands::model::handle_model_options(model, format.is_json())?
+            Some(ModelCommand::Params { model, format }) => {
+                commands::model::handle_model_params(model, format.is_json())?
             }
             Some(ModelCommand::Select { model }) => {
                 commands::model::handle_model_select(model).await?
@@ -843,9 +841,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 full_args.insert(0, model.clone());
                 full_args.insert(0, "-m".to_string());
             }
-            for model_option in cli.model_options.iter().rev() {
-                full_args.insert(0, model_option.clone());
-                full_args.insert(0, "--mo".to_string());
+            for param in cli.params.iter().rev() {
+                full_args.insert(0, param.clone());
+                full_args.insert(0, "--param".to_string());
             }
             commands::handle_launch(&config_data, full_args).await?;
         }
@@ -957,11 +955,11 @@ mod tests {
     }
 
     #[test]
-    fn cli_accepts_model_options_listing_format() {
+    fn cli_accepts_model_params_listing_format() {
         let cli = Cli::try_parse_from([
             "ostt",
             "model",
-            "options",
+            "params",
             "openai/gpt-4o-transcribe",
             "--format",
             "json",
@@ -971,7 +969,7 @@ mod tests {
         match cli.command {
             Some(Commands::Model {
                 command:
-                    Some(ModelCommand::Options {
+                    Some(ModelCommand::Params {
                         model: Some(model),
                         format,
                     }),
@@ -979,7 +977,7 @@ mod tests {
                 assert_eq!(model, "openai/gpt-4o-transcribe");
                 assert_eq!(format, ListFormat::Json);
             }
-            _ => panic!("expected model options command"),
+            _ => panic!("expected model params command"),
         }
     }
 
@@ -1041,28 +1039,29 @@ mod tests {
     }
 
     #[test]
-    fn cli_accepts_repeatable_model_options_for_default_record() {
+    fn cli_accepts_repeatable_params_for_default_record() {
         let cli = Cli::try_parse_from([
             "ostt",
-            "--mo",
+            "--param",
             "detect_language=false",
-            "--mo",
+            "--param",
             "smart_format=true",
         ])
         .expect("parse cli");
 
         assert_eq!(
-            cli.model_options,
+            cli.params,
             vec!["detect_language=false", "smart_format=true"]
         );
     }
 
     #[test]
-    fn cli_accepts_model_options_for_transcribe() {
-        let cli = Cli::try_parse_from(["ostt", "transcribe", "audio.ogg", "--mo", "language=sv"])
-            .expect("parse cli");
+    fn cli_accepts_params_for_transcribe() {
+        let cli =
+            Cli::try_parse_from(["ostt", "transcribe", "audio.ogg", "--param", "language=sv"])
+                .expect("parse cli");
 
-        assert_eq!(cli.model_options, vec!["language=sv"]);
+        assert_eq!(cli.params, vec!["language=sv"]);
         match cli.command {
             Some(Commands::Transcribe { .. }) => {}
             _ => panic!("expected transcribe command"),
@@ -1070,34 +1069,35 @@ mod tests {
     }
 
     #[test]
-    fn cli_collects_model_options_once_for_subcommands() {
+    fn cli_collects_params_once_for_subcommands() {
         let cli = Cli::try_parse_from([
             "ostt",
             "transcribe",
             "audio.ogg",
-            "--mo",
+            "--param",
             "diarize=true",
-            "--mo",
+            "--param",
             "language=sv",
         ])
         .expect("parse cli");
 
-        assert_eq!(cli.model_options, vec!["diarize=true", "language=sv"]);
+        assert_eq!(cli.params, vec!["diarize=true", "language=sv"]);
     }
 
     #[test]
-    fn cli_accepts_model_options_for_launch() {
+    fn cli_accepts_params_for_launch() {
         let cli =
-            Cli::try_parse_from(["ostt", "launch", "--mo", "language=sv"]).expect("parse cli");
+            Cli::try_parse_from(["ostt", "launch", "--param", "language=sv"]).expect("parse cli");
 
-        assert_eq!(cli.model_options, vec!["language=sv"]);
+        assert_eq!(cli.params, vec!["language=sv"]);
     }
 
     #[test]
-    fn cli_accepts_global_model_options_before_subcommand() {
-        let cli = Cli::try_parse_from(["ostt", "--mo", "language=sv", "transcribe", "audio.ogg"])
-            .expect("parse cli");
+    fn cli_accepts_global_params_before_subcommand() {
+        let cli =
+            Cli::try_parse_from(["ostt", "--param", "language=sv", "transcribe", "audio.ogg"])
+                .expect("parse cli");
 
-        assert_eq!(cli.model_options, vec!["language=sv"]);
+        assert_eq!(cli.params, vec!["language=sv"]);
     }
 }

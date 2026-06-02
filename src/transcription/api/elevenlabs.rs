@@ -191,13 +191,13 @@ pub(super) fn validate_options(
     if options.contains_key("diarization_threshold") {
         if matches!(options.get("diarize"), Some(ModelOptionValue::Bool(false))) {
             anyhow::bail!(
-                "Invalid options for '{}'. ElevenLabs diarization_threshold requires diarize = true.",
+                "Invalid params for '{}'. ElevenLabs diarization_threshold requires diarize = true.",
                 full_model_id
             );
         }
         if options.contains_key("num_speakers") {
             anyhow::bail!(
-                "Invalid options for '{}'. ElevenLabs diarization_threshold cannot be used with num_speakers.",
+                "Invalid params for '{}'. ElevenLabs diarization_threshold cannot be used with num_speakers.",
                 full_model_id
             );
         }
@@ -209,7 +209,7 @@ pub(super) fn validate_options(
     ) {
         if !matches!(options.get("diarize"), Some(ModelOptionValue::Bool(true))) {
             anyhow::bail!(
-                "Invalid options for '{}'. ElevenLabs detect_speaker_roles requires diarize = true.",
+                "Invalid params for '{}'. ElevenLabs detect_speaker_roles requires diarize = true.",
                 full_model_id
             );
         }
@@ -218,7 +218,7 @@ pub(super) fn validate_options(
             Some(ModelOptionValue::Bool(true))
         ) {
             anyhow::bail!(
-                "Invalid options for '{}'. ElevenLabs detect_speaker_roles cannot be used with use_multi_channel = true.",
+                "Invalid params for '{}'. ElevenLabs detect_speaker_roles cannot be used with use_multi_channel = true.",
                 full_model_id
             );
         }
@@ -381,7 +381,7 @@ fn add_string_or_string_list_fields(
     config: &TranscriptionConfig,
     name: &'static str,
 ) -> reqwest::multipart::Form {
-    match config.model_options.get(name) {
+    match config.params.get(name) {
         Some(ModelOptionValue::String(value)) => form = form.text(name, value.clone()),
         Some(ModelOptionValue::StringList(values)) => {
             for value in values {

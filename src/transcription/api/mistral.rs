@@ -74,7 +74,7 @@ pub(super) fn validate_options(
 
     if options.contains_key("language") && options.contains_key("timestamp_granularities") {
         anyhow::bail!(
-            "Invalid options for '{}'. Mistral timestamp_granularities is not compatible with language.",
+            "Invalid params for '{}'. Mistral timestamp_granularities is not compatible with language.",
             full_model_id
         );
     }

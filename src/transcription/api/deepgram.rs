@@ -139,7 +139,7 @@ fn push_string_list_option(config: &TranscriptionConfig, url: &mut String, name:
 }
 
 fn push_bool_or_string_option(config: &TranscriptionConfig, url: &mut String, name: &str) {
-    match config.model_options.get(name) {
+    match config.params.get(name) {
         Some(ModelOptionValue::Bool(value)) => url.push_str(&format!("&{name}={value}")),
         Some(ModelOptionValue::String(value)) => push_query_pair(url, name, value),
         _ => {}
@@ -147,7 +147,7 @@ fn push_bool_or_string_option(config: &TranscriptionConfig, url: &mut String, na
 }
 
 fn push_bool_or_string_list_option(config: &TranscriptionConfig, url: &mut String, name: &str) {
-    match config.model_options.get(name) {
+    match config.params.get(name) {
         Some(ModelOptionValue::Bool(value)) => url.push_str(&format!("&{name}={value}")),
         Some(ModelOptionValue::StringList(values)) => {
             for value in values {
@@ -260,7 +260,7 @@ pub(super) async fn transcribe(
         } else {
             "keywords"
         };
-        if !config.model_options.contains_key(param_name) {
+        if !config.params.contains_key(param_name) {
             for keyword in &config.keywords {
                 push_query_pair(&mut url, param_name, keyword);
             }

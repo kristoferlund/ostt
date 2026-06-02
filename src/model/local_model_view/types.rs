@@ -60,10 +60,6 @@ pub(crate) enum LocalModelsMode {
         entry: LocalModelEntry,
         selected_action: DialogAction,
     },
-    ConfirmAudioConfig {
-        entry: LocalModelEntry,
-        selected_action: DialogAction,
-    },
     ErrorDialog {
         message: String,
         return_mode: Box<LocalModelsMode>,

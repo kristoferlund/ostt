@@ -29,8 +29,7 @@ pub fn config_for_selected_model(
     selected_model: &crate::config::SelectedModel,
     api_key: Option<String>,
     keywords: Vec<String>,
-    providers: crate::config::file::ProvidersConfig,
-    model_options: indexmap::IndexMap<String, crate::config::ModelOptionValue>,
+    params: indexmap::IndexMap<String, crate::config::ModelOptionValue>,
 ) -> anyhow::Result<TranscriptionConfig> {
     let provider =
         TranscriptionProvider::from_id(&selected_model.provider_id).ok_or_else(|| {
@@ -41,12 +40,11 @@ pub fn config_for_selected_model(
             )
         })?;
 
-    if provider == TranscriptionProvider::Local {
+    if provider == TranscriptionProvider::Whisper {
         return Ok(TranscriptionConfig::new_local(
             selected_model.model_id.clone(),
             keywords,
-            providers,
-            model_options,
+            params,
         ));
     }
 
@@ -68,8 +66,7 @@ pub fn config_for_selected_model(
         model.endpoint,
         api_key,
         keywords,
-        providers,
-        model_options,
+        params,
     ))
 }
 

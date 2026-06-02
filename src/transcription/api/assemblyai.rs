@@ -101,7 +101,7 @@ pub(super) fn validate_options(
 
     if options.contains_key("prompt") && options.contains_key("keyterms_prompt") {
         anyhow::bail!(
-            "Invalid options for '{}'. AssemblyAI does not allow 'prompt' and 'keyterms_prompt' together.",
+            "Invalid params for '{}'. AssemblyAI does not allow 'prompt' and 'keyterms_prompt' together.",
             full_model_id
         );
     }

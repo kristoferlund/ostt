@@ -40,23 +40,33 @@ reference_level_db = -20
 # Add more formats as needed - ffmpeg handles the rest!
 output_format = "mp3 -ab 16k -ar 12000"
 
-# Per-model transcription request options.
-# Keys must use the full provider/model id and options are validated against that model.
+# Provider and per-model transcription params.
+# Provider params apply to all models for that provider. Model params override provider params.
 #
 # Examples:
-# [model_options."deepgram/nova-3"]
+# [deepgram.params]
+# detect_language = true
+# smart_format = true
+#
+# [deepgram.nova-3.params]
 # detect_language = true
 # smart_format = true
 # keyterm = ["OSTT"]
 #
-# [model_options."berget/openai/whisper-large-v3"]
+# [berget."openai/whisper-large-v3".params]
 # language = "sv"
 #
-# Local Whisper-compatible models support the same option keys per model.
-# [model_options."local/turbo"]
+# Built-in local Whisper models use the whisper provider.
+# [whisper]
+# output_format = "pcm_s16le -ar 16000"
+#
+# [whisper.params]
 # language = "auto"
 # no_timestamps = true
 # no_context = true
 # temperature = 0.0
 # entropy_thold = 2.4
 # no_speech_thold = 0.6
+#
+# [whisper.turbo.params]
+# language = "sv"

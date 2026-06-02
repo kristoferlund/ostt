@@ -26,6 +26,10 @@ pub fn parse_provider_model(value: &str) -> anyhow::Result<SelectedModel> {
         anyhow::bail!("Expected model in PROVIDER/MODEL format, for example deepgram/nova-3");
     }
 
+    if provider_id == "local" {
+        anyhow::bail!("Provider 'local' is no longer supported. Use 'whisper/{model_id}'.");
+    }
+
     let provider = TranscriptionProvider::from_id(provider_id);
     if provider.is_none() {
         anyhow::bail!(
@@ -35,7 +39,8 @@ pub fn parse_provider_model(value: &str) -> anyhow::Result<SelectedModel> {
         );
     }
 
-    if provider != Some(TranscriptionProvider::Local) && find_model(provider_id, model_id).is_none()
+    if provider != Some(TranscriptionProvider::Whisper)
+        && find_model(provider_id, model_id).is_none()
     {
         anyhow::bail!(
             "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",

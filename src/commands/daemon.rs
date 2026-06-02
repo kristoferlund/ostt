@@ -226,7 +226,7 @@ fn active_local_model() -> Option<String> {
     crate::config::get_selected_model_entry()
         .ok()
         .flatten()
-        .filter(|m| m.provider_id == "local")
+        .filter(|m| m.provider_id == "whisper")
         .map(|m| m.model_id)
 }
 

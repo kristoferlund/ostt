@@ -1,4 +1,4 @@
-//! Version comparison and migration logic.
+//! Version comparison and config version maintenance.
 //!
 //! Handles checking if setup is needed by comparing embedded version with config file version.
 
@@ -95,7 +95,7 @@ fn read_config_version_from_file(config_path: &Path) -> anyhow::Result<Option<St
 /// 3. Config file version is older than current version
 ///
 /// Returns the version that the config file was at. Callers decide whether to
-/// create the default config, run migrations, or only update `config_version`.
+/// create the default config or update `config_version`.
 pub fn check_setup_needed(config_path: &Path) -> anyhow::Result<Option<String>> {
     if !config_path.exists() {
         // Config doesn't exist — setup is needed (fresh install)
@@ -161,10 +161,6 @@ pub fn update_config_version(config_path: &Path) -> anyhow::Result<()> {
     };
 
     std::fs::write(config_path, new_content)?;
-    Ok(())
-}
-
-pub fn run_config_migrations(_config_path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 

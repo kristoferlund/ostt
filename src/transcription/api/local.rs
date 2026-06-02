@@ -58,7 +58,7 @@ pub(super) async fn transcribe(
 ) -> anyhow::Result<String> {
     validate_local_audio_format(audio_path)?;
     let mut local_config = config.local_config().cloned().unwrap_or_default();
-    apply_model_options(config, &mut local_config);
+    apply_params(config, &mut local_config);
 
     if let Some(text) = try_daemon_transcription(&config.model_id, audio_path, &local_config).await
     {
@@ -124,7 +124,7 @@ pub(super) async fn transcribe(
     Ok(filter_obvious_hallucination(&text).unwrap_or_default())
 }
 
-fn apply_model_options(config: &TranscriptionConfig, local_config: &mut LocalTranscriptionConfig) {
+fn apply_params(config: &TranscriptionConfig, local_config: &mut LocalTranscriptionConfig) {
     if let Some(language) = config.option_string("language") {
         local_config.language = language.to_string();
     }
@@ -220,7 +220,7 @@ pub(crate) fn load_audio_for_whisper(audio_path: &Path) -> anyhow::Result<Vec<f3
 pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<()> {
     let reader = hound::WavReader::open(audio_path).map_err(|err| {
         anyhow::anyhow!(
-            "Local transcription requires WAV audio: {err}. Configure [audio] with output_format = \"pcm_s16le -ar 16000\"."
+            "Whisper transcription requires WAV audio: {err}. Configure [whisper] with output_format = \"pcm_s16le -ar 16000\"."
         )
     })?;
     let spec = reader.spec();
@@ -231,7 +231,7 @@ pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<(
         || spec.channels != 1
     {
         anyhow::bail!(
-            "Local transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Configure [audio] with output_format = \"pcm_s16le -ar 16000\". Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
+            "Whisper transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Configure [whisper] with output_format = \"pcm_s16le -ar 16000\". Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
             spec.sample_format,
             spec.bits_per_sample,
             spec.sample_rate,

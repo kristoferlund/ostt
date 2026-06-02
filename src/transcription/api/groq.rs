@@ -81,7 +81,7 @@ pub(super) fn validate_options(
         if let Some(ModelOptionValue::String(response_format)) = options.get("response_format") {
             if response_format != "verbose_json" {
                 anyhow::bail!(
-                    "Invalid options for '{}'. Groq timestamp_granularities requires response_format = \"verbose_json\".",
+                    "Invalid params for '{}'. Groq timestamp_granularities requires response_format = \"verbose_json\".",
                     full_model_id
                 );
             }

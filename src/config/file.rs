@@ -78,7 +78,7 @@ fn default_true() -> bool {
     true
 }
 
-/// Local transcription provider configuration.
+/// Built-in whisper.cpp transcription defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LocalTranscriptionConfig {
@@ -134,14 +134,6 @@ fn validate_local_values(
     Ok(())
 }
 
-/// All provider configurations
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct ProvidersConfig {
-    #[serde(default)]
-    pub local: LocalTranscriptionConfig,
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ModelOptionValue {
@@ -152,7 +144,45 @@ pub enum ModelOptionValue {
     StringList(Vec<String>),
 }
 
-pub type ModelOptionsConfig = IndexMap<String, IndexMap<String, ModelOptionValue>>;
+pub type ParamsConfig = IndexMap<String, ModelOptionValue>;
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderModelConfig {
+    #[serde(flatten)]
+    pub settings: ProviderSettings,
+    #[serde(default)]
+    pub params: ParamsConfig,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ProviderConfig {
+    #[serde(flatten)]
+    pub settings: ProviderSettings,
+    #[serde(default)]
+    pub params: ParamsConfig,
+    #[serde(default)]
+    pub models: IndexMap<String, ProviderModelConfig>,
+}
+
+pub type ProviderConfigs = IndexMap<String, ProviderConfig>;
 
 /// Popup window configuration for the `launch` subcommand.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -531,22 +561,28 @@ pub struct TranscriptionSelectionConfig {
     pub model: Option<String>,
 }
 
+const FIXED_TOP_LEVEL_SECTIONS: &[&str] = &["audio", "transcription", "process", "popup"];
+const DEPRECATED_TOP_LEVEL_SECTIONS: &[&str] = &["providers", "model_options"];
+
 /// Complete application configuration.
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug)]
 pub struct OsttConfig {
-    #[serde(default = "current_config_version")]
     pub config_version: String,
     pub audio: AudioConfig,
-    #[serde(default)]
     pub transcription: TranscriptionSelectionConfig,
-    #[serde(default)]
-    pub providers: ProvidersConfig,
-    #[serde(default)]
-    pub model_options: ModelOptionsConfig,
-    #[serde(default)]
+    pub provider_configs: ProviderConfigs,
     pub process: ProcessConfig,
-    #[serde(default)]
     pub popup: PopupConfig,
+}
+
+impl<'de> Deserialize<'de> for OsttConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let mut table = toml::Table::deserialize(deserializer)?;
+        parse_config_table(&mut table).map_err(serde::de::Error::custom)
+    }
 }
 
 impl OsttConfig {
@@ -560,8 +596,7 @@ impl OsttConfig {
         let config_path = get_config_path()?;
         let config_content = fs::read_to_string(&config_path)?;
         let config: OsttConfig = toml::from_str(&config_content)?;
-        config.providers.local.validate()?;
-        validate_model_options(&config.model_options)?;
+        validate_config(&config)?;
         for action in &config.process.actions {
             action.validate()?;
         }
@@ -575,7 +610,7 @@ impl OsttConfig {
     /// - If the file cannot be written
     pub fn save(&self) -> anyhow::Result<()> {
         let config_path = get_config_path()?;
-        let config_content = toml::to_string_pretty(self)?;
+        let config_content = toml::to_string_pretty(&config_to_table(self)?)?;
         fs::write(&config_path, config_content)?;
         tracing::info!("Configuration saved");
         Ok(())
@@ -594,12 +629,353 @@ impl OsttConfig {
                 visualization: VisualizationType::default(),
             },
             transcription: TranscriptionSelectionConfig::default(),
-            providers: ProvidersConfig::default(),
-            model_options: ModelOptionsConfig::default(),
+            provider_configs: ProviderConfigs::default(),
             process: ProcessConfig::default(),
             popup: PopupConfig::default(),
         }
     }
+}
+
+fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
+    reject_deprecated_top_level_sections(table)?;
+    reject_deprecated_section_keys(table)?;
+
+    let config_version = match table.remove("config_version") {
+        Some(value) => value.try_into()?,
+        None => current_config_version(),
+    };
+    let audio = take_required_section::<AudioConfig>(table, "audio")?;
+    let transcription =
+        take_optional_section::<TranscriptionSelectionConfig>(table, "transcription")?;
+    let process = take_optional_section::<ProcessConfig>(table, "process")?;
+    let popup = take_optional_section::<PopupConfig>(table, "popup")?;
+
+    let mut provider_configs = ProviderConfigs::new();
+    let provider_tables = std::mem::take(table);
+    for (provider_id, value) in provider_tables {
+        if FIXED_TOP_LEVEL_SECTIONS.contains(&provider_id.as_str()) {
+            anyhow::bail!("duplicate top-level section '{provider_id}'");
+        }
+        if crate::transcription::TranscriptionProvider::from_id(&provider_id).is_none() {
+            anyhow::bail!(
+                "Unknown top-level config section '{}'. Expected one of: audio, transcription, process, popup, {}.",
+                provider_id,
+                crate::transcription::TranscriptionProvider::supported_ids().join(", ")
+            );
+        }
+        let toml::Value::Table(provider_table) = value else {
+            anyhow::bail!("Provider config '{provider_id}' must be a table");
+        };
+        provider_configs.insert(
+            provider_id.clone(),
+            parse_provider_config(&provider_id, provider_table)?,
+        );
+    }
+
+    let config = OsttConfig {
+        config_version,
+        audio,
+        transcription,
+        provider_configs,
+        process,
+        popup,
+    };
+    validate_config(&config)?;
+    Ok(config)
+}
+
+fn reject_deprecated_top_level_sections(table: &toml::Table) -> anyhow::Result<()> {
+    for section in DEPRECATED_TOP_LEVEL_SECTIONS {
+        if table.contains_key(*section) {
+            anyhow::bail!(
+                "Deprecated config section '[{}]' is no longer supported. Use top-level provider sections with '.params', for example '[whisper.params]' or '[openai.gpt-4o-transcribe.params]'.",
+                section
+            );
+        }
+    }
+    Ok(())
+}
+
+fn reject_deprecated_section_keys(table: &toml::Table) -> anyhow::Result<()> {
+    if table
+        .get("audio")
+        .and_then(toml::Value::as_table)
+        .is_some_and(|audio| audio.contains_key("sample_rate"))
+    {
+        anyhow::bail!(
+            "Deprecated config key '[audio].sample_rate' is no longer supported. Use '[audio].output_format' instead, for example output_format = \"mp3 -ab 16k -ar 12000\"."
+        );
+    }
+
+    if table
+        .get("process")
+        .and_then(toml::Value::as_table)
+        .and_then(|process| process.get("actions"))
+        .is_some_and(toml::Value::is_array)
+    {
+        anyhow::bail!(
+            "Deprecated config table '[[process.actions]]' is no longer supported. Use named action tables instead, for example '[process.actions.clean]'."
+        );
+    }
+
+    Ok(())
+}
+
+fn take_required_section<T>(table: &mut toml::Table, name: &str) -> anyhow::Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let Some(value) = table.remove(name) else {
+        anyhow::bail!("Missing required config section '[{name}]'");
+    };
+    Ok(value.try_into()?)
+}
+
+fn take_optional_section<T>(table: &mut toml::Table, name: &str) -> anyhow::Result<T>
+where
+    T: serde::de::DeserializeOwned + Default,
+{
+    match table.remove(name) {
+        Some(value) => Ok(value.try_into()?),
+        None => Ok(T::default()),
+    }
+}
+
+fn parse_provider_config(provider_id: &str, table: toml::Table) -> anyhow::Result<ProviderConfig> {
+    let mut config = ProviderConfig::default();
+
+    for (key, value) in table {
+        if key == "params" {
+            config.params = parse_params_table(provider_id, None, value)?;
+            continue;
+        }
+
+        if is_provider_setting_key(&key) {
+            set_provider_setting(&mut config.settings, &key, value)?;
+            continue;
+        }
+
+        let toml::Value::Table(model_table) = value else {
+            anyhow::bail!(
+                "Unknown setting '{}' in provider config '[{}]'",
+                key,
+                provider_id
+            );
+        };
+        config.models.insert(
+            key.clone(),
+            parse_provider_model_config(provider_id, &key, model_table)?,
+        );
+    }
+
+    Ok(config)
+}
+
+fn parse_provider_model_config(
+    provider_id: &str,
+    model_id: &str,
+    table: toml::Table,
+) -> anyhow::Result<ProviderModelConfig> {
+    let mut config = ProviderModelConfig::default();
+
+    for (key, value) in table {
+        if key == "params" {
+            config.params = parse_params_table(provider_id, Some(model_id), value)?;
+            continue;
+        }
+
+        if is_provider_setting_key(&key) {
+            set_provider_setting(&mut config.settings, &key, value)?;
+            continue;
+        }
+
+        anyhow::bail!(
+            "Unknown setting '{}' in provider model config '[{}.{}]'",
+            key,
+            provider_id,
+            model_id
+        );
+    }
+
+    Ok(config)
+}
+
+fn parse_params_table(
+    provider_id: &str,
+    model_id: Option<&str>,
+    value: toml::Value,
+) -> anyhow::Result<ParamsConfig> {
+    let toml::Value::Table(table) = value else {
+        anyhow::bail!("Params for provider '{}' must be a table", provider_id);
+    };
+    let params: ParamsConfig = toml::Value::Table(table).try_into()?;
+    if let Some(model_id) = model_id {
+        validate_params_for_model(provider_id, model_id, &params)?;
+    }
+    Ok(params)
+}
+
+fn is_provider_setting_key(key: &str) -> bool {
+    matches!(
+        key,
+        "output_format"
+            | "timeout_secs"
+            | "command"
+            | "endpoint"
+            | "model"
+            | "api_key_env"
+            | "display_name"
+    )
+}
+
+fn set_provider_setting(
+    settings: &mut ProviderSettings,
+    key: &str,
+    value: toml::Value,
+) -> anyhow::Result<()> {
+    match key {
+        "output_format" => settings.output_format = Some(value.try_into()?),
+        "timeout_secs" => settings.timeout_secs = Some(value.try_into()?),
+        "command" => settings.command = Some(value.try_into()?),
+        "endpoint" => settings.endpoint = Some(value.try_into()?),
+        "model" => settings.model = Some(value.try_into()?),
+        "api_key_env" => settings.api_key_env = Some(value.try_into()?),
+        "display_name" => settings.display_name = Some(value.try_into()?),
+        _ => unreachable!("unknown provider setting was pre-filtered"),
+    }
+    Ok(())
+}
+
+fn config_to_table(config: &OsttConfig) -> anyhow::Result<toml::Table> {
+    let mut table = toml::Table::new();
+    table.insert(
+        "config_version".to_string(),
+        toml::Value::String(config.config_version.clone()),
+    );
+    table.insert("audio".to_string(), toml::Value::try_from(&config.audio)?);
+    if config.transcription.provider.is_some() || config.transcription.model.is_some() {
+        table.insert(
+            "transcription".to_string(),
+            toml::Value::try_from(&config.transcription)?,
+        );
+    }
+    for (provider_id, provider_config) in &config.provider_configs {
+        table.insert(
+            provider_id.clone(),
+            provider_config_to_value(provider_config)?,
+        );
+    }
+    if !config.process.actions.is_empty() {
+        table.insert(
+            "process".to_string(),
+            toml::Value::try_from(&config.process)?,
+        );
+    }
+    table.insert("popup".to_string(), toml::Value::try_from(&config.popup)?);
+    Ok(table)
+}
+
+fn provider_config_to_value(config: &ProviderConfig) -> anyhow::Result<toml::Value> {
+    let mut table = provider_settings_to_table(&config.settings)?;
+    if !config.params.is_empty() {
+        table.insert("params".to_string(), toml::Value::try_from(&config.params)?);
+    }
+    for (model_id, model_config) in &config.models {
+        table.insert(
+            model_id.clone(),
+            provider_model_config_to_value(model_config)?,
+        );
+    }
+    Ok(toml::Value::Table(table))
+}
+
+fn provider_model_config_to_value(config: &ProviderModelConfig) -> anyhow::Result<toml::Value> {
+    let mut table = provider_settings_to_table(&config.settings)?;
+    if !config.params.is_empty() {
+        table.insert("params".to_string(), toml::Value::try_from(&config.params)?);
+    }
+    Ok(toml::Value::Table(table))
+}
+
+fn provider_settings_to_table(settings: &ProviderSettings) -> anyhow::Result<toml::Table> {
+    let mut table = toml::Table::new();
+    if let Some(value) = &settings.output_format {
+        table.insert(
+            "output_format".to_string(),
+            toml::Value::String(value.clone()),
+        );
+    }
+    if let Some(value) = settings.timeout_secs {
+        table.insert("timeout_secs".to_string(), toml::Value::try_from(value)?);
+    }
+    if let Some(value) = &settings.command {
+        table.insert("command".to_string(), toml::Value::String(value.clone()));
+    }
+    if let Some(value) = &settings.endpoint {
+        table.insert("endpoint".to_string(), toml::Value::String(value.clone()));
+    }
+    if let Some(value) = &settings.model {
+        table.insert("model".to_string(), toml::Value::String(value.clone()));
+    }
+    if let Some(value) = &settings.api_key_env {
+        table.insert(
+            "api_key_env".to_string(),
+            toml::Value::String(value.clone()),
+        );
+    }
+    if let Some(value) = &settings.display_name {
+        table.insert(
+            "display_name".to_string(),
+            toml::Value::String(value.clone()),
+        );
+    }
+    Ok(table)
+}
+
+pub fn validate_config(config: &OsttConfig) -> anyhow::Result<()> {
+    for (provider_id, provider_config) in &config.provider_configs {
+        if crate::transcription::TranscriptionProvider::from_id(provider_id).is_none() {
+            anyhow::bail!("Unknown provider config '{}'.", provider_id);
+        }
+
+        for model_id in provider_config.models.keys() {
+            validate_model_id(provider_id, model_id)?;
+        }
+    }
+
+    if config.transcription.provider.as_deref() == Some("local") {
+        anyhow::bail!("Provider 'local' is no longer supported. Use provider = \"whisper\".");
+    }
+
+    Ok(())
+}
+
+pub fn resolve_output_format(
+    config: &OsttConfig,
+    selected_model: &crate::config::SelectedModel,
+) -> String {
+    if let Some(output_format) = config
+        .provider_configs
+        .get(&selected_model.provider_id)
+        .and_then(|provider| provider.models.get(&selected_model.model_id))
+        .and_then(|model| model.settings.output_format.as_deref())
+    {
+        return output_format.to_string();
+    }
+
+    if let Some(output_format) = config
+        .provider_configs
+        .get(&selected_model.provider_id)
+        .and_then(|provider| provider.settings.output_format.as_deref())
+    {
+        return output_format.to_string();
+    }
+
+    if selected_model.provider_id == "whisper" {
+        return LOCAL_TRANSCRIPTION_OUTPUT_FORMAT.to_string();
+    }
+
+    config.audio.output_format.clone()
 }
 
 /// Retrieves the path to the config file.
@@ -622,51 +998,52 @@ pub fn save_config(config: &OsttConfig) -> anyhow::Result<()> {
     config.save()
 }
 
-pub fn validate_model_options(model_options: &ModelOptionsConfig) -> anyhow::Result<()> {
-    for (full_model_id, options) in model_options {
-        let (provider_id, model_id) = full_model_id.split_once('/').ok_or_else(|| {
-            anyhow::anyhow!(
-                "Invalid model_options key '{}'. Use 'provider/model'.",
-                full_model_id
-            )
-        })?;
-
-        if provider_id != "local" && model::find_model(provider_id, model_id).is_none() {
-            anyhow::bail!(
-                "Invalid model_options key '{}'. Unknown provider/model.",
-                full_model_id
-            );
-        }
-
-        if provider_id == "local" && !crate::transcription::local_models::is_safe_model_id(model_id)
-        {
-            anyhow::bail!(
-                "Invalid model_options key '{}'. Local model id must contain only lowercase letters, digits, '.', '_' or '-'.",
-                full_model_id
-            );
-        }
-
-        let schema = api::option_schema(provider_id, model_id).ok_or_else(|| {
-            anyhow::anyhow!(
-                "Invalid model_options key '{}'. No options are supported for this model.",
-                full_model_id
-            )
-        })?;
-
-        for (option_name, value) in options {
-            let Some(spec) = schema.option(option_name) else {
-                anyhow::bail!(
-                    "Invalid option '{}' for '{}'. Supported options: {}.",
-                    option_name,
-                    full_model_id,
-                    schema.option_names().join(", ")
-                );
-            };
-            validate_model_option_type(full_model_id, option_name, value, spec.kind)?;
-        }
-
-        api::validate_model_options(provider_id, full_model_id, options)?;
+pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
+    if provider_id != "whisper" && model::find_model(provider_id, model_id).is_none() {
+        anyhow::bail!(
+            "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
+            model_id,
+            provider_id
+        );
     }
+
+    if provider_id == "whisper" && !crate::transcription::local_models::is_safe_model_id(model_id) {
+        anyhow::bail!(
+            "Whisper model id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
+            model_id
+        );
+    }
+
+    Ok(())
+}
+
+pub fn validate_params_for_model(
+    provider_id: &str,
+    model_id: &str,
+    params: &ParamsConfig,
+) -> anyhow::Result<()> {
+    validate_model_id(provider_id, model_id)?;
+    let full_model_id = format!("{provider_id}/{model_id}");
+    let schema = api::option_schema(provider_id, model_id).ok_or_else(|| {
+        anyhow::anyhow!(
+            "Invalid params for '{}'. No params are supported for this model.",
+            full_model_id
+        )
+    })?;
+
+    for (option_name, value) in params {
+        let Some(spec) = schema.option(option_name) else {
+            anyhow::bail!(
+                "Invalid param '{}' for '{}'. Supported params: {}.",
+                option_name,
+                full_model_id,
+                schema.option_names().join(", ")
+            );
+        };
+        validate_model_option_type(&full_model_id, option_name, value, spec.kind)?;
+    }
+
+    api::validate_params(provider_id, &full_model_id, params)?;
 
     Ok(())
 }
@@ -719,7 +1096,7 @@ fn validate_model_option_type(
 
     if !matches {
         anyhow::bail!(
-            "Invalid value for option '{}' in '{}'. Expected {}.",
+            "Invalid value for param '{}' in '{}'. Expected {}.",
             option_name,
             full_model_id,
             expected.name()
@@ -728,7 +1105,7 @@ fn validate_model_option_type(
 
     if matches_empty_string(expected, value) {
         anyhow::bail!(
-            "Invalid value for option '{}' in '{}'. Value must not be empty.",
+            "Invalid value for param '{}' in '{}'. Value must not be empty.",
             option_name,
             full_model_id,
         );
@@ -744,68 +1121,6 @@ fn matches_empty_string(expected: model::ModelOptionKind, value: &ModelOptionVal
         (model::ModelOptionKind::StringOrStringList, ModelOptionValue::String(s)) => s.is_empty(),
         _ => false,
     }
-}
-
-pub fn ensure_local_transcription_audio_config() -> anyhow::Result<()> {
-    let config_path = get_config_path()?;
-    let content = fs::read_to_string(&config_path)?;
-    let updated = ensure_local_transcription_audio_config_content(&content);
-    fs::write(config_path, updated)?;
-    Ok(())
-}
-
-fn ensure_local_transcription_audio_config_content(content: &str) -> String {
-    let mut output = Vec::new();
-    let mut in_audio = false;
-    let mut saw_audio = false;
-    let mut wrote_output_format = false;
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed == "[audio]" {
-            in_audio = true;
-            saw_audio = true;
-            wrote_output_format = false;
-            output.push(line.to_string());
-            continue;
-        }
-
-        if in_audio && trimmed.starts_with('[') && trimmed.ends_with(']') {
-            if !wrote_output_format {
-                output.push(format!(
-                    "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
-                ));
-            }
-            in_audio = false;
-        }
-
-        if in_audio && trimmed.starts_with("sample_rate") {
-            continue;
-        } else if in_audio && trimmed.starts_with("output_format") {
-            output.push(format!(
-                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
-            ));
-            wrote_output_format = true;
-        } else {
-            output.push(line.to_string());
-        }
-    }
-
-    if in_audio {
-        if !wrote_output_format {
-            output.push(format!(
-                "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
-            ));
-        }
-    } else if !saw_audio {
-        output.push(String::new());
-        output.push("[audio]".to_string());
-        output.push(format!(
-            "output_format = \"{LOCAL_TRANSCRIPTION_OUTPUT_FORMAT}\""
-        ));
-    }
-
-    format!("{}\n", output.join("\n").trim())
 }
 
 #[cfg(test)]
@@ -842,30 +1157,6 @@ mod tests {
         assert!(!is_local_transcription_audio_compatible(&audio));
     }
 
-    #[test]
-    fn local_transcription_audio_update_preserves_other_config() {
-        let content = r#"# ostt
-[audio]
-device = "default"
-peak_volume_threshold = 90
-output_format = "mp3 -ab 16k -ar 12000"
-visualization = "spectrum"
-
-[transcription]
-provider = "openai"
-model = "whisper-1"
-"#;
-
-        let updated = ensure_local_transcription_audio_config_content(content);
-
-        assert!(updated.contains("device = \"default\""));
-        assert!(!updated.contains("sample_rate"));
-        assert!(updated.contains("peak_volume_threshold = 90"));
-        assert!(updated.contains("output_format = \"pcm_s16le -ar 16000\""));
-        assert!(updated.contains("[transcription]"));
-        assert!(updated.contains("provider = \"openai\""));
-    }
-
     fn validate_process_config(config: &ProcessConfig) -> Result<(), Box<dyn std::error::Error>> {
         for action in &config.actions {
             action.validate()?;
@@ -874,8 +1165,7 @@ model = "whisper-1"
     }
 
     fn validate_ostt_config(config: &OsttConfig) -> anyhow::Result<()> {
-        config.providers.local.validate()?;
-        validate_model_options(&config.model_options)?;
+        validate_config(config)?;
         for action in &config.process.actions {
             action
                 .validate()
@@ -981,29 +1271,30 @@ model = "whisper-1"
     }
 
     #[test]
-    fn missing_local_provider_defaults_to_standard_local_params() {
+    fn missing_whisper_provider_uses_builtin_output_format_default() {
         let toml_str = r#"
             [audio]
             device = "default"
         "#;
 
         let config = parse_ostt_config(toml_str).unwrap();
-        let local = &config.providers.local;
-        assert_eq!(local.language, "auto");
-        assert!(local.no_timestamps);
-        assert!(local.no_context);
-        assert_eq!(local.temperature, 0.0);
-        assert_eq!(local.entropy_thold, 2.4);
-        assert_eq!(local.no_speech_thold, 0.6);
+        let selected = crate::config::SelectedModel {
+            provider_id: "whisper".to_string(),
+            model_id: "turbo".to_string(),
+        };
+        assert_eq!(
+            resolve_output_format(&config, &selected),
+            "pcm_s16le -ar 16000"
+        );
     }
 
     #[test]
-    fn full_local_provider_deserializes() {
+    fn full_whisper_params_deserialize() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [providers.local]
+            [whisper.params]
             language = "sv"
             no_timestamps = false
             no_context = false
@@ -1013,13 +1304,16 @@ model = "whisper-1"
         "#;
 
         let config = parse_ostt_config(toml_str).unwrap();
-        let local = &config.providers.local;
-        assert_eq!(local.language, "sv");
-        assert!(!local.no_timestamps);
-        assert!(!local.no_context);
-        assert_eq!(local.temperature, 0.2);
-        assert_eq!(local.entropy_thold, 3.0);
-        assert_eq!(local.no_speech_thold, 0.4);
+        let params = &config.provider_configs["whisper"].params;
+        assert_eq!(
+            params["language"],
+            ModelOptionValue::String("sv".to_string())
+        );
+        assert_eq!(params["no_timestamps"], ModelOptionValue::Bool(false));
+        assert_eq!(params["no_context"], ModelOptionValue::Bool(false));
+        assert_eq!(params["temperature"], ModelOptionValue::Number(0.2));
+        assert_eq!(params["entropy_thold"], ModelOptionValue::Number(3.0));
+        assert_eq!(params["no_speech_thold"], ModelOptionValue::Number(0.4));
     }
 
     #[test]
@@ -1037,12 +1331,11 @@ model = "whisper-1"
                     [audio]
                     device = "default"
 
-                    [providers.local]
+                    [whisper.turbo.params]
                     {local_setting}
                 "#
             );
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            let err = parse_ostt_config(&toml_str).unwrap_err().to_string();
             assert!(
                 err.contains(expected_error),
                 "expected '{err}' to contain '{expected_error}'"
@@ -1056,7 +1349,7 @@ model = "whisper-1"
             [audio]
             device = "default"
 
-            [providers.local]
+            [whisper.params]
             temperature = 1.0
             entropy_thold = 0.0
             no_speech_thold = 0.0
@@ -1067,12 +1360,12 @@ model = "whisper-1"
     }
 
     #[test]
-    fn model_options_validate_against_model_schema() {
+    fn params_validate_against_model_schema() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [model_options."deepgram/nova-3"]
+            [deepgram.nova-3.params]
             detect_language = ["sv", "en"]
             smart_format = true
             keyterm = ["OSTT"]
@@ -1083,12 +1376,12 @@ model = "whisper-1"
     }
 
     #[test]
-    fn model_options_allow_local_whisper_options_per_model() {
+    fn params_allow_whisper_params_per_model() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [model_options."local/tiny"]
+            [whisper.tiny.params]
             language = "sv"
             no_timestamps = true
             no_context = false
@@ -1096,7 +1389,7 @@ model = "whisper-1"
             entropy_thold = 2.4
             no_speech_thold = 0.6
 
-            [model_options."local/turbo"]
+            [whisper.turbo.params]
             language = "en"
             temperature = 0.2
         "#;
@@ -1106,7 +1399,7 @@ model = "whisper-1"
     }
 
     #[test]
-    fn model_options_reject_invalid_local_whisper_values() {
+    fn params_reject_invalid_whisper_values() {
         let cases = [
             ("temperature = 1.5", "Expected 0-1"),
             ("entropy_thold = -1.0", "Expected >= 0"),
@@ -1119,424 +1412,95 @@ model = "whisper-1"
                     [audio]
                     device = "default"
 
-                    [model_options."local/turbo"]
+                    [whisper.turbo.params]
                     {setting}
                 "#
             );
 
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
+            let err = parse_ostt_config(&toml_str).unwrap_err().to_string();
             assert!(err.contains(expected), "{err}");
         }
     }
 
     #[test]
-    fn model_options_reject_unsafe_local_model_id() {
+    fn params_reject_unsafe_whisper_model_id() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [model_options."local/Turbo"]
+            [whisper.Turbo.params]
             language = "en"
         "#;
 
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("Local model id"));
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("Whisper model id"));
     }
 
     #[test]
-    fn model_options_reject_wrong_value_types() {
+    fn params_reject_wrong_value_types() {
         let cases = [
             (
-                "deepgram/nova-3",
+                "[deepgram.nova-3.params]",
                 "smart_format = \"true\"",
                 "smart_format",
                 "boolean",
             ),
             (
-                "openai/gpt-4o-transcribe",
+                "[openai.gpt-4o-transcribe.params]",
                 "temperature = \"0.2\"",
                 "temperature",
                 "number",
             ),
             (
-                "openai/gpt-4o-transcribe",
+                "[openai.gpt-4o-transcribe.params]",
                 "prompt = [\"OSTT\"]",
                 "prompt",
                 "string",
             ),
             (
-                "deepgram/nova-3",
+                "[deepgram.nova-3.params]",
                 "keyterm = \"OSTT\"",
                 "keyterm",
                 "string list",
             ),
             (
-                "elevenlabs/scribe_v2",
+                "[elevenlabs.scribe_v2.params]",
                 "num_speakers = \"2\"",
                 "num_speakers",
                 "integer",
             ),
         ];
 
-        for (model_id, setting, option_name, expected_type) in cases {
+        for (header, setting, param_name, expected_type) in cases {
             let toml_str = format!(
                 r#"
                     [audio]
                     device = "default"
 
-                    [model_options."{model_id}"]
+                    {header}
                     {setting}
                 "#
             );
 
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
-            assert!(err.contains(option_name), "{err}");
+            let err = parse_ostt_config(&toml_str).unwrap_err().to_string();
+            assert!(err.contains(param_name), "{err}");
             assert!(err.contains(expected_type), "{err}");
         }
     }
 
     #[test]
-    fn model_options_accept_bool_or_string_list_shapes() {
+    fn params_parse_quoted_model_ids_with_slashes() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [model_options."deepgram/nova-3"]
-            detect_language = true
-
-            [model_options."deepgram/nova-2"]
-            detect_language = ["en", "sv"]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_reject_invalid_bool_or_string_list_shape() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."deepgram/nova-3"]
-            detect_language = "en,sv"
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("detect_language"));
-        assert!(err.contains("boolean or string list"));
-    }
-
-    #[test]
-    fn model_options_reject_duplicate_config_keys_at_parse_time() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."deepgram/nova-3"]
-            smart_format = true
-            smart_format = false
-        "#;
-
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("duplicate key") || err.contains("duplicate field"));
-    }
-
-    #[test]
-    fn model_options_reject_unknown_option_for_model() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."openai/gpt-4o-transcribe"]
-            smart_format = true
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("Invalid option 'smart_format'"));
-    }
-
-    #[test]
-    fn model_options_allow_openai_documented_json_safe_options() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."openai/gpt-4o-transcribe"]
-            include = ["logprobs"]
-
-            [model_options."openai/whisper-1"]
-            response_format = "verbose_json"
-            timestamp_granularities = ["word", "segment"]
-
-            [model_options."openai/gpt-4o-transcribe-diarize"]
-            response_format = "diarized_json"
-            chunking_strategy = "auto"
-            known_speaker_names = ["agent"]
-            known_speaker_references = ["data:audio/wav;base64,AAA..."]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_reject_openai_options_that_break_json_parsing_or_api_rules() {
-        let cases = [
-            (
-                "openai/gpt-4o-transcribe",
-                "include = [\"timestamps\"]",
-                "include",
-            ),
-            (
-                "openai/whisper-1",
-                "response_format = \"srt\"",
-                "response_format",
-            ),
-            (
-                "openai/whisper-1",
-                "timestamp_granularities = [\"sentence\"]",
-                "timestamp_granularities",
-            ),
-            (
-                "openai/whisper-1",
-                "response_format = \"json\"\ntimestamp_granularities = [\"word\"]",
-                "verbose_json",
-            ),
-            (
-                "openai/gpt-4o-transcribe-diarize",
-                "chunking_strategy = \"none\"",
-                "chunking_strategy",
-            ),
-        ];
-
-        for (model_id, setting, expected) in cases {
-            let toml_str = format!(
-                r#"
-                    [audio]
-                    device = "default"
-
-                    [model_options."{model_id}"]
-                    {setting}
-                "#
-            );
-
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
-            assert!(err.contains(expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn model_options_reject_model_specific_deepgram_keyterm() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."deepgram/nova-2"]
-            keyterm = ["OSTT"]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("Invalid option 'keyterm'"));
-    }
-
-    #[test]
-    fn model_options_allow_deepgram_nova_2_keywords() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."deepgram/nova-2"]
-            keywords = ["OSTT"]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_reject_model_specific_elevenlabs_v2_option_on_v1() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."elevenlabs/scribe_v1"]
-            no_verbatim = true
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("Invalid option 'no_verbatim'"));
-    }
-
-    #[test]
-    fn model_options_allow_elevenlabs_documented_options() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."elevenlabs/scribe_v2"]
-            language_code = "en"
-            tag_audio_events = true
-            timestamps_granularity = "word"
-            diarize = true
-            detect_speaker_roles = true
-            diarization_threshold = 0.2
-            temperature = 1.5
-            file_format = "other"
-            seed = 42
-            use_multi_channel = false
-            keyterms = ["OSTT"]
-            no_verbatim = true
-            entity_detection = ["pii", "phi"]
-            entity_redaction = "pii"
-            entity_redaction_mode = "enumerated_entity_type"
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_reject_invalid_elevenlabs_values() {
-        let cases = [
-            (
-                "timestamps_granularity = \"sentence\"",
-                "timestamps_granularity",
-            ),
-            ("file_format = \"wav\"", "file_format"),
-            (
-                "entity_redaction_mode = \"masked\"",
-                "entity_redaction_mode",
-            ),
-            (
-                "diarize = false\ndiarization_threshold = 0.2",
-                "diarization_threshold requires diarize",
-            ),
-            (
-                "diarize = true\nnum_speakers = 2\ndiarization_threshold = 0.2",
-                "diarization_threshold cannot be used with num_speakers",
-            ),
-            (
-                "detect_speaker_roles = true",
-                "detect_speaker_roles requires diarize",
-            ),
-            (
-                "diarize = true\ndetect_speaker_roles = true\nuse_multi_channel = true",
-                "detect_speaker_roles cannot be used with use_multi_channel",
-            ),
-        ];
-
-        for (setting, expected) in cases {
-            let toml_str = format!(
-                r#"
-                    [audio]
-                    device = "default"
-
-                    [model_options."elevenlabs/scribe_v2"]
-                    {setting}
-                "#
-            );
-
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
-            assert!(err.contains(expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn model_options_reject_berget_only_hotwords_on_groq() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."groq/whisper-large-v3"]
-            hotwords = ["OSTT"]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("Invalid option 'hotwords'"));
-    }
-
-    #[test]
-    fn model_options_allow_berget_openapi_options() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."berget/KBLab/kb-whisper-large"]
+            [berget."openai/whisper-large-v3".params]
             language = "sv"
             hotwords = ["OSTT", "Berget"]
             prompt = "Swedish technical dictation."
             temperature = 0.0
-            response_format = "verbose_json"
-            timestamp_granularities = ["word", "segment"]
-            align = true
-            diarize = true
-            speaker_embeddings = true
-            chunk_size = 30
-            batch_size = 8
-        "#;
 
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_reject_invalid_berget_values() {
-        let cases = [
-            ("response_format = \"srt\"", "response_format"),
-            (
-                "timestamp_granularities = [\"sentence\"]",
-                "timestamp_granularities",
-            ),
-            ("chunk_size = 0", "chunk_size"),
-            ("chunk_size = 61", "chunk_size"),
-            ("batch_size = 0", "batch_size"),
-            ("batch_size = 33", "batch_size"),
-            ("stream = true", "Invalid option 'stream'"),
-        ];
-
-        for (setting, expected) in cases {
-            let toml_str = format!(
-                r#"
-                    [audio]
-                    device = "default"
-
-                    [model_options."berget/openai/whisper-large-v3"]
-                    {setting}
-                "#
-            );
-
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
-            assert!(err.contains(expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn model_options_allow_deepinfra_documented_options_and_models() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."deepinfra/openai/whisper-large-v3-turbo"]
-            task = "transcribe"
-            initial_prompt = "Names: OSTT, DeepInfra, Whisper."
-            language = "en"
-            temperature = 0.0
-            chunk_level = "word"
-            chunk_length_s = 30
-
-            [model_options."deepinfra/mistralai/Voxtral-Mini-3B-2507"]
+            [deepinfra."mistralai/Voxtral-Mini-3B-2507".params]
             task = "transcribe"
         "#;
 
@@ -1545,230 +1509,87 @@ model = "whisper-1"
     }
 
     #[test]
-    fn model_options_reject_invalid_deepinfra_values() {
-        let cases = [
-            ("task = \"summarize\"", "task"),
-            ("chunk_level = \"sentence\"", "chunk_level"),
-            ("chunk_length_s = 31", "chunk_length_s"),
-            ("prompt = \"OSTT\"", "Invalid option 'prompt'"),
-        ];
-
-        for (setting, expected) in cases {
-            let toml_str = format!(
-                r#"
-                    [audio]
-                    device = "default"
-
-                    [model_options."deepinfra/openai/whisper-large-v3"]
-                    {setting}
-                "#
-            );
-
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
-            assert!(err.contains(expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn model_options_allow_groq_documented_json_safe_options() {
+    fn params_reject_unknown_param_for_model() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [model_options."groq/whisper-large-v3-turbo"]
-            response_format = "verbose_json"
-            timestamp_granularities = ["word", "segment"]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_reject_groq_options_that_break_json_parsing_or_api_rules() {
-        let cases = [
-            ("response_format = \"text\"", "response_format"),
-            (
-                "timestamp_granularities = [\"sentence\"]",
-                "timestamp_granularities",
-            ),
-            (
-                "response_format = \"json\"\ntimestamp_granularities = [\"word\"]",
-                "verbose_json",
-            ),
-        ];
-
-        for (setting, expected) in cases {
-            let toml_str = format!(
-                r#"
-                    [audio]
-                    device = "default"
-
-                    [model_options."groq/whisper-large-v3"]
-                    {setting}
-                "#
-            );
-
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
-            assert!(err.contains(expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn model_options_allow_mistral_documented_options() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."mistral/voxtral-mini-latest"]
-            language = "sv"
-            diarize = true
-            context_bias = ["OSTT"]
-            temperature = 0.2
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_allow_mistral_timestamp_granularities() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."mistral/voxtral-mini-latest"]
-            context_bias = ["OSTT"]
-            diarize = true
-            timestamp_granularities = ["word"]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
-    }
-
-    #[test]
-    fn model_options_reject_invalid_mistral_values() {
-        let cases = [
-            (
-                "timestamp_granularities = [\"sentence\"]",
-                "timestamp_granularities",
-            ),
-            (
-                "language = \"en\"\ntimestamp_granularities = [\"word\"]",
-                "not compatible with language",
-            ),
-        ];
-
-        for (setting, expected) in cases {
-            let toml_str = format!(
-                r#"
-                    [audio]
-                    device = "default"
-
-                    [model_options."mistral/voxtral-mini-latest"]
-                    {setting}
-                "#
-            );
-
-            let config = parse_ostt_config(&toml_str).unwrap();
-            let err = validate_ostt_config(&config).unwrap_err().to_string();
-            assert!(err.contains(expected), "{err}");
-        }
-    }
-
-    #[test]
-    fn model_options_reject_assemblyai_prompt_with_keyterms_prompt() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."assemblyai/universal-3-pro"]
-            prompt = "Use Swedish spelling."
-            keyterms_prompt = ["OSTT"]
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("prompt"));
-        assert!(err.contains("keyterms_prompt"));
-    }
-
-    #[test]
-    fn model_options_reject_out_of_range_values() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."openai/gpt-4o-transcribe"]
-            temperature = 1.5
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("Expected 0-1"));
-    }
-
-    #[test]
-    fn model_options_reject_empty_string_for_string_typed_option() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."openai/gpt-4o-transcribe"]
-            prompt = ""
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("prompt"));
-        assert!(err.contains("must not be empty"));
-    }
-
-    #[test]
-    fn model_options_reject_empty_string_for_bool_or_string_option() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [model_options."deepgram/nova-3"]
-            language = ""
-        "#;
-
-        let config = parse_ostt_config(toml_str).unwrap();
-        let err = validate_ostt_config(&config).unwrap_err().to_string();
-        assert!(err.contains("language"));
-        assert!(err.contains("must not be empty"));
-    }
-
-    #[test]
-    fn old_provider_level_request_options_fail_deserialization() {
-        let toml_str = r#"
-            [audio]
-            device = "default"
-
-            [providers.deepgram]
+            [openai.gpt-4o-transcribe.params]
             smart_format = true
         "#;
 
         let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("unknown field `deepgram`"));
+        assert!(err.contains("Invalid param 'smart_format'"));
     }
 
     #[test]
-    fn local_config_validation_does_not_validate_active_model_id() {
+    fn deprecated_providers_section_fails_deserialization() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [providers.local]
-            language = "auto"
+            [providers]
         "#;
 
-        let config = parse_ostt_config(toml_str).unwrap();
-        validate_ostt_config(&config).unwrap();
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("Deprecated config section '[providers]'"));
+    }
+
+    #[test]
+    fn deprecated_model_options_section_fails_deserialization() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [model_options]
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("Deprecated config section '[model_options]'"));
+    }
+
+    #[test]
+    fn deprecated_audio_sample_rate_fails_deserialization() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+            sample_rate = 16000
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("Deprecated config key '[audio].sample_rate'"));
+    }
+
+    #[test]
+    fn deprecated_process_actions_array_fails_deserialization() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [[process.actions]]
+            id = "clean"
+            name = "Clean up"
+            type = "bash"
+            command = "cat"
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("Deprecated config table '[[process.actions]]'"));
+    }
+
+    #[test]
+    fn deprecated_local_provider_selection_fails_validation() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [transcription]
+            provider = "local"
+            model = "turbo"
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("Provider 'local' is no longer supported"));
     }
 
     #[test]

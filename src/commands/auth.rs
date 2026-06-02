@@ -176,7 +176,7 @@ fn provider_by_id(
 fn cloud_providers() -> Vec<transcription::TranscriptionProvider> {
     transcription::TranscriptionProvider::all()
         .iter()
-        .filter(|provider| **provider != transcription::TranscriptionProvider::Local)
+        .filter(|provider| **provider != transcription::TranscriptionProvider::Whisper)
         .cloned()
         .collect()
 }
@@ -273,7 +273,7 @@ mod tests {
     fn login_provider_options_exclude_local() {
         let providers = cloud_providers();
 
-        assert!(!providers.contains(&transcription::TranscriptionProvider::Local));
+        assert!(!providers.contains(&transcription::TranscriptionProvider::Whisper));
         assert!(providers.contains(&transcription::TranscriptionProvider::OpenAI));
     }
 

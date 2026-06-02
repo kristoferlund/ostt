@@ -101,9 +101,11 @@ pub fn model_files_dir() -> PathBuf {
 /// Error type for local model-related failures.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
-    #[error("Local model 'local/{0}' was not found in the local model registry or custom models.")]
+    #[error(
+        "Local model 'whisper/{0}' was not found in the local model registry or custom models."
+    )]
     NotFound(String),
-    #[error("Local model 'local/{0}' is not downloaded. Run `ostt model` to download it.")]
+    #[error("Local model 'whisper/{0}' is not downloaded. Run `ostt model` to download it.")]
     NotDownloaded(String),
     #[error("Model file not found at {0}")]
     FileNotFound(PathBuf),
@@ -231,7 +233,7 @@ pub fn is_safe_model_id(id: &str) -> bool {
 }
 
 pub fn full_model_id(id: &str) -> String {
-    format!("local/{id}")
+    format!("whisper/{id}")
 }
 
 pub fn installed_models(
@@ -253,7 +255,7 @@ pub fn installed_models(
                 modified_at: metadata.modified().ok(),
                 is_active: selected_model
                     .map(|selected| {
-                        selected.provider_id == "local" && selected.model_id == entry.id
+                        selected.provider_id == "whisper" && selected.model_id == entry.id
                     })
                     .unwrap_or(false),
             })
@@ -700,7 +702,7 @@ pub fn activate_model(model_id: &str) -> anyhow::Result<()> {
     if !path.exists() {
         return Err(ModelError::NotDownloaded(model_id.to_string()).into());
     }
-    config::save_selected_model("local", model_id)
+    config::save_selected_model("whisper", model_id)
 }
 
 pub fn deactivate_model() -> anyhow::Result<()> {
@@ -720,7 +722,7 @@ pub fn delete_model(model_id: &str) -> anyhow::Result<()> {
     }
 
     if config::get_selected_model_entry()?
-        .is_some_and(|selected| selected.provider_id == "local" && selected.model_id == model_id)
+        .is_some_and(|selected| selected.provider_id == "whisper" && selected.model_id == model_id)
     {
         config::clear_selected_model()?;
     }
@@ -1032,7 +1034,7 @@ mod tests {
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             fs::write(model_files_dir().join("turbo.bin"), [1]).expect("write model");
             let selected_model = SelectedModel {
-                provider_id: "local".to_string(),
+                provider_id: "whisper".to_string(),
                 model_id: "turbo".to_string(),
             };
 
@@ -1063,7 +1065,7 @@ mod tests {
                 .expect("load selected model")
                 .expect("selected model");
 
-            assert_eq!(selected.provider_id, "local");
+            assert_eq!(selected.provider_id, "whisper");
             assert_eq!(selected.model_id, "custom");
         });
     }
@@ -1089,7 +1091,7 @@ mod tests {
     #[test]
     fn deactivate_model_clears_selected_model() {
         with_isolated_data_dir(|_| {
-            config::save_selected_model("local", "custom").expect("save selected model");
+            config::save_selected_model("whisper", "custom").expect("save selected model");
 
             deactivate_model().expect("deactivate model");
 
@@ -1110,7 +1112,7 @@ mod tests {
             fs::create_dir_all(model_files_dir()).expect("create files dir");
             let file_path = model_files_dir().join("custom.bin");
             fs::write(&file_path, [1]).expect("write custom model");
-            config::save_selected_model("local", "custom").expect("save selected model");
+            config::save_selected_model("whisper", "custom").expect("save selected model");
 
             delete_model("custom").expect("delete model");
 
@@ -1396,7 +1398,7 @@ mod tests {
         env::set_var("HOME", &dir);
         env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
         env::set_var("XDG_DATA_HOME", dir.join(".local").join("share"));
-        config::save_selected_model("local", "active").expect("save selected model");
+        config::save_selected_model("whisper", "active").expect("save selected model");
         let dest_path = model_files_dir().join("turbo.bin");
 
         download_model(&first_url, &dest_path, None)
