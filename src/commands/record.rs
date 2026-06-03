@@ -58,7 +58,7 @@ pub async fn handle_record(
 
     // Cancel means discard the in-memory samples; only a transcribe action persists audio.
     if !run_recording_loop(&mut tui, &mut audio_recorder, actual_sample_rate, &term)
-        .context("recording loop failed")?
+        .map_err(|err| show_recording_error(&mut tui, "Recording Error", err))?
     {
         return finish_recording_without_output(&mut tui);
     }
@@ -68,7 +68,8 @@ pub async fn handle_record(
 
     let output_format = resolve_recording_output_format(config, model_override.as_ref());
     let Some(filepath) = storage::save_recording(&mut audio_recorder, &output_format)
-        .context("failed to save recording")?
+        .context("failed to save recording")
+        .map_err(|err| show_recording_error(&mut tui, "Recording Error", err))?
     else {
         return finish_recording_without_output(&mut tui);
     };
@@ -78,11 +79,11 @@ pub async fn handle_record(
 
     let transcription_context =
         crate::transcription::build_context(config, model_override, param_overrides)
-            .context("failed to build transcription context")?;
+            .context("failed to build transcription context")
+            .map_err(|err| show_recording_error(&mut tui, "Transcription Error", err))?;
     let model_id = transcription_context.selected_model.model_id.clone();
     let filepath_str = filepath.to_string_lossy().to_string();
 
-    let mut transcription_error = None;
     let maybe_transcribed_text = match transcribe_recording_with_animation(
         &mut tui,
         transcription_context.config,
@@ -98,7 +99,10 @@ pub async fn handle_record(
         }
         Err(e) => {
             tracing::warn!("Transcription failed: {}", e);
-            transcription_error = Some(e.to_string());
+            let message = format!("Transcription failed: {e}");
+            if let Err(display_err) = tui.show_error("Transcription Error", &message) {
+                tracing::warn!("Failed to show transcription error in TUI: {display_err}");
+            }
             None
         }
     };
@@ -110,7 +114,8 @@ pub async fn handle_record(
                 process::select_requested_action(&config.process, process.as_deref(), |actions| {
                     pick_action_id_with_recording_tui(&mut tui, actions)
                 })
-                .context("failed to select process action")?
+                .context("failed to select process action")
+                .map_err(|err| show_recording_error(&mut tui, "Processing Error", err))?
             else {
                 return finish_recording_with_output(
                     &mut tui,
@@ -123,7 +128,8 @@ pub async fn handle_record(
             Some(
                 run_process_action_with_animation(&mut tui, action, transcribed_text)
                     .await
-                    .context("failed to process transcription")?,
+                    .context("failed to process transcription")
+                    .map_err(|err| show_recording_error(&mut tui, "Processing Error", err))?,
             )
         }
         Some(transcribed_text) => Some(transcribed_text),
@@ -136,12 +142,21 @@ pub async fn handle_record(
         }
         None => {
             finish_recording_without_output(&mut tui)?;
-            if let Some(error) = transcription_error {
-                eprintln!("Warning: Transcription failed: {error}");
-            }
             Ok(())
         }
     }
+}
+
+fn show_recording_error(
+    tui: &mut RecordingTui,
+    title: &str,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    let message = error.to_string();
+    if let Err(display_err) = tui.show_error(title, &message) {
+        tracing::warn!("Failed to show recording error in TUI: {display_err}");
+    }
+    error
 }
 
 fn resolve_recording_output_format(
