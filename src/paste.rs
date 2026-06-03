@@ -4,13 +4,16 @@ use anyhow::Context;
 use std::io::{Read, Write};
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+#[cfg(not(target_os = "macos"))]
 const POPUP_TITLE: &str = "ostt";
 
 pub(crate) fn wait_for_focus_after_popup(config: &PasteConfig) {
     #[cfg(not(target_os = "macos"))]
     {
+        use std::time::Instant;
+
         if std::env::var("HYPRLAND_INSTANCE_SIGNATURE").is_ok() {
             let deadline = Instant::now() + Duration::from_millis(config.post_popup_delay_ms);
             while Instant::now() < deadline {
@@ -60,6 +63,7 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
     set_clipboard(text).context("failed to copy text to clipboard for paste")?;
     tracing::debug!("Paste mode: copied {} bytes to clipboard", text.len());
 
+    #[cfg(not(target_os = "macos"))]
     log_active_window("before paste key");
     if let Err(err) = send_paste_key(&config.paste_key) {
         tracing::warn!("Failed to send paste key '{}': {err}", config.paste_key);
@@ -126,17 +130,15 @@ pub(crate) fn handle_paste_helper(config: &crate::config::OsttConfig) -> anyhow:
     paste_text(&text, &config.output.paste)
 }
 
+#[cfg(not(target_os = "macos"))]
 fn log_active_window(label: &str) {
-    #[cfg(not(target_os = "macos"))]
+    if let Ok(output) = Command::new("hyprctl")
+        .args(["activewindow", "-j"])
+        .output()
     {
-        if let Ok(output) = Command::new("hyprctl")
-            .args(["activewindow", "-j"])
-            .output()
-        {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout);
-                tracing::debug!("Paste mode: active window {label}: {}", text.trim());
-            }
+        if output.status.success() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            tracing::debug!("Paste mode: active window {label}: {}", text.trim());
         }
     }
 }
@@ -296,6 +298,8 @@ fn xdotool_modifier(modifier: &str) -> anyhow::Result<&'static str> {
 
 fn run_status(command: &mut Command, name: &str) -> anyhow::Result<()> {
     let status = command
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .with_context(|| format!("Failed to run {name}"))?;
     if !status.success() {
