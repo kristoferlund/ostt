@@ -27,6 +27,7 @@ use std::sync::{
 pub async fn handle_record(
     config: &OsttConfig,
     clipboard: bool,
+    paste: bool,
     output_file: Option<String>,
     process: Option<String>,
     model_override: Option<SelectedModel>,
@@ -122,6 +123,8 @@ pub async fn handle_record(
                     &transcribed_text,
                     output_file,
                     clipboard,
+                    paste,
+                    &config.output.paste,
                 );
             };
 
@@ -137,9 +140,14 @@ pub async fn handle_record(
     };
 
     match output_text {
-        Some(output_text) => {
-            finish_recording_with_output(&mut tui, &output_text, output_file, clipboard)
-        }
+        Some(output_text) => finish_recording_with_output(
+            &mut tui,
+            &output_text,
+            output_file,
+            clipboard,
+            paste,
+            &config.output.paste,
+        ),
         None => {
             finish_recording_without_output(&mut tui)?;
             Ok(())
@@ -195,12 +203,14 @@ fn finish_recording_with_output(
     output_text: &str,
     output_file: Option<String>,
     clipboard: bool,
+    paste: bool,
+    paste_config: &crate::config::PasteConfig,
 ) -> anyhow::Result<()> {
     tui.cleanup()
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .context("failed to clean up recording UI")?;
 
-    write_record_output(output_text, output_file, clipboard)
+    write_record_output(output_text, output_file, clipboard, paste, paste_config)
         .context("failed to write recording output")?;
 
     tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
@@ -325,21 +335,23 @@ fn write_record_output(
     output_text: &str,
     output_file: Option<String>,
     clipboard: bool,
+    paste: bool,
+    paste_config: &crate::config::PasteConfig,
 ) -> anyhow::Result<()> {
-    if let Some(file_path) = output_file {
-        std::fs::write(&file_path, output_text)
-            .with_context(|| format!("failed to write output file: {file_path}"))?;
-        tracing::info!("Transcription written to file: {}", file_path);
-    } else if clipboard {
-        crate::clipboard::copy_to_clipboard(output_text)
-            .context("failed to copy output to clipboard")?;
-        tracing::info!("Transcription copied to clipboard");
-    } else {
-        println!("{output_text}");
-        tracing::debug!("Transcription printed to stdout");
+    if paste {
+        crate::paste::spawn_detached_paste_helper(output_text)?;
+        tracing::debug!("Transcription sent to detached paste helper");
+        return Ok(());
     }
 
-    Ok(())
+    super::output::write_text(
+        output_text,
+        output_file,
+        clipboard,
+        paste,
+        paste_config,
+        "Transcription",
+    )
 }
 
 async fn transcribe_recording_with_animation(

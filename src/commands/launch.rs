@@ -5,7 +5,7 @@
 //! a new instance.
 
 use anyhow::{anyhow, Context};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::config::file::PopupConfig;
 use crate::recording::active;
@@ -171,7 +171,6 @@ fn build_terminal_args(
 
             let mut args = vec![
                 binary.to_string(),
-                "--class=ostt-popup".to_string(),
                 "--title=ostt".to_string(),
                 format!("--window-position-x={}", config.x),
                 format!("--window-position-y={}", config.y),
@@ -325,6 +324,9 @@ pub async fn handle_launch(
 
     let child = Command::new(program)
         .args(spawn_args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .with_context(|| format!("Failed to spawn {}", terminal.command_name()))?;
 
@@ -363,5 +365,20 @@ mod tests {
             .iter()
             .any(|arg| arg == "macos_quit_when_last_window_closed=yes"));
         assert_eq!(args.last(), Some(&"-c".to_string()));
+    }
+
+    #[test]
+    fn ghostty_args_do_not_use_invalid_class_flag() {
+        let args = build_terminal_args(
+            TerminalEmulator::Ghostty,
+            "ghostty",
+            &PopupConfig::default(),
+            "ostt",
+            &["--paste".to_string()],
+        );
+
+        assert!(!args.iter().any(|arg| arg == "--class=ostt-popup"));
+        assert!(args.iter().any(|arg| arg == "--title=ostt"));
+        assert!(args.last().is_some_and(|arg| arg.contains("'--paste'")));
     }
 }

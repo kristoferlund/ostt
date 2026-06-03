@@ -188,6 +188,47 @@ pub struct TextConfig {
     pub replace: IndexMap<String, String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PasteConfig {
+    pub paste_key: String,
+    pub restore_clipboard: bool,
+    pub restore_delay_ms: u64,
+    pub post_popup_delay_ms: u64,
+}
+
+impl Default for PasteConfig {
+    fn default() -> Self {
+        Self {
+            paste_key: default_paste_key(),
+            restore_clipboard: true,
+            restore_delay_ms: 750,
+            post_popup_delay_ms: 1000,
+        }
+    }
+}
+
+fn default_paste_key() -> String {
+    if cfg!(target_os = "macos") {
+        "cmd+v".to_string()
+    } else if is_omarchy() {
+        "shift+insert".to_string()
+    } else {
+        "ctrl+v".to_string()
+    }
+}
+
+fn is_omarchy() -> bool {
+    std::env::var_os("HOME")
+        .is_some_and(|home| PathBuf::from(home).join(".local/share/omarchy").exists())
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutputConfig {
+    pub paste: PasteConfig,
+}
+
 /// Popup window configuration for the `launch` subcommand.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PopupConfig {
@@ -565,7 +606,14 @@ pub struct TranscriptionSelectionConfig {
     pub model: Option<String>,
 }
 
-const FIXED_TOP_LEVEL_SECTIONS: &[&str] = &["audio", "transcription", "text", "process", "popup"];
+const FIXED_TOP_LEVEL_SECTIONS: &[&str] = &[
+    "audio",
+    "transcription",
+    "text",
+    "output",
+    "process",
+    "popup",
+];
 const DEPRECATED_TOP_LEVEL_SECTIONS: &[&str] = &["providers", "model_options"];
 
 /// Complete application configuration.
@@ -576,6 +624,7 @@ pub struct OsttConfig {
     pub transcription: TranscriptionSelectionConfig,
     pub provider_configs: ProviderConfigs,
     pub text: TextConfig,
+    pub output: OutputConfig,
     pub process: ProcessConfig,
     pub popup: PopupConfig,
 }
@@ -636,6 +685,7 @@ impl OsttConfig {
             transcription: TranscriptionSelectionConfig::default(),
             provider_configs: ProviderConfigs::default(),
             text: TextConfig::default(),
+            output: OutputConfig::default(),
             process: ProcessConfig::default(),
             popup: PopupConfig::default(),
         }
@@ -654,6 +704,7 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
     let transcription =
         take_optional_section::<TranscriptionSelectionConfig>(table, "transcription")?;
     let text = take_optional_section::<TextConfig>(table, "text")?;
+    let output = take_optional_section::<OutputConfig>(table, "output")?;
     let process = take_optional_section::<ProcessConfig>(table, "process")?;
     let popup = take_optional_section::<PopupConfig>(table, "popup")?;
 
@@ -665,7 +716,7 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
         }
         if crate::transcription::TranscriptionProvider::from_id(&provider_id).is_none() {
             anyhow::bail!(
-                "Unknown top-level config section '{}'. Expected one of: audio, transcription, text, process, popup, {}.",
+                "Unknown top-level config section '{}'. Expected one of: audio, transcription, text, output, process, popup, {}.",
                 provider_id,
                 crate::transcription::TranscriptionProvider::supported_ids().join(", ")
             );
@@ -685,6 +736,7 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
         transcription,
         provider_configs,
         text,
+        output,
         process,
         popup,
     };
@@ -869,6 +921,9 @@ fn config_to_table(config: &OsttConfig) -> anyhow::Result<toml::Table> {
     if !config.text.replace.is_empty() {
         table.insert("text".to_string(), toml::Value::try_from(&config.text)?);
     }
+    if config.output != OutputConfig::default() {
+        table.insert("output".to_string(), toml::Value::try_from(&config.output)?);
+    }
     if !config.process.actions.is_empty() {
         table.insert(
             "process".to_string(),
@@ -950,6 +1005,36 @@ pub fn validate_config(config: &OsttConfig) -> anyhow::Result<()> {
     for source in config.text.replace.keys() {
         if source.trim().is_empty() {
             anyhow::bail!("Text replace source must not be empty.");
+        }
+    }
+
+    validate_paste_key(&config.output.paste.paste_key)?;
+
+    Ok(())
+}
+
+fn validate_paste_key(paste_key: &str) -> anyhow::Result<()> {
+    let parts: Vec<_> = paste_key
+        .split('+')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    if parts.len() < 2 {
+        anyhow::bail!("[output.paste].paste_key must be a key combination like 'ctrl+v'.");
+    }
+
+    let key = parts[parts.len() - 1].to_lowercase();
+    if key.len() != 1 && key != "insert" {
+        anyhow::bail!("[output.paste].paste_key must end with a single key or 'insert'.");
+    }
+
+    for modifier in &parts[..parts.len() - 1] {
+        match modifier.to_lowercase().as_str() {
+            "ctrl" | "shift" | "alt" | "cmd" | "super" => {}
+            _ => anyhow::bail!(
+                "Unsupported paste_key modifier '{}'. Supported modifiers: ctrl, shift, alt, cmd, super.",
+                modifier
+            ),
         }
     }
 
@@ -1409,6 +1494,57 @@ mod tests {
         let err = parse_ostt_config(toml_str).unwrap_err().to_string();
 
         assert!(err.contains("Text replace source must not be empty"));
+    }
+
+    #[test]
+    fn missing_output_section_defaults_to_paste_defaults() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+
+        assert!(!config.output.paste.paste_key.is_empty());
+        assert!(config.output.paste.restore_clipboard);
+        assert_eq!(config.output.paste.restore_delay_ms, 750);
+        assert_eq!(config.output.paste.post_popup_delay_ms, 1000);
+    }
+
+    #[test]
+    fn output_paste_preserves_configured_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [output.paste]
+            paste_key = "super+v"
+            restore_clipboard = false
+            restore_delay_ms = 300
+            post_popup_delay_ms = 100
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+
+        assert_eq!(config.output.paste.paste_key, "super+v");
+        assert!(!config.output.paste.restore_clipboard);
+        assert_eq!(config.output.paste.restore_delay_ms, 300);
+        assert_eq!(config.output.paste.post_popup_delay_ms, 100);
+    }
+
+    #[test]
+    fn invalid_output_paste_key_fails_validation() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [output.paste]
+            paste_key = "hyper+v"
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+
+        assert!(err.contains("Unsupported paste_key modifier"));
     }
 
     #[test]
