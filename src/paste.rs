@@ -90,7 +90,7 @@ pub(crate) fn spawn_detached_paste_helper(text: &str) -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("failed to resolve ostt executable path")?;
     let mut command = Command::new(exe);
     command
-        .arg("__paste")
+        .arg("paste-helper")
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

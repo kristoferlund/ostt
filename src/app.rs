@@ -278,9 +278,6 @@ enum Commands {
     /// and common transcription corrections.
     Replace,
 
-    #[command(name = "__paste", hide = true)]
-    PasteHelper,
-
     /// Open configuration file in your preferred editor
     ///
     /// Edit audio settings, provider options, and other configuration.
@@ -595,6 +592,13 @@ fn resolve_process_args(
 /// - If logging initialization fails
 /// - If command execution fails (e.g., authentication, recording, history viewing)
 pub async fn run() -> Result<(), anyhow::Error> {
+    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("paste-helper")) {
+        logging::init_logging()?;
+        check_and_run_setup().await?;
+        let config_data = load_config()?;
+        return crate::paste::handle_paste_helper(&config_data);
+    }
+
     let cli = Cli::parse();
 
     // Handle commands that don't need logging or config setup
@@ -835,7 +839,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
         },
         Some(Commands::Replace) => commands::handle_replace().await?,
-        Some(Commands::PasteHelper) => crate::paste::handle_paste_helper(&config_data)?,
         Some(Commands::Config { command }) => match command {
             None => commands::handle_config()?,
             Some(ConfigCommand::Path) => commands::config::handle_config_path()?,
@@ -1155,6 +1158,16 @@ mod tests {
                 ..
             }) => assert_eq!(shell, Shell::Bash),
             _ => panic!("expected completions install command"),
+        }
+    }
+
+    #[test]
+    fn cli_generates_shell_completions_without_panicking() {
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let mut output = Vec::new();
+            generate(shell, &mut Cli::command(), "ostt", &mut output);
+            assert!(!output.is_empty());
+            assert!(!String::from_utf8_lossy(&output).contains("paste-helper"));
         }
     }
 
