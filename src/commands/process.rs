@@ -26,6 +26,7 @@ pub async fn handle_process(
     action_id: Option<String>,
     list: bool,
     clipboard: bool,
+    paste: bool,
     output_file: Option<String>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Process Command ===");
@@ -107,7 +108,14 @@ pub async fn handle_process(
         process::execute_action(&action, &transcription.text, &keywords).await?
     };
 
-    output::write_text(&result, output_file, clipboard, "Processed result")?;
+    output::write_text(
+        &result,
+        output_file,
+        clipboard,
+        paste,
+        &config_data.output.paste,
+        "Processed result",
+    )?;
 
     tracing::info!("=== ostt Process Command Completed ===");
     Ok(())

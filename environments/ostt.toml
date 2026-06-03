@@ -52,6 +52,16 @@ output_format = "mp3 -ab 16k -ar 12000"
 # "typescript" = "TypeScript"
 # "github" = "GitHub"
 
+[output.paste]
+# Paste mode copies the final text to the clipboard, sends this shortcut,
+# then restores the previous clipboard when enabled.
+# Defaults: macOS uses cmd+v, Omarchy uses shift+insert, other Linux uses ctrl+v.
+# Linux paste shortcuts vary by app and desktop; override paste_key when needed.
+paste_key = "ctrl+v"
+restore_clipboard = true
+restore_delay_ms = 750
+post_popup_delay_ms = 1000
+
 # Provider and per-model transcription params.
 # Provider params apply to all models for that provider. Model params override provider params.
 #

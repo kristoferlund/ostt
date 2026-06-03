@@ -5,7 +5,7 @@
 //! a new instance.
 
 use anyhow::{anyhow, Context};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 use crate::config::file::PopupConfig;
 use crate::recording::active;
@@ -325,6 +325,9 @@ pub async fn handle_launch(
 
     let child = Command::new(program)
         .args(spawn_args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .with_context(|| format!("Failed to spawn {}", terminal.command_name()))?;
 

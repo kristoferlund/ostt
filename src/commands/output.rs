@@ -1,9 +1,12 @@
 use crate::clipboard::copy_to_clipboard;
+use crate::config::PasteConfig;
 
 pub(crate) fn write_text(
     output_text: &str,
     output_file: Option<String>,
     clipboard: bool,
+    paste: bool,
+    paste_config: &PasteConfig,
     label: &str,
 ) -> anyhow::Result<()> {
     if let Some(file_path) = output_file {
@@ -17,6 +20,9 @@ pub(crate) fn write_text(
             Ok(()) => tracing::debug!("{label} copied to clipboard"),
             Err(err) => tracing::warn!("Failed to copy to clipboard: {err}"),
         }
+    } else if paste {
+        crate::paste::paste_text(output_text, paste_config)?;
+        tracing::debug!("{label} pasted to focused app");
     } else {
         println!("{output_text}");
         tracing::debug!("{label} printed to stdout");

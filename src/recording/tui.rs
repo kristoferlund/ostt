@@ -11,7 +11,7 @@ use crossterm::{
 use ratatui::{
     prelude::*,
     style::{Color, Style},
-    widgets::{ListState, Sparkline},
+    widgets::{ListState, Paragraph, Sparkline, Wrap},
 };
 use std::error::Error;
 use std::io::{stdout, Stdout};
@@ -447,6 +447,53 @@ impl RecordingTui {
         }
 
         Ok(None)
+    }
+
+    /// Displays an error in the active recording UI until the user presses a key.
+    pub fn show_error(&mut self, title: &str, message: &str) -> Result<(), Box<dyn Error>> {
+        loop {
+            self.terminal.draw(|frame| {
+                let area = frame.area();
+                let background = ratatui::widgets::Block::default().style(Style::reset());
+                frame.render_widget(background, area);
+
+                let padded_area = Rect {
+                    x: area.x.saturating_add(area.width / 10),
+                    y: area.y.saturating_add(area.height / 4),
+                    width: area.width.saturating_sub((area.width / 10) * 2),
+                    height: area.height.saturating_sub(area.height / 2),
+                };
+
+                let title_line = ratatui::text::Line::from(ratatui::text::Span::styled(
+                    format!(" {title} "),
+                    Style::default().fg(Color::Black).bg(Color::Red),
+                ))
+                .alignment(Alignment::Center);
+
+                let text = ratatui::text::Text::from(vec![
+                    title_line,
+                    ratatui::text::Line::raw(""),
+                    ratatui::text::Line::raw(message),
+                    ratatui::text::Line::raw(""),
+                    ratatui::text::Line::raw("Press any key to close."),
+                ]);
+
+                let paragraph = Paragraph::new(text)
+                    .alignment(Alignment::Center)
+                    .wrap(Wrap { trim: true })
+                    .style(Style::reset().fg(Color::White));
+
+                frame.render_widget(paragraph, padded_area);
+            })?;
+
+            if event::poll(std::time::Duration::from_millis(100))? {
+                if let Event::Key(_) = event::read()? {
+                    break;
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Cleans up terminal state and exits alternate screen mode.

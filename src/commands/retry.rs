@@ -19,6 +19,7 @@ pub async fn handle_retry(
     config_data: &config::OsttConfig,
     recording_index: Option<usize>,
     clipboard: bool,
+    paste: bool,
     output_file: Option<String>,
     process: Option<String>,
     model_override: Option<config::SelectedModel>,
@@ -70,7 +71,14 @@ pub async fn handle_retry(
                 process.as_deref(),
             )
             .await?;
-            output::write_text(&output_text, output_file, clipboard, "Output text")?;
+            output::write_text(
+                &output_text,
+                output_file,
+                clipboard,
+                paste,
+                &config_data.output.paste,
+                "Output text",
+            )?;
 
             Ok(())
         }

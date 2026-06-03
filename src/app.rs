@@ -89,6 +89,10 @@ struct Cli {
     #[arg(short, long)]
     clipboard: bool,
 
+    /// Paste transcription into the focused app (record default command)
+    #[arg(long)]
+    paste: bool,
+
     /// Write transcription to file instead of stdout (record default command)
     #[arg(short, long, value_name = "FILE")]
     output: Option<String>,
@@ -133,6 +137,10 @@ enum Commands {
         #[arg(short, long)]
         clipboard: bool,
 
+        /// Paste transcription into the focused app
+        #[arg(long)]
+        paste: bool,
+
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
@@ -158,6 +166,10 @@ enum Commands {
         /// Copy transcription to clipboard instead of stdout
         #[arg(short, long)]
         clipboard: bool,
+
+        /// Paste transcription into the focused app
+        #[arg(long)]
+        paste: bool,
 
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
@@ -191,6 +203,10 @@ enum Commands {
         /// Copy transcription to clipboard instead of stdout
         #[arg(short, long)]
         clipboard: bool,
+
+        /// Paste transcription into the focused app
+        #[arg(long)]
+        paste: bool,
 
         /// Write transcription to file instead of stdout
         #[arg(short, long, value_name = "FILE")]
@@ -302,6 +318,10 @@ enum Commands {
         /// Copy result to clipboard instead of stdout (shadows global -c)
         #[arg(short, long)]
         clipboard: bool,
+
+        /// Paste result into the focused app
+        #[arg(long)]
+        paste: bool,
 
         /// Write result to file instead of stdout (shadows global -o)
         #[arg(short, long, value_name = "FILE")]
@@ -572,6 +592,13 @@ fn resolve_process_args(
 /// - If logging initialization fails
 /// - If command execution fails (e.g., authentication, recording, history viewing)
 pub async fn run() -> Result<(), anyhow::Error> {
+    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("paste-helper")) {
+        logging::init_logging()?;
+        check_and_run_setup().await?;
+        let config_data = load_config()?;
+        return crate::paste::handle_paste_helper(&config_data);
+    }
+
     let cli = Cli::parse();
 
     // Handle commands that don't need logging or config setup
@@ -663,16 +690,18 @@ pub async fn run() -> Result<(), anyhow::Error> {
             // Default command is record
             // Merge top-level options with explicit record command options
             // If both are specified, the explicit record command options take precedence
-            let (clipboard, output, process, model) = match cli.command {
+            let (clipboard, paste, output, process, model) = match cli.command {
                 Some(Commands::Record {
                     clipboard,
+                    paste,
                     output,
                     process,
                     model,
-                }) => (clipboard, output, process, model.or(cli.model)),
-                None => (cli.clipboard, cli.output, cli.process, cli.model),
+                }) => (clipboard, paste, output, process, model.or(cli.model)),
+                None => (cli.clipboard, cli.paste, cli.output, cli.process, cli.model),
                 _ => unreachable!(),
             };
+            ensure_single_output_mode(clipboard, paste, output.as_ref())?;
             let model_override = model
                 .as_deref()
                 .map(crate::config::parse_provider_model)
@@ -680,6 +709,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
             commands::handle_record(
                 &config_data,
                 clipboard,
+                paste,
                 output,
                 process,
                 model_override,
@@ -690,10 +720,12 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Retry {
             index,
             clipboard,
+            paste,
             output,
             process,
             model,
         }) => {
+            ensure_single_output_mode(clipboard, paste, output.as_ref())?;
             let model_override = model
                 .or(cli.model)
                 .as_deref()
@@ -703,6 +735,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 &config_data,
                 index,
                 clipboard,
+                paste,
                 output,
                 process,
                 model_override,
@@ -713,10 +746,12 @@ pub async fn run() -> Result<(), anyhow::Error> {
         Some(Commands::Transcribe {
             file,
             clipboard,
+            paste,
             output,
             process,
             model,
         }) => {
+            ensure_single_output_mode(clipboard, paste, output.as_ref())?;
             let model_override = model
                 .or(cli.model)
                 .as_deref()
@@ -726,6 +761,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 &config_data,
                 file,
                 clipboard,
+                paste,
                 output,
                 process,
                 model_override,
@@ -820,13 +856,17 @@ pub async fn run() -> Result<(), anyhow::Error> {
             index_or_action,
             action,
             clipboard,
+            paste,
             output,
             ..
         }) => {
+            ensure_single_output_mode(clipboard, paste, output.as_ref())?;
             let (index, action) = resolve_process_args(index_or_action, action)?;
-            commands::handle_process(&config_data, index, action, false, clipboard, output).await?;
+            commands::handle_process(&config_data, index, action, false, clipboard, paste, output)
+                .await?;
         }
         Some(Commands::Launch { args }) => {
+            ensure_single_output_mode(cli.clipboard, cli.paste, cli.output.as_ref())?;
             // Reconstruct the full ostt args list. Global flags (-c, -o, -p) are
             // consumed by clap before they reach the Launch args vec, so we
             // re-inject them here so they get passed to the spawned ostt instance.
@@ -839,6 +879,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
             if cli.clipboard {
                 full_args.insert(0, "-c".to_string());
+            }
+            if cli.paste {
+                full_args.insert(0, "--paste".to_string());
             }
             if let Some(ref out) = cli.output {
                 full_args.insert(0, out.clone());
@@ -904,6 +947,18 @@ fn completion_filename(shell: Shell) -> String {
         Shell::PowerShell => "ostt.ps1".to_string(),
         _ => "ostt".to_string(),
     }
+}
+
+fn ensure_single_output_mode(
+    clipboard: bool,
+    paste: bool,
+    output: Option<&String>,
+) -> anyhow::Result<()> {
+    let selected = usize::from(clipboard) + usize::from(paste) + usize::from(output.is_some());
+    if selected > 1 {
+        anyhow::bail!("Choose one output mode: stdout, --clipboard, --output, or --paste.");
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1012,6 +1067,58 @@ mod tests {
     }
 
     #[test]
+    fn cli_accepts_paste_for_output_commands() {
+        let cli = Cli::try_parse_from(["ostt", "--paste"]).expect("parse cli");
+        assert!(cli.paste);
+
+        let cli = Cli::try_parse_from(["ostt", "record", "--paste"]).expect("parse cli");
+        match cli.command {
+            Some(Commands::Record { paste, .. }) => assert!(paste),
+            _ => panic!("expected record command"),
+        }
+
+        let cli =
+            Cli::try_parse_from(["ostt", "transcribe", "audio.ogg", "--paste"]).expect("parse cli");
+        match cli.command {
+            Some(Commands::Transcribe { paste, .. }) => assert!(paste),
+            _ => panic!("expected transcribe command"),
+        }
+
+        let cli = Cli::try_parse_from(["ostt", "retry", "--paste"]).expect("parse cli");
+        match cli.command {
+            Some(Commands::Retry { paste, .. }) => assert!(paste),
+            _ => panic!("expected retry command"),
+        }
+
+        let cli = Cli::try_parse_from(["ostt", "process", "clean", "--paste"]).expect("parse cli");
+        match cli.command {
+            Some(Commands::Process { paste, .. }) => assert!(paste),
+            _ => panic!("expected process command"),
+        }
+    }
+
+    #[test]
+    fn cli_forwards_paste_for_launch() {
+        let cli =
+            Cli::try_parse_from(["ostt", "launch", "--paste", "-p", "clean"]).expect("parse cli");
+
+        match cli.command {
+            Some(Commands::Launch { args }) => {
+                assert_eq!(args, ["--paste", "-p", "clean"]);
+            }
+            _ => panic!("expected launch command"),
+        }
+    }
+
+    #[test]
+    fn output_mode_validation_rejects_ambiguous_modes() {
+        assert!(ensure_single_output_mode(true, true, None).is_err());
+        assert!(ensure_single_output_mode(false, true, Some(&"out.txt".to_string())).is_err());
+        assert!(ensure_single_output_mode(true, false, Some(&"out.txt".to_string())).is_err());
+        assert!(ensure_single_output_mode(false, true, None).is_ok());
+    }
+
+    #[test]
     fn cli_moves_device_listing_under_config() {
         assert!(Cli::try_parse_from(["ostt", "list-devices"]).is_err());
 
@@ -1051,6 +1158,16 @@ mod tests {
                 ..
             }) => assert_eq!(shell, Shell::Bash),
             _ => panic!("expected completions install command"),
+        }
+    }
+
+    #[test]
+    fn cli_generates_shell_completions_without_panicking() {
+        for shell in [Shell::Bash, Shell::Zsh, Shell::Fish] {
+            let mut output = Vec::new();
+            generate(shell, &mut Cli::command(), "ostt", &mut output);
+            assert!(!output.is_empty());
+            assert!(!String::from_utf8_lossy(&output).contains("paste-helper"));
         }
     }
 

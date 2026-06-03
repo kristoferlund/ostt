@@ -27,6 +27,7 @@ use std::sync::{
 pub async fn handle_record(
     config: &OsttConfig,
     clipboard: bool,
+    paste: bool,
     output_file: Option<String>,
     process: Option<String>,
     model_override: Option<SelectedModel>,
@@ -58,7 +59,7 @@ pub async fn handle_record(
 
     // Cancel means discard the in-memory samples; only a transcribe action persists audio.
     if !run_recording_loop(&mut tui, &mut audio_recorder, actual_sample_rate, &term)
-        .context("recording loop failed")?
+        .map_err(|err| show_recording_error(&mut tui, "Recording Error", err))?
     {
         return finish_recording_without_output(&mut tui);
     }
@@ -68,7 +69,8 @@ pub async fn handle_record(
 
     let output_format = resolve_recording_output_format(config, model_override.as_ref());
     let Some(filepath) = storage::save_recording(&mut audio_recorder, &output_format)
-        .context("failed to save recording")?
+        .context("failed to save recording")
+        .map_err(|err| show_recording_error(&mut tui, "Recording Error", err))?
     else {
         return finish_recording_without_output(&mut tui);
     };
@@ -78,11 +80,11 @@ pub async fn handle_record(
 
     let transcription_context =
         crate::transcription::build_context(config, model_override, param_overrides)
-            .context("failed to build transcription context")?;
+            .context("failed to build transcription context")
+            .map_err(|err| show_recording_error(&mut tui, "Transcription Error", err))?;
     let model_id = transcription_context.selected_model.model_id.clone();
     let filepath_str = filepath.to_string_lossy().to_string();
 
-    let mut transcription_error = None;
     let maybe_transcribed_text = match transcribe_recording_with_animation(
         &mut tui,
         transcription_context.config,
@@ -98,7 +100,10 @@ pub async fn handle_record(
         }
         Err(e) => {
             tracing::warn!("Transcription failed: {}", e);
-            transcription_error = Some(e.to_string());
+            let message = format!("Transcription failed: {e}");
+            if let Err(display_err) = tui.show_error("Transcription Error", &message) {
+                tracing::warn!("Failed to show transcription error in TUI: {display_err}");
+            }
             None
         }
     };
@@ -110,20 +115,24 @@ pub async fn handle_record(
                 process::select_requested_action(&config.process, process.as_deref(), |actions| {
                     pick_action_id_with_recording_tui(&mut tui, actions)
                 })
-                .context("failed to select process action")?
+                .context("failed to select process action")
+                .map_err(|err| show_recording_error(&mut tui, "Processing Error", err))?
             else {
                 return finish_recording_with_output(
                     &mut tui,
                     &transcribed_text,
                     output_file,
                     clipboard,
+                    paste,
+                    &config.output.paste,
                 );
             };
 
             Some(
                 run_process_action_with_animation(&mut tui, action, transcribed_text)
                     .await
-                    .context("failed to process transcription")?,
+                    .context("failed to process transcription")
+                    .map_err(|err| show_recording_error(&mut tui, "Processing Error", err))?,
             )
         }
         Some(transcribed_text) => Some(transcribed_text),
@@ -131,17 +140,31 @@ pub async fn handle_record(
     };
 
     match output_text {
-        Some(output_text) => {
-            finish_recording_with_output(&mut tui, &output_text, output_file, clipboard)
-        }
+        Some(output_text) => finish_recording_with_output(
+            &mut tui,
+            &output_text,
+            output_file,
+            clipboard,
+            paste,
+            &config.output.paste,
+        ),
         None => {
             finish_recording_without_output(&mut tui)?;
-            if let Some(error) = transcription_error {
-                eprintln!("Warning: Transcription failed: {error}");
-            }
             Ok(())
         }
     }
+}
+
+fn show_recording_error(
+    tui: &mut RecordingTui,
+    title: &str,
+    error: anyhow::Error,
+) -> anyhow::Error {
+    let message = error.to_string();
+    if let Err(display_err) = tui.show_error(title, &message) {
+        tracing::warn!("Failed to show recording error in TUI: {display_err}");
+    }
+    error
 }
 
 fn resolve_recording_output_format(
@@ -180,12 +203,14 @@ fn finish_recording_with_output(
     output_text: &str,
     output_file: Option<String>,
     clipboard: bool,
+    paste: bool,
+    paste_config: &crate::config::PasteConfig,
 ) -> anyhow::Result<()> {
     tui.cleanup()
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .context("failed to clean up recording UI")?;
 
-    write_record_output(output_text, output_file, clipboard)
+    write_record_output(output_text, output_file, clipboard, paste, paste_config)
         .context("failed to write recording output")?;
 
     tracing::info!("=== ostt Audio Recorder Exited Successfully ===");
@@ -310,21 +335,23 @@ fn write_record_output(
     output_text: &str,
     output_file: Option<String>,
     clipboard: bool,
+    paste: bool,
+    paste_config: &crate::config::PasteConfig,
 ) -> anyhow::Result<()> {
-    if let Some(file_path) = output_file {
-        std::fs::write(&file_path, output_text)
-            .with_context(|| format!("failed to write output file: {file_path}"))?;
-        tracing::info!("Transcription written to file: {}", file_path);
-    } else if clipboard {
-        crate::clipboard::copy_to_clipboard(output_text)
-            .context("failed to copy output to clipboard")?;
-        tracing::info!("Transcription copied to clipboard");
-    } else {
-        println!("{output_text}");
-        tracing::debug!("Transcription printed to stdout");
+    if paste {
+        crate::paste::spawn_detached_paste_helper(output_text)?;
+        tracing::debug!("Transcription sent to detached paste helper");
+        return Ok(());
     }
 
-    Ok(())
+    super::output::write_text(
+        output_text,
+        output_file,
+        clipboard,
+        paste,
+        paste_config,
+        "Transcription",
+    )
 }
 
 async fn transcribe_recording_with_animation(
