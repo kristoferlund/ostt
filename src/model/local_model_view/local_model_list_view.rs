@@ -84,8 +84,10 @@ fn push_grouped_model_items(
             if current_group.is_some() {
                 items.push(ListItem::new(Line::from("")));
             }
-            items.push(group_header(group.to_string()));
-            items.push(ListItem::new(Line::from("")));
+            if group != section {
+                items.push(group_header(group.to_string()));
+                items.push(ListItem::new(Line::from("")));
+            }
             current_group = Some(group);
         }
         let is_selected = selected_id.as_deref() == Some(model_key(entry).as_str());
@@ -188,7 +190,9 @@ pub(super) fn grouped_display_index(
             if current_group.is_some() {
                 index += 1;
             }
-            index += 2;
+            if group != section {
+                index += 2;
+            }
             current_group = Some(group);
         }
         if model_key(entry) == selected_entry_id {
