@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.19 - 2026-06-03
+
 ### Added
 
 - Added `--paste` output mode for record, transcribe, retry, process, and launch flows, using configurable `[output.paste]` clipboard-backed paste settings.
