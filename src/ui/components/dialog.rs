@@ -27,7 +27,7 @@ pub fn render_dialog(
             .bg(Color::White)
             .add_modifier(Modifier::BOLD),
     )));
-    render_dialog_content(frame, title, lines, 70, 9);
+    render_dialog_content(frame, title, lines, 70, 10);
 }
 
 pub fn centered_fixed_rect(width: u16, height: u16, area: Rect) -> Rect {

@@ -29,7 +29,7 @@ impl CustomModelDetailsDialog {
             Line::from(""),
             wizard_button("Download", selected_action),
         ];
-        render_dialog_content(frame, "Download Custom Model 2/3", lines, 70, 13);
+        render_dialog_content(frame, "Download Custom Whisper Model 2/3", lines, 70, 13);
         render_dialog_input(frame, id_input, 13, 5);
         render_dialog_input(frame, name_input, 13, 8);
         match focus {

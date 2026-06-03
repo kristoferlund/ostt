@@ -26,8 +26,8 @@ pub use model::{all_models, find_model, models_for_provider, ModelOptionKind, Mo
 pub use provider::TranscriptionProvider;
 
 pub fn config_for_selected_model(
+    ostt_config: &crate::config::OsttConfig,
     selected_model: &crate::config::SelectedModel,
-    api_key: Option<String>,
     keywords: Vec<String>,
     params: indexmap::IndexMap<String, crate::config::ModelOptionValue>,
 ) -> anyhow::Result<TranscriptionConfig> {
@@ -48,6 +48,32 @@ pub fn config_for_selected_model(
         ));
     }
 
+    if provider == TranscriptionProvider::Command {
+        let profile = external_profile_config(ostt_config, selected_model)?;
+        return Ok(TranscriptionConfig::new_external(
+            provider,
+            selected_model.model_id.clone(),
+            profile.settings.command.clone().unwrap_or_default(),
+            None,
+            profile.settings.timeout_secs,
+            keywords,
+            params,
+        ));
+    }
+
+    if provider == TranscriptionProvider::Http {
+        let profile = external_profile_config(ostt_config, selected_model)?;
+        return Ok(TranscriptionConfig::new_external(
+            provider,
+            selected_model.model_id.clone(),
+            profile.settings.endpoint.clone().unwrap_or_default(),
+            profile.settings.api_key.clone(),
+            profile.settings.timeout_secs,
+            keywords,
+            params,
+        ));
+    }
+
     let model = find_model(&selected_model.provider_id, &selected_model.model_id).ok_or_else(|| {
         anyhow::anyhow!(
             "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
@@ -56,7 +82,7 @@ pub fn config_for_selected_model(
         )
     })?;
 
-    let api_key = api_key.ok_or_else(|| {
+    let api_key = crate::config::get_api_key(&selected_model.provider_id)?.ok_or_else(|| {
         anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
     })?;
 
@@ -68,6 +94,23 @@ pub fn config_for_selected_model(
         keywords,
         params,
     ))
+}
+
+fn external_profile_config<'a>(
+    ostt_config: &'a crate::config::OsttConfig,
+    selected_model: &crate::config::SelectedModel,
+) -> anyhow::Result<&'a crate::config::ProviderModelConfig> {
+    ostt_config
+        .provider_configs
+        .get(&selected_model.provider_id)
+        .and_then(|provider| provider.models.get(&selected_model.model_id))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Unknown external profile: {}/{}",
+                selected_model.provider_id,
+                selected_model.model_id
+            )
+        })
 }
 
 pub(crate) fn local_inference_backend() -> &'static str {

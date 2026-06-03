@@ -58,7 +58,6 @@ fn config_for_selected_model(
     keywords: Vec<String>,
     param_overrides: &[String],
 ) -> anyhow::Result<TranscriptionConfig> {
-    let api_key = config::get_api_key(&selected_model.provider_id)?;
     let mut params = ostt_config
         .provider_configs
         .get(&selected_model.provider_id)
@@ -78,13 +77,17 @@ fn config_for_selected_model(
         &params,
     )?;
 
-    super::config_for_selected_model(selected_model, api_key, keywords, params)
+    super::config_for_selected_model(ostt_config, selected_model, keywords, params)
 }
 
 fn parse_param_overrides(
     selected_model: &SelectedModel,
     overrides: &[String],
 ) -> anyhow::Result<IndexMap<String, config::ModelOptionValue>> {
+    if overrides.is_empty() {
+        return Ok(IndexMap::new());
+    }
+
     let schema = super::api::option_schema(&selected_model.provider_id, &selected_model.model_id)
         .ok_or_else(|| anyhow::anyhow!("No params are supported for this model"))?;
     let full_model_id = format!("{}/{}", selected_model.provider_id, selected_model.model_id);
@@ -207,6 +210,14 @@ mod tests {
 
         assert!(err.contains("Invalid --param 'diarize'"));
         assert!(err.contains("key=value"));
+    }
+
+    #[test]
+    fn param_overrides_allow_empty_overrides_for_paramless_models() {
+        let model = selected_model("command", "parakeet");
+        let options = parse_param_overrides(&model, &[]).unwrap();
+
+        assert!(options.is_empty());
     }
 
     #[test]

@@ -43,6 +43,37 @@ pub async fn handle_model_list(
                 }),
             });
         }
+
+        if provider
+            .as_deref()
+            .is_none_or(|id| matches!(id, "command" | "http"))
+        {
+            let config = crate::config::OsttConfig::load()
+                .map_err(|err| anyhow::anyhow!(err.to_string()))?;
+            for provider_id in ["command", "http"] {
+                if provider.as_deref().is_some_and(|id| id != provider_id) {
+                    continue;
+                }
+                if let Some(provider_config) = config.provider_configs.get(provider_id) {
+                    for (profile_id, profile) in &provider_config.models {
+                        rows.push(ModelListRow {
+                            provider: provider_id.to_string(),
+                            model: profile_id.clone(),
+                            name: profile
+                                .settings
+                                .display_name
+                                .clone()
+                                .unwrap_or_else(|| profile_id.clone()),
+                            installed: None,
+                            active: selected.as_ref().is_some_and(|selected| {
+                                selected.provider_id == provider_id
+                                    && selected.model_id == *profile_id
+                            }),
+                        });
+                    }
+                }
+            }
+        }
     }
 
     if provider.as_deref().is_none_or(|id| id == "whisper") {
@@ -161,6 +192,29 @@ pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
         println!(
             "Selected model: {}/{}",
             activated.provider_id, activated.model_id
+        );
+        return Ok(());
+    }
+
+    if matches!(selected.provider_id.as_str(), "command" | "http") {
+        let config =
+            crate::config::OsttConfig::load().map_err(|err| anyhow::anyhow!(err.to_string()))?;
+        if config
+            .provider_configs
+            .get(&selected.provider_id)
+            .and_then(|provider| provider.models.get(&selected.model_id))
+            .is_none()
+        {
+            anyhow::bail!(
+                "Unknown external profile: {}/{}",
+                selected.provider_id,
+                selected.model_id
+            );
+        }
+        crate::config::save_selected_model(&selected.provider_id, &selected.model_id)?;
+        println!(
+            "Selected model: {}/{}",
+            selected.provider_id, selected.model_id
         );
         return Ok(());
     }

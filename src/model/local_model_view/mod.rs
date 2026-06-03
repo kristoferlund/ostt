@@ -27,6 +27,7 @@ use crate::transcription::local_models::{
     resolve_custom_model, validate_custom_model_registration, validate_downloaded_model,
     DownloadHandle, LocalModelState, RegistryEntry,
 };
+use crate::transcription::{self, TranscriptionProvider};
 use crate::ui::{render_error_dialog, render_toast, DialogAction, Toast};
 
 use custom_model_details_dialog::CustomModelDetailsDialog;
@@ -43,6 +44,9 @@ use types::{
 
 pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let local_state = load_state();
+    let ostt_config =
+        config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let authorized_provider_ids = config::get_authorized_providers()?;
     let registry = match fetch_registry().await {
         Ok(registry) => registry,
         Err(error) => {
@@ -57,7 +61,9 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
         .await
         .map(|d| d.model_id);
 
-    let entries = build_local_model_entries(
+    let entries = build_model_entries(
+        &ostt_config,
+        &authorized_provider_ids,
         &local_state,
         &registry,
         selected_model.as_ref(),
@@ -177,51 +183,193 @@ fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
     }
 }
 
-fn build_local_model_entries(
+pub(crate) fn build_model_entries(
+    config: &config::OsttConfig,
+    authorized_provider_ids: &[String],
     local_state: &LocalModelState,
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
     daemon_model_id: Option<&str>,
 ) -> Vec<LocalModelEntry> {
-    // Custom entries are appended to the remote registry and marked as non-registry models.
-    registry
-        .iter()
-        .chain(local_state.custom_models.iter())
-        .map(|entry| {
-            let is_downloaded = model_destination(entry).exists();
-            let is_active = selected_model
-                .map(|selected| {
-                    selected.provider_id == entry.provider_id && selected.model_id == entry.id
-                })
-                .unwrap_or(false);
-            let is_daemon_loaded = daemon_model_id == Some(entry.id.as_str());
+    let mut entries = Vec::new();
+    entries.extend(build_custom_model_entries(
+        config,
+        local_state,
+        selected_model,
+        daemon_model_id,
+    ));
+    entries.extend(build_cloud_model_entries(
+        authorized_provider_ids,
+        selected_model,
+    ));
+    entries.extend(build_local_model_entries(
+        local_state,
+        registry,
+        selected_model,
+        daemon_model_id,
+    ));
+    entries
+}
 
-            LocalModelEntry {
-                id: entry.id.clone(),
-                provider_id: entry.provider_id.clone(),
-                name: entry.name.clone(),
-                description: entry.description.clone(),
-                size_mb: entry.size_mb,
-                is_downloaded,
-                is_active,
-                is_daemon_loaded,
-                is_available_in_registry: registry
-                    .iter()
-                    .any(|registry_entry| registry_entry.id == entry.id),
-                languages: entry.languages.clone(),
-                url: entry.url.clone(),
-                recommended_hardware: entry.recommended_hardware.clone(),
-                category: entry.category.clone(),
-                sha256: entry.sha256.clone(),
-                group_id: entry.group_id.clone(),
-            }
+fn build_custom_model_entries(
+    config: &config::OsttConfig,
+    local_state: &LocalModelState,
+    selected_model: Option<&SelectedModel>,
+    daemon_model_id: Option<&str>,
+) -> Vec<LocalModelEntry> {
+    let mut entries: Vec<LocalModelEntry> = local_state
+        .custom_models
+        .iter()
+        .map(|entry| {
+            local_model_entry_from_registry_entry(entry, &[], selected_model, daemon_model_id)
+        })
+        .map(|mut entry| {
+            entry.group_id = Some("Custom models".to_string());
+            entry
+        })
+        .collect();
+
+    for provider_id in ["command", "http"] {
+        let Some(provider_config) = config.provider_configs.get(provider_id) else {
+            continue;
+        };
+        for (profile_id, profile) in &provider_config.models {
+            let description = match provider_id {
+                "command" => profile
+                    .settings
+                    .command
+                    .clone()
+                    .unwrap_or_else(|| "External command backend".to_string()),
+                "http" => profile
+                    .settings
+                    .endpoint
+                    .clone()
+                    .unwrap_or_else(|| "OpenAI-compatible HTTP endpoint".to_string()),
+                _ => String::new(),
+            };
+            entries.push(LocalModelEntry {
+                id: profile_id.clone(),
+                provider_id: provider_id.to_string(),
+                name: profile
+                    .settings
+                    .display_name
+                    .clone()
+                    .unwrap_or_else(|| profile_id.clone()),
+                description,
+                size_mb: 0,
+                is_downloaded: true,
+                is_active: selected_model
+                    .map(|selected| {
+                        selected.provider_id == provider_id && selected.model_id == *profile_id
+                    })
+                    .unwrap_or(false),
+                is_daemon_loaded: false,
+                is_available_in_registry: false,
+                languages: vec!["Configured".to_string()],
+                url: String::new(),
+                recommended_hardware: None,
+                category: None,
+                sha256: None,
+                group_id: Some("Custom models".to_string()),
+            });
+        }
+    }
+
+    entries
+}
+
+fn build_cloud_model_entries(
+    authorized_provider_ids: &[String],
+    selected_model: Option<&SelectedModel>,
+) -> Vec<LocalModelEntry> {
+    let authorized: std::collections::HashSet<&str> =
+        authorized_provider_ids.iter().map(String::as_str).collect();
+
+    TranscriptionProvider::all()
+        .iter()
+        .filter(|provider| provider.requires_auth())
+        .filter(|provider| authorized.contains(provider.id()))
+        .flat_map(|provider| transcription::models_for_provider(provider))
+        .map(|model| LocalModelEntry {
+            id: model.model_id.to_string(),
+            provider_id: model.provider_id.to_string(),
+            name: model.display_name.to_string(),
+            description: model.description.to_string(),
+            size_mb: 0,
+            is_downloaded: true,
+            is_active: selected_model
+                .map(|selected| {
+                    selected.provider_id == model.provider_id && selected.model_id == model.model_id
+                })
+                .unwrap_or(false),
+            is_daemon_loaded: false,
+            is_available_in_registry: false,
+            languages: model
+                .languages
+                .iter()
+                .map(|language| language.to_string())
+                .collect(),
+            url: String::new(),
+            recommended_hardware: None,
+            category: None,
+            sha256: None,
+            group_id: Some("Cloud models".to_string()),
         })
         .collect()
+}
+
+pub(crate) fn build_local_model_entries(
+    local_state: &LocalModelState,
+    registry: &[RegistryEntry],
+    selected_model: Option<&SelectedModel>,
+    daemon_model_id: Option<&str>,
+) -> Vec<LocalModelEntry> {
+    let _ = local_state;
+    registry
+        .iter()
+        .map(|entry| {
+            local_model_entry_from_registry_entry(entry, registry, selected_model, daemon_model_id)
+        })
+        .collect()
+}
+
+fn local_model_entry_from_registry_entry(
+    entry: &RegistryEntry,
+    registry: &[RegistryEntry],
+    selected_model: Option<&SelectedModel>,
+    daemon_model_id: Option<&str>,
+) -> LocalModelEntry {
+    let is_downloaded = model_destination(entry).exists();
+    let is_active = selected_model
+        .map(|selected| selected.provider_id == entry.provider_id && selected.model_id == entry.id)
+        .unwrap_or(false);
+    let is_daemon_loaded = daemon_model_id == Some(entry.id.as_str());
+
+    LocalModelEntry {
+        id: entry.id.clone(),
+        provider_id: entry.provider_id.clone(),
+        name: entry.name.clone(),
+        description: entry.description.clone(),
+        size_mb: entry.size_mb,
+        is_downloaded,
+        is_active,
+        is_daemon_loaded,
+        is_available_in_registry: registry
+            .iter()
+            .any(|registry_entry| registry_entry.id == entry.id),
+        languages: entry.languages.clone(),
+        url: entry.url.clone(),
+        recommended_hardware: entry.recommended_hardware.clone(),
+        category: entry.category.clone(),
+        sha256: entry.sha256.clone(),
+        group_id: Some("Local models".to_string()),
+    }
 }
 
 fn downloaded_model_disk_usage_bytes(entries: &[LocalModelEntry]) -> u64 {
     entries
         .iter()
+        .filter(|entry| entry.provider_id == "whisper")
         .filter(|entry| entry.is_downloaded)
         .filter_map(|entry| {
             model_destination(&registry_entry_from_model(entry))
@@ -260,7 +408,9 @@ async fn handle_key(
         (LocalModelsMode::ErrorDialog { .. }, KeyCode::Enter | KeyCode::Esc) => {
             tui.close_error_dialog()
         }
-        (LocalModelsMode::Browse, KeyCode::Char('x') | KeyCode::Delete) => tui.confirm_delete(),
+        (LocalModelsMode::Browse, KeyCode::Char('x') | KeyCode::Char('d') | KeyCode::Delete) => {
+            tui.confirm_delete()
+        }
         (LocalModelsMode::Info { .. }, KeyCode::Esc | KeyCode::Char('q')) => tui.back_to_browse(),
         (LocalModelsMode::Downloading(_), KeyCode::Enter | KeyCode::Tab | KeyCode::Esc) => {
             cancel_download(running_download)
@@ -375,7 +525,7 @@ async fn handle_selected_entry(
     };
     tracing::debug!("Selected local model '{}'", entry.id);
 
-    if !entry.is_downloaded {
+    if entry.provider_id == "whisper" && !entry.is_downloaded {
         if entry.is_available_in_registry {
             tracing::debug!("Confirming download for local model '{}'", entry.id);
             tui.mode = LocalModelsMode::ConfirmDownload {
@@ -403,6 +553,11 @@ async fn handle_selected_entry(
 }
 
 async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
+    if entry.provider_id != "whisper" {
+        config::save_selected_model(&entry.provider_id, &entry.id)?;
+        return Ok(());
+    }
+
     if !entry.is_downloaded {
         anyhow::bail!("Download first with [d]");
     }
@@ -782,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn build_local_model_entries_merges_registry_and_custom_entries() {
+    fn build_model_entries_orders_custom_before_local_entries() {
         with_isolated_models_dir(|_| {
             let registry = vec![registry_entry("turbo")];
             let state = LocalModelState {
@@ -793,10 +948,15 @@ mod tests {
                     ..registry_entry("custom")
                 }],
             };
+            let config = config::OsttConfig::default();
 
-            let entries = build_local_model_entries(&state, &registry, None, None);
+            let entries = build_model_entries(&config, &[], &state, &registry, None, None);
 
             assert_eq!(entries.len(), 2);
+            assert_eq!(entries[0].id, "custom");
+            assert_eq!(entries[0].group_id.as_deref(), Some("Custom models"));
+            assert_eq!(entries[1].id, "turbo");
+            assert_eq!(entries[1].group_id.as_deref(), Some("Local models"));
             assert!(entries.iter().any(|entry| {
                 entry.id == "turbo" && entry.is_available_in_registry && !entry.is_downloaded
             }));
@@ -965,7 +1125,7 @@ mod tests {
                 group_id: None,
             },
         ];
-        let idx = grouped_display_index(entries.iter().collect(), "tiny", 0);
-        assert_eq!(idx, Some(1));
+        let idx = grouped_display_index(entries.iter().collect(), "whisper/tiny", 0);
+        assert_eq!(idx, Some(2));
     }
 }

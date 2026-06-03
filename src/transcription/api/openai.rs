@@ -272,8 +272,7 @@ pub(super) async fn transcribe(
         );
     }
 
-    let endpoint = config.endpoint;
-    let url = endpoint.to_string();
+    let url = config.endpoint.clone();
 
     tracing::debug!(
         "OpenAI API Call:\n  URL: {}\n  Method: POST\n  Headers:\n    Authorization: Bearer <redacted>\n    Content-Type: multipart/form-data\n  Body parameters: {}",

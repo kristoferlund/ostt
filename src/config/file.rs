@@ -157,9 +157,7 @@ pub struct ProviderSettings {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key_env: Option<String>,
+    pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub display_name: Option<String>,
 }
@@ -818,13 +816,7 @@ fn parse_params_table(
 fn is_provider_setting_key(key: &str) -> bool {
     matches!(
         key,
-        "output_format"
-            | "timeout_secs"
-            | "command"
-            | "endpoint"
-            | "model"
-            | "api_key_env"
-            | "display_name"
+        "output_format" | "timeout_secs" | "command" | "endpoint" | "api_key" | "display_name"
     )
 }
 
@@ -838,8 +830,7 @@ fn set_provider_setting(
         "timeout_secs" => settings.timeout_secs = Some(value.try_into()?),
         "command" => settings.command = Some(value.try_into()?),
         "endpoint" => settings.endpoint = Some(value.try_into()?),
-        "model" => settings.model = Some(value.try_into()?),
-        "api_key_env" => settings.api_key_env = Some(value.try_into()?),
+        "api_key" => settings.api_key = Some(value.try_into()?),
         "display_name" => settings.display_name = Some(value.try_into()?),
         _ => unreachable!("unknown provider setting was pre-filtered"),
     }
@@ -914,14 +905,8 @@ fn provider_settings_to_table(settings: &ProviderSettings) -> anyhow::Result<tom
     if let Some(value) = &settings.endpoint {
         table.insert("endpoint".to_string(), toml::Value::String(value.clone()));
     }
-    if let Some(value) = &settings.model {
-        table.insert("model".to_string(), toml::Value::String(value.clone()));
-    }
-    if let Some(value) = &settings.api_key_env {
-        table.insert(
-            "api_key_env".to_string(),
-            toml::Value::String(value.clone()),
-        );
+    if let Some(value) = &settings.api_key {
+        table.insert("api_key".to_string(), toml::Value::String(value.clone()));
     }
     if let Some(value) = &settings.display_name {
         table.insert(
@@ -934,17 +919,81 @@ fn provider_settings_to_table(settings: &ProviderSettings) -> anyhow::Result<tom
 
 pub fn validate_config(config: &OsttConfig) -> anyhow::Result<()> {
     for (provider_id, provider_config) in &config.provider_configs {
-        if crate::transcription::TranscriptionProvider::from_id(provider_id).is_none() {
+        let Some(provider) = crate::transcription::TranscriptionProvider::from_id(provider_id)
+        else {
             anyhow::bail!("Unknown provider config '{}'.", provider_id);
-        }
+        };
 
-        for model_id in provider_config.models.keys() {
+        for (model_id, model_config) in &provider_config.models {
             validate_model_id(provider_id, model_id)?;
+            validate_external_profile(provider.id(), model_id, model_config)?;
         }
     }
 
     if config.transcription.provider.as_deref() == Some("local") {
         anyhow::bail!("Provider 'local' is no longer supported. Use provider = \"whisper\".");
+    }
+
+    Ok(())
+}
+
+fn validate_external_profile(
+    provider_id: &str,
+    profile_id: &str,
+    config: &ProviderModelConfig,
+) -> anyhow::Result<()> {
+    match provider_id {
+        "command" => {
+            let command = config.settings.command.as_deref().unwrap_or_default();
+            if command.trim().is_empty() {
+                anyhow::bail!(
+                    "Command profile '{}': missing required 'command'.",
+                    profile_id
+                );
+            }
+            validate_command_template(profile_id, command)?;
+        }
+        "http" => {
+            let endpoint = config.settings.endpoint.as_deref().unwrap_or_default();
+            if endpoint.trim().is_empty() {
+                anyhow::bail!(
+                    "HTTP profile '{}': missing required 'endpoint'.",
+                    profile_id
+                );
+            }
+        }
+        _ => {}
+    }
+
+    Ok(())
+}
+
+fn validate_command_template(profile_id: &str, command: &str) -> anyhow::Result<()> {
+    let mut rest = command;
+    while let Some(start) = rest.find('{') {
+        let after_start = &rest[start + 1..];
+        let Some(end) = after_start.find('}') else {
+            anyhow::bail!(
+                "Command profile '{}': unclosed template placeholder.",
+                profile_id
+            );
+        };
+        let placeholder = &after_start[..end];
+        if placeholder != "audio_path" {
+            anyhow::bail!(
+                "Command profile '{}': unknown template placeholder '{{{}}}'. Supported placeholders: {{audio_path}}.",
+                profile_id,
+                placeholder
+            );
+        }
+        rest = &after_start[end + 1..];
+    }
+
+    if rest.contains('}') {
+        anyhow::bail!(
+            "Command profile '{}': unmatched '}}' in command.",
+            profile_id
+        );
     }
 
     Ok(())
@@ -999,6 +1048,16 @@ pub fn save_config(config: &OsttConfig) -> anyhow::Result<()> {
 }
 
 pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()> {
+    if matches!(provider_id, "command" | "http") {
+        if !crate::transcription::local_models::is_safe_model_id(model_id) {
+            anyhow::bail!(
+                "External profile id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
+                model_id
+            );
+        }
+        return Ok(());
+    }
+
     if provider_id != "whisper" && model::find_model(provider_id, model_id).is_none() {
         anyhow::bail!(
             "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
@@ -1024,12 +1083,15 @@ pub fn validate_params_for_model(
 ) -> anyhow::Result<()> {
     validate_model_id(provider_id, model_id)?;
     let full_model_id = format!("{provider_id}/{model_id}");
-    let schema = api::option_schema(provider_id, model_id).ok_or_else(|| {
-        anyhow::anyhow!(
+    let Some(schema) = api::option_schema(provider_id, model_id) else {
+        if params.is_empty() {
+            return Ok(());
+        }
+        anyhow::bail!(
             "Invalid params for '{}'. No params are supported for this model.",
             full_model_id
-        )
-    })?;
+        );
+    };
 
     for (option_name, value) in params {
         let Some(spec) = schema.option(option_name) else {
@@ -1506,6 +1568,84 @@ mod tests {
 
         let config = parse_ostt_config(toml_str).unwrap();
         validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
+    fn external_command_profile_requires_known_audio_path_placeholder() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [command.parakeet-fast]
+            command = "parakeet --input {file}"
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+
+        assert!(err.contains("unknown template placeholder"), "{err}");
+        assert!(err.contains("{audio_path}"), "{err}");
+    }
+
+    #[test]
+    fn external_profiles_parse_backend_settings_and_params() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [command.parakeet-fast]
+            display_name = "Parakeet"
+            command = "parakeet {audio_path}"
+            output_format = "pcm_s16le -ar 16000"
+            timeout_secs = 120
+
+            [http.speaches]
+            display_name = "Speaches"
+            endpoint = "http://localhost:8000/v1/audio/transcriptions"
+            api_key = ""
+            output_format = "mp3 -ab 16k -ar 12000"
+            timeout_secs = 60
+
+            [http.speaches.params]
+            model = "Systran/faster-whisper-large-v3"
+            response_format = "json"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+
+        let command = &config.provider_configs["command"].models["parakeet-fast"];
+        assert_eq!(
+            command.settings.command.as_deref(),
+            Some("parakeet {audio_path}")
+        );
+        assert_eq!(command.settings.timeout_secs, Some(120));
+
+        let http = &config.provider_configs["http"].models["speaches"];
+        assert_eq!(http.settings.api_key.as_deref(), Some(""));
+        assert_eq!(
+            http.params["model"],
+            ModelOptionValue::String("Systran/faster-whisper-large-v3".to_string())
+        );
+    }
+
+    #[test]
+    fn http_profile_rejects_unsupported_response_format() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [http.speaches]
+            endpoint = "http://localhost:8000/v1/audio/transcriptions"
+
+            [http.speaches.params]
+            model = "large-v3"
+            response_format = "text"
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+
+        assert!(err.contains("response_format"), "{err}");
+        assert!(err.contains("json"), "{err}");
     }
 
     #[test]

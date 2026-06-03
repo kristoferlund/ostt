@@ -155,7 +155,7 @@ pub(super) async fn transcribe(
         );
     }
 
-    let endpoint = config.endpoint;
+    let endpoint = &config.endpoint;
 
     let client = reqwest::Client::new();
 

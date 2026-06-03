@@ -22,7 +22,7 @@ impl LocalModelDownloadProgressDialog {
         render_dialog_content(
             frame,
             if state.is_custom {
-                "Download Custom Model 3/3"
+                "Download Custom Whisper Model 3/3"
             } else {
                 state.status.as_str()
             },
