@@ -26,6 +26,7 @@ pub mod model;
 pub mod process;
 pub mod recording;
 pub mod setup;
+pub(crate) mod text;
 pub mod transcription;
 pub mod ui;
 
