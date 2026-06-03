@@ -47,7 +47,7 @@ pub async fn handle_transcribe(
             anyhow::anyhow!("Transcription failed: {e}")
         })?;
 
-    let transcription_text = text.trim().to_string();
+    let transcription_text = crate::text::apply_replace(text.trim(), &config_data.text.replace)?;
     tracing::debug!("Transcription completed: {}", transcription_text);
 
     history::save_transcription(&transcription_text)?;

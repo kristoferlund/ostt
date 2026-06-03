@@ -182,6 +182,12 @@ pub struct ProviderConfig {
 
 pub type ProviderConfigs = IndexMap<String, ProviderConfig>;
 
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct TextConfig {
+    #[serde(default)]
+    pub replace: IndexMap<String, String>,
+}
+
 /// Popup window configuration for the `launch` subcommand.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PopupConfig {
@@ -559,7 +565,7 @@ pub struct TranscriptionSelectionConfig {
     pub model: Option<String>,
 }
 
-const FIXED_TOP_LEVEL_SECTIONS: &[&str] = &["audio", "transcription", "process", "popup"];
+const FIXED_TOP_LEVEL_SECTIONS: &[&str] = &["audio", "transcription", "text", "process", "popup"];
 const DEPRECATED_TOP_LEVEL_SECTIONS: &[&str] = &["providers", "model_options"];
 
 /// Complete application configuration.
@@ -569,6 +575,7 @@ pub struct OsttConfig {
     pub audio: AudioConfig,
     pub transcription: TranscriptionSelectionConfig,
     pub provider_configs: ProviderConfigs,
+    pub text: TextConfig,
     pub process: ProcessConfig,
     pub popup: PopupConfig,
 }
@@ -628,6 +635,7 @@ impl OsttConfig {
             },
             transcription: TranscriptionSelectionConfig::default(),
             provider_configs: ProviderConfigs::default(),
+            text: TextConfig::default(),
             process: ProcessConfig::default(),
             popup: PopupConfig::default(),
         }
@@ -645,6 +653,7 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
     let audio = take_required_section::<AudioConfig>(table, "audio")?;
     let transcription =
         take_optional_section::<TranscriptionSelectionConfig>(table, "transcription")?;
+    let text = take_optional_section::<TextConfig>(table, "text")?;
     let process = take_optional_section::<ProcessConfig>(table, "process")?;
     let popup = take_optional_section::<PopupConfig>(table, "popup")?;
 
@@ -656,7 +665,7 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
         }
         if crate::transcription::TranscriptionProvider::from_id(&provider_id).is_none() {
             anyhow::bail!(
-                "Unknown top-level config section '{}'. Expected one of: audio, transcription, process, popup, {}.",
+                "Unknown top-level config section '{}'. Expected one of: audio, transcription, text, process, popup, {}.",
                 provider_id,
                 crate::transcription::TranscriptionProvider::supported_ids().join(", ")
             );
@@ -675,6 +684,7 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
         audio,
         transcription,
         provider_configs,
+        text,
         process,
         popup,
     };
@@ -856,6 +866,9 @@ fn config_to_table(config: &OsttConfig) -> anyhow::Result<toml::Table> {
             provider_config_to_value(provider_config)?,
         );
     }
+    if !config.text.replace.is_empty() {
+        table.insert("text".to_string(), toml::Value::try_from(&config.text)?);
+    }
     if !config.process.actions.is_empty() {
         table.insert(
             "process".to_string(),
@@ -932,6 +945,12 @@ pub fn validate_config(config: &OsttConfig) -> anyhow::Result<()> {
 
     if config.transcription.provider.as_deref() == Some("local") {
         anyhow::bail!("Provider 'local' is no longer supported. Use provider = \"whisper\".");
+    }
+
+    for source in config.text.replace.keys() {
+        if source.trim().is_empty() {
+            anyhow::bail!("Text replace source must not be empty.");
+        }
     }
 
     Ok(())
@@ -1330,6 +1349,66 @@ mod tests {
         "#;
         let config: OsttConfig = toml::from_str(toml_str).unwrap();
         assert!(config.process.actions.is_empty());
+    }
+
+    #[test]
+    fn missing_text_section_defaults_to_empty_replace() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+
+        assert!(config.text.replace.is_empty());
+    }
+
+    #[test]
+    fn empty_text_replace_section_parses() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [text.replace]
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+
+        assert!(config.text.replace.is_empty());
+    }
+
+    #[test]
+    fn text_replace_preserves_configured_values() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [text.replace]
+            ostt = "OSTT"
+            api = "API"
+            typescript = "TypeScript"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+
+        assert_eq!(config.text.replace["ostt"], "OSTT");
+        assert_eq!(config.text.replace["api"], "API");
+        assert_eq!(config.text.replace["typescript"], "TypeScript");
+    }
+
+    #[test]
+    fn empty_text_replace_source_fails_validation() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [text.replace]
+            "" = "OSTT"
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+
+        assert!(err.contains("Text replace source must not be empty"));
     }
 
     #[test]

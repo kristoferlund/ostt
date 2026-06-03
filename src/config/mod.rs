@@ -15,8 +15,8 @@ pub use file::{
 };
 pub use file::{
     AudioConfig, ModelOptionValue, OsttConfig, ParamsConfig, PopupConfig, ProviderConfig,
-    ProviderConfigs, ProviderModelConfig, ProviderSettings, TranscriptionSelectionConfig,
-    VisualizationType,
+    ProviderConfigs, ProviderModelConfig, ProviderSettings, TextConfig,
+    TranscriptionSelectionConfig, VisualizationType,
 };
 pub use secrets::{
     clear_api_key, clear_selected_model, get_api_key, get_authorized_providers, get_selected_model,

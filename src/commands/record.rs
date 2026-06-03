@@ -91,7 +91,11 @@ pub async fn handle_record(
     )
     .await
     {
-        Ok(text) => Some(text),
+        Ok(text) => {
+            let text = crate::text::apply_replace(text.trim(), &config.text.replace)?;
+            history::save_transcription(&text).context("failed to save transcription history")?;
+            Some(text)
+        }
         Err(e) => {
             tracing::warn!("Transcription failed: {}", e);
             transcription_error = Some(e.to_string());
@@ -374,11 +378,8 @@ async fn transcribe_recording_with_animation(
             let trimmed_text = text.trim().to_string();
             tracing::debug!("Transcription completed: {}", trimmed_text);
 
-            history::save_transcription(&trimmed_text)
-                .context("failed to save transcription history")?;
-
             // Return the transcription text to be output after TUI cleanup
-            Ok(text)
+            Ok(trimmed_text)
         }
         Ok(Err(e)) => {
             tracing::error!("Transcription failed: {}", e);

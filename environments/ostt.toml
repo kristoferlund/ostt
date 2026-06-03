@@ -40,6 +40,18 @@ reference_level_db = -20
 # Add more formats as needed - ffmpeg handles the rest!
 output_format = "mp3 -ab 16k -ar 12000"
 
+[text]
+# Deterministic post-transcription replace rules.
+# Keywords help the model recognize terms; replace fixes final text casing,
+# acronyms, project names, and common misrecognitions.
+#
+# Examples:
+# [text.replace]
+# "ostt" = "OSTT"
+# "api" = "API"
+# "typescript" = "TypeScript"
+# "github" = "GitHub"
+
 # Provider and per-model transcription params.
 # Provider params apply to all models for that provider. Model params override provider params.
 #

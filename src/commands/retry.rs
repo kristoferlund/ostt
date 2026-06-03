@@ -58,7 +58,8 @@ pub async fn handle_retry(
     tracing::debug!("Starting transcription for retry...");
     match transcription::transcribe(&context.config, audio_path).await {
         Ok(text) => {
-            let transcription_text = text.trim().to_string();
+            let transcription_text =
+                crate::text::apply_replace(text.trim(), &config_data.text.replace)?;
             tracing::debug!("Retry transcription completed: {}", transcription_text);
 
             history::save_transcription(&transcription_text)?;
