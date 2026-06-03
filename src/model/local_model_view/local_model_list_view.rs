@@ -50,7 +50,14 @@ impl LocalModelListView {
 fn section_header(label: impl Into<String>) -> ListItem<'static> {
     ListItem::new(Line::from(Span::styled(
         format!(" {} ", label.into()),
-        Style::default().fg(Color::Black).bg(Color::Cyan),
+        Style::default().fg(Color::Black).bg(Color::Green),
+    )))
+}
+
+fn group_header(label: impl Into<String>) -> ListItem<'static> {
+    ListItem::new(Line::from(Span::styled(
+        format!(" {} ", label.into()),
+        Style::default().fg(Color::Black).bg(Color::Magenta),
     )))
 }
 
@@ -59,14 +66,25 @@ fn push_grouped_model_items(
     entries: Vec<&LocalModelEntry>,
     selected_id: Option<&str>,
 ) {
+    let mut current_section: Option<&str> = None;
     let mut current_group: Option<&str> = None;
     for entry in entries {
-        let group = entry.group_id.as_deref().unwrap_or("Custom models");
+        let section = section_label(entry);
+        let group = group_label(entry);
+        if current_section != Some(section) {
+            if current_section.is_some() {
+                items.push(ListItem::new(Line::from("")));
+            }
+            items.push(section_header(section.to_string()));
+            items.push(ListItem::new(Line::from("")));
+            current_section = Some(section);
+            current_group = None;
+        }
         if current_group != Some(group) {
             if current_group.is_some() {
                 items.push(ListItem::new(Line::from("")));
             }
-            items.push(section_header(group.to_string()));
+            items.push(group_header(group.to_string()));
             items.push(ListItem::new(Line::from("")));
             current_group = Some(group);
         }
@@ -152,9 +170,20 @@ pub(super) fn grouped_display_index(
     start_index: usize,
 ) -> Option<usize> {
     let mut index = start_index;
+    let mut current_section: Option<&str> = None;
     let mut current_group: Option<&str> = None;
     for entry in entries {
-        let group = entry.group_id.as_deref().unwrap_or("Custom models");
+        let section = section_label(entry);
+        let group = group_label(entry);
+        if current_section != Some(section) {
+            if current_section.is_some() {
+                index += 1;
+            }
+            index += 1;
+            index += 1;
+            current_section = Some(section);
+            current_group = None;
+        }
         if current_group != Some(group) {
             if current_group.is_some() {
                 index += 1;
@@ -172,4 +201,21 @@ pub(super) fn grouped_display_index(
 
 fn model_key(entry: &LocalModelEntry) -> String {
     format!("{}/{}", entry.provider_id, entry.id)
+}
+
+fn section_label(entry: &LocalModelEntry) -> &'static str {
+    if entry.group_id.as_deref() == Some("Custom models") {
+        "Custom models"
+    } else if entry.provider_id == "whisper" {
+        "Local models"
+    } else {
+        "Cloud models"
+    }
+}
+
+fn group_label(entry: &LocalModelEntry) -> &str {
+    entry
+        .group_id
+        .as_deref()
+        .unwrap_or_else(|| section_label(entry))
 }

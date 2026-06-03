@@ -289,8 +289,12 @@ fn build_cloud_model_entries(
         .iter()
         .filter(|provider| provider.requires_auth())
         .filter(|provider| authorized.contains(provider.id()))
-        .flat_map(|provider| transcription::models_for_provider(provider))
-        .map(|model| LocalModelEntry {
+        .flat_map(|provider| {
+            transcription::models_for_provider(provider)
+                .into_iter()
+                .map(move |model| (provider.name(), model))
+        })
+        .map(|(provider_name, model)| LocalModelEntry {
             id: model.model_id.to_string(),
             provider_id: model.provider_id.to_string(),
             name: model.display_name.to_string(),
@@ -313,7 +317,7 @@ fn build_cloud_model_entries(
             recommended_hardware: None,
             category: None,
             sha256: None,
-            group_id: Some("Cloud models".to_string()),
+            group_id: Some(provider_name.to_string()),
         })
         .collect()
 }
@@ -362,7 +366,10 @@ fn local_model_entry_from_registry_entry(
         recommended_hardware: entry.recommended_hardware.clone(),
         category: entry.category.clone(),
         sha256: entry.sha256.clone(),
-        group_id: Some("Local models".to_string()),
+        group_id: entry
+            .group_id
+            .clone()
+            .or_else(|| Some("Local models".to_string())),
     }
 }
 
@@ -939,7 +946,10 @@ mod tests {
     #[test]
     fn build_model_entries_orders_custom_before_local_entries() {
         with_isolated_models_dir(|_| {
-            let registry = vec![registry_entry("turbo")];
+            let registry = vec![RegistryEntry {
+                group_id: Some("nbailab".to_string()),
+                ..registry_entry("turbo")
+            }];
             let state = LocalModelState {
                 version: 1,
                 custom_models: vec![RegistryEntry {
@@ -956,7 +966,7 @@ mod tests {
             assert_eq!(entries[0].id, "custom");
             assert_eq!(entries[0].group_id.as_deref(), Some("Custom models"));
             assert_eq!(entries[1].id, "turbo");
-            assert_eq!(entries[1].group_id.as_deref(), Some("Local models"));
+            assert_eq!(entries[1].group_id.as_deref(), Some("nbailab"));
             assert!(entries.iter().any(|entry| {
                 entry.id == "turbo" && entry.is_available_in_registry && !entry.is_downloaded
             }));
@@ -964,6 +974,28 @@ mod tests {
                 entry.id == "custom"
                     && !entry.is_available_in_registry
                     && entry.category.as_deref() == Some("custom")
+            }));
+        });
+    }
+
+    #[test]
+    fn build_model_entries_groups_cloud_models_by_provider_name() {
+        with_isolated_models_dir(|_| {
+            let config = config::OsttConfig::default();
+            let entries = build_model_entries(
+                &config,
+                &["openai".to_string(), "deepgram".to_string()],
+                &LocalModelState::default(),
+                &[],
+                None,
+                None,
+            );
+
+            assert!(entries.iter().any(|entry| {
+                entry.provider_id == "openai" && entry.group_id.as_deref() == Some("OpenAI")
+            }));
+            assert!(entries.iter().any(|entry| {
+                entry.provider_id == "deepgram" && entry.group_id.as_deref() == Some("Deepgram")
             }));
         });
     }
@@ -1126,6 +1158,6 @@ mod tests {
             },
         ];
         let idx = grouped_display_index(entries.iter().collect(), "whisper/tiny", 0);
-        assert_eq!(idx, Some(2));
+        assert_eq!(idx, Some(4));
     }
 }
