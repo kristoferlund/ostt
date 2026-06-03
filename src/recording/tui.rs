@@ -464,11 +464,24 @@ impl RecordingTui {
                     height: area.height.saturating_sub(area.height / 2),
                 };
 
-                let text = format!("{title}\n\n{message}\n\nPress any key to close.");
+                let title_line = ratatui::text::Line::from(ratatui::text::Span::styled(
+                    format!(" {title} "),
+                    Style::default().fg(Color::Black).bg(Color::Red),
+                ))
+                .alignment(Alignment::Center);
+
+                let text = ratatui::text::Text::from(vec![
+                    title_line,
+                    ratatui::text::Line::raw(""),
+                    ratatui::text::Line::raw(message),
+                    ratatui::text::Line::raw(""),
+                    ratatui::text::Line::raw("Press any key to close."),
+                ]);
+
                 let paragraph = Paragraph::new(text)
                     .alignment(Alignment::Center)
                     .wrap(Wrap { trim: true })
-                    .style(Style::default().fg(Color::Black).bg(Color::Red));
+                    .style(Style::reset().fg(Color::White));
 
                 frame.render_widget(paragraph, padded_area);
             })?;
