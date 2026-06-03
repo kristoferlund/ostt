@@ -6,10 +6,12 @@
 
 mod assemblyai;
 mod berget;
+mod command;
 mod deepgram;
 mod deepinfra;
 mod elevenlabs;
 mod groq;
+mod http;
 pub(crate) mod local;
 mod mistral;
 mod openai;
@@ -31,9 +33,13 @@ pub struct TranscriptionConfig {
     /// The selected model ID, including data-driven local model IDs
     pub model_id: String,
     /// Base API endpoint for the selected model
-    pub endpoint: &'static str,
+    pub endpoint: String,
     /// The API key for authentication
     pub api_key: String,
+    /// Whether auth should be sent when the key is empty
+    pub api_key_configured: bool,
+    /// Provider request timeout in seconds
+    pub timeout_secs: Option<u64>,
     /// Keywords to improve transcription accuracy
     pub keywords: Vec<String>,
     /// Validated request params for the selected model
@@ -45,7 +51,7 @@ impl TranscriptionConfig {
     pub fn new_cloud(
         provider: TranscriptionProvider,
         model_id: String,
-        endpoint: &'static str,
+        endpoint: impl Into<String>,
         api_key: String,
         keywords: Vec<String>,
         params: IndexMap<String, ModelOptionValue>,
@@ -53,8 +59,31 @@ impl TranscriptionConfig {
         Self {
             provider,
             model_id,
-            endpoint,
+            endpoint: endpoint.into(),
             api_key,
+            api_key_configured: true,
+            timeout_secs: None,
+            keywords,
+            params,
+        }
+    }
+
+    pub fn new_external(
+        provider: TranscriptionProvider,
+        model_id: String,
+        endpoint: String,
+        api_key: Option<String>,
+        timeout_secs: Option<u64>,
+        keywords: Vec<String>,
+        params: IndexMap<String, ModelOptionValue>,
+    ) -> Self {
+        Self {
+            provider,
+            model_id,
+            endpoint,
+            api_key_configured: api_key.is_some(),
+            api_key: api_key.unwrap_or_default(),
+            timeout_secs,
             keywords,
             params,
         }
@@ -69,8 +98,10 @@ impl TranscriptionConfig {
         Self {
             provider: TranscriptionProvider::Whisper,
             model_id,
-            endpoint: "",
+            endpoint: String::new(),
             api_key: String::new(),
+            api_key_configured: false,
+            timeout_secs: None,
             keywords,
             params,
         }
@@ -156,6 +187,8 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
         TranscriptionProvider::Whisper => local::transcribe(config, audio_path).await,
         TranscriptionProvider::Mistral => mistral::transcribe(config, audio_path).await,
+        TranscriptionProvider::Command => command::transcribe(config, audio_path).await,
+        TranscriptionProvider::Http => http::transcribe(config, audio_path).await,
     }?;
 
     Ok(result)
@@ -172,6 +205,7 @@ pub(crate) fn option_schema(provider_id: &str, model_id: &str) -> Option<ModelOp
         "elevenlabs" => elevenlabs::option_schema(model_id),
         "mistral" => mistral::option_schema(model_id),
         "whisper" => local::option_schema(model_id),
+        "http" => http::option_schema(model_id),
         _ => None,
     }
 }
@@ -190,6 +224,7 @@ pub(crate) fn validate_params(
         "elevenlabs" => elevenlabs::validate_options(full_model_id, options),
         "mistral" => mistral::validate_options(full_model_id, options),
         "whisper" => local::validate_options(full_model_id, options),
+        "http" => http::validate_options(full_model_id, options),
         _ => Ok(()),
     }
 }

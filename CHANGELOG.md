@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added external `command/<profile>` transcription providers that run configured shell commands with `{audio_path}` and read transcript text from stdout.
+- Added external `http/<profile>` transcription providers for OpenAI-compatible `/v1/audio/transcriptions` endpoints with validated request params.
+
+### Changed
+
+- `ostt model` now uses a unified picker with custom, cloud, and local models in one list.
+- `ostt model list` and `ostt model select` now support configured `command/*` and `http/*` profiles.
+
 ## 0.0.18 - 2026-06-02
 
 ### Changed

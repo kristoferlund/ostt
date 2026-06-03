@@ -164,7 +164,7 @@ pub(super) async fn transcribe(
         }
     }
 
-    let endpoint = config.endpoint;
+    let endpoint = &config.endpoint;
 
     tracing::debug!(
         "Groq API Call:\n  URL: {}\n  Method: POST\n  Headers:\n    Authorization: Bearer <redacted>\n    Content-Type: multipart/form-data\n  Body parameters: {}",

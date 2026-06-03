@@ -21,7 +21,7 @@ impl CustomModelUrlInputDialog {
             Line::from(""),
             wizard_button("Next", selected_action),
         ];
-        render_dialog_content(frame, "Download Custom Model 1/3", lines, 70, 10);
+        render_dialog_content(frame, "Download Custom Whisper Model 1/3", lines, 70, 10);
         render_dialog_input(frame, input, 10, 5);
         set_custom_input_cursor(frame, input, 10, 5);
     }

@@ -137,7 +137,7 @@ impl LocalModelsTui {
     pub(crate) fn confirm_delete(&mut self) {
         if let Some(entry) = self
             .selected_entry()
-            .filter(|entry| entry.is_downloaded)
+            .filter(|entry| entry.provider_id == "whisper" && entry.is_downloaded)
             .cloned()
         {
             self.mode = LocalModelsMode::ConfirmDelete {
@@ -177,8 +177,13 @@ impl LocalModelsTui {
         registry: &[RegistryEntry],
     ) -> anyhow::Result<()> {
         let selected_model = crate::config::get_selected_model_entry()?;
+        let config = crate::config::OsttConfig::load()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?;
+        let authorized_provider_ids = crate::config::get_authorized_providers()?;
         let daemon_model_id = self.daemon_model_id.as_deref();
-        self.entries = super::build_local_model_entries(
+        self.entries = super::build_model_entries(
+            &config,
+            &authorized_provider_ids,
             local_state,
             registry,
             selected_model.as_ref(),

@@ -317,7 +317,7 @@ pub(super) async fn transcribe(
     }
 
     let client = reqwest::Client::new();
-    let url = config.endpoint;
+    let url = &config.endpoint;
 
     tracing::debug!(
         "ElevenLabs API Call:\n  URL: {}\n  Method: POST\n  Model: {}\n  Keyterms: {:?}",

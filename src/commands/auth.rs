@@ -176,7 +176,7 @@ fn provider_by_id(
 fn cloud_providers() -> Vec<transcription::TranscriptionProvider> {
     transcription::TranscriptionProvider::all()
         .iter()
-        .filter(|provider| **provider != transcription::TranscriptionProvider::Whisper)
+        .filter(|provider| provider.requires_auth())
         .cloned()
         .collect()
 }

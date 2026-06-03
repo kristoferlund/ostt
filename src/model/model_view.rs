@@ -6,7 +6,6 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
 
-use super::model_provider_view::ModelProviderChoice;
 use super::UserQuit;
 
 pub struct ModelView {
@@ -27,21 +26,7 @@ impl ModelView {
     pub async fn run(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Model view started");
         loop {
-            let choice = super::model_provider_view::run(&mut self.terminal).await?;
-            let result = match choice {
-                ModelProviderChoice::Quit => {
-                    tracing::debug!("Model view exited from provider picker");
-                    break;
-                }
-                ModelProviderChoice::Local => {
-                    tracing::debug!("Opening local model view");
-                    super::local_model_view::run(&mut self.terminal).await
-                }
-                ModelProviderChoice::Cloud => {
-                    tracing::debug!("Opening cloud model view");
-                    super::cloud_model_view::run(&mut self.terminal).await
-                }
-            };
+            let result = super::local_model_view::run(&mut self.terminal).await;
             if let Err(e) = result {
                 if e.downcast_ref::<UserQuit>().is_some() {
                     tracing::debug!("Model view exited via Ctrl+C");
@@ -49,6 +34,7 @@ impl ModelView {
                 }
                 return Err(e);
             }
+            break;
         }
         Ok(())
     }

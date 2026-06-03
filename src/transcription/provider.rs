@@ -17,6 +17,8 @@ pub enum TranscriptionProvider {
     ElevenLabs,
     Whisper,
     Mistral,
+    Command,
+    Http,
 }
 
 impl TranscriptionProvider {
@@ -31,6 +33,8 @@ impl TranscriptionProvider {
             TranscriptionProvider::ElevenLabs => "elevenlabs",
             TranscriptionProvider::Whisper => "whisper",
             TranscriptionProvider::Mistral => "mistral",
+            TranscriptionProvider::Command => "command",
+            TranscriptionProvider::Http => "http",
         }
     }
 
@@ -45,6 +49,8 @@ impl TranscriptionProvider {
             TranscriptionProvider::ElevenLabs => "ElevenLabs",
             TranscriptionProvider::Whisper => "Whisper (local whisper.cpp)",
             TranscriptionProvider::Mistral => "Mistral",
+            TranscriptionProvider::Command => "External command",
+            TranscriptionProvider::Http => "OpenAI-compatible HTTP",
         }
     }
 
@@ -59,6 +65,8 @@ impl TranscriptionProvider {
             "elevenlabs" => Some(TranscriptionProvider::ElevenLabs),
             "whisper" => Some(TranscriptionProvider::Whisper),
             "mistral" => Some(TranscriptionProvider::Mistral),
+            "command" => Some(TranscriptionProvider::Command),
+            "http" => Some(TranscriptionProvider::Http),
             _ => None,
         }
     }
@@ -74,10 +82,21 @@ impl TranscriptionProvider {
             TranscriptionProvider::ElevenLabs,
             TranscriptionProvider::Whisper,
             TranscriptionProvider::Mistral,
+            TranscriptionProvider::Command,
+            TranscriptionProvider::Http,
         ]
     }
 
     pub fn supported_ids() -> Vec<&'static str> {
         Self::all().iter().map(Self::id).collect()
+    }
+
+    pub fn requires_auth(&self) -> bool {
+        !matches!(
+            self,
+            TranscriptionProvider::Whisper
+                | TranscriptionProvider::Command
+                | TranscriptionProvider::Http
+        )
     }
 }

@@ -40,6 +40,8 @@ pub fn parse_provider_model(value: &str) -> anyhow::Result<SelectedModel> {
     }
 
     if provider != Some(TranscriptionProvider::Whisper)
+        && provider != Some(TranscriptionProvider::Command)
+        && provider != Some(TranscriptionProvider::Http)
         && find_model(provider_id, model_id).is_none()
     {
         anyhow::bail!(

@@ -202,7 +202,7 @@ pub(super) async fn transcribe(
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {e}"))?;
 
-    let base_url = config.endpoint;
+    let base_url = &config.endpoint;
 
     // Step 1: Upload audio with retry logic for transient failures
     let upload_url = upload_with_retry(&client, base_url, &config.api_key, audio_data).await?;

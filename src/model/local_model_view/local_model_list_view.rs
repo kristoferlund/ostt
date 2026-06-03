@@ -1,9 +1,10 @@
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState};
 use ratatui::Frame;
 
-use crate::ui::{render_app_layout, render_footer, render_title};
+use crate::ui::{render_app_layout, render_footer};
 
 use super::local_model_view_helpers::format_bytes;
 use super::types::{LocalModelEntry, LocalModelsTui};
@@ -13,11 +14,20 @@ pub(super) struct LocalModelListView;
 impl LocalModelListView {
     pub(super) fn render(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
         let layout = render_app_layout(frame, frame.area());
-        render_title(frame, layout.title, "Local models");
+        let body = Rect {
+            x: layout.title.x,
+            y: layout.title.y,
+            width: layout.title.width,
+            height: layout.title.height.saturating_add(layout.body.height),
+        };
 
-        let selected_id = tui.selected_entry().map(|e| e.id.as_str());
+        let selected_id = tui.selected_entry().map(model_key);
         let mut items = Vec::new();
-        push_grouped_model_items(&mut items, tui.entries.iter().collect(), selected_id);
+        push_grouped_model_items(
+            &mut items,
+            tui.entries.iter().collect(),
+            selected_id.as_deref(),
+        );
 
         let selected_display_index = display_index_for_selected_model(tui);
         let mut state = ListState::default().with_selected(selected_display_index);
@@ -25,7 +35,7 @@ impl LocalModelListView {
         // so pill background colours are preserved on the selected row.
         frame.render_stateful_widget(
             List::new(items).highlight_style(Style::default()),
-            layout.body,
+            body,
             &mut state,
         );
 
@@ -39,8 +49,8 @@ impl LocalModelListView {
 
 fn section_header(label: impl Into<String>) -> ListItem<'static> {
     ListItem::new(Line::from(Span::styled(
-        label.into(),
-        Style::default().add_modifier(Modifier::BOLD),
+        format!(" {} ", label.into()),
+        Style::default().fg(Color::Black).bg(Color::Cyan),
     )))
 }
 
@@ -51,22 +61,22 @@ fn push_grouped_model_items(
 ) {
     let mut current_group: Option<&str> = None;
     for entry in entries {
-        let group = entry.group_id.as_deref().unwrap_or("Custom");
+        let group = entry.group_id.as_deref().unwrap_or("Custom models");
         if current_group != Some(group) {
             if current_group.is_some() {
                 items.push(ListItem::new(Line::from("")));
             }
             items.push(section_header(group.to_string()));
+            items.push(ListItem::new(Line::from("")));
             current_group = Some(group);
         }
-        let is_selected = selected_id == Some(entry.id.as_str());
+        let is_selected = selected_id.as_deref() == Some(model_key(entry).as_str());
         items.push(local_model_list_item(entry, is_selected));
     }
 }
 
 fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
-    let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
     let description = entry.description.trim();
 
     let row_bg = if is_selected {
@@ -78,7 +88,7 @@ fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem
 
     let mut spans = vec![Span::styled(format!("{active_marker} "), row_style)];
 
-    if entry.is_downloaded {
+    if entry.is_downloaded && entry.provider_id == "whisper" {
         let (pill_fg, pill_bg) = if is_selected {
             (Color::Black, Color::LightGreen)
         } else {
@@ -104,17 +114,36 @@ fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem
         spans.push(Span::styled(" ", row_style));
     }
 
-    spans.push(Span::styled(
-        format!("{}, {}, {}", entry.name, size, description),
-        row_style,
-    ));
+    let details = if entry.provider_id == "whisper" {
+        let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
+        if description.is_empty() {
+            format!(
+                "{}  {}/{}  {}",
+                entry.name, entry.provider_id, entry.id, size
+            )
+        } else {
+            format!(
+                "{}  {}/{}  {}  {}",
+                entry.name, entry.provider_id, entry.id, size, description
+            )
+        }
+    } else if description.is_empty() {
+        format!("{}  {}/{}", entry.name, entry.provider_id, entry.id)
+    } else {
+        format!(
+            "{}  {}/{}  {}",
+            entry.name, entry.provider_id, entry.id, description
+        )
+    };
+
+    spans.push(Span::styled(details, row_style));
 
     ListItem::new(Line::from(spans))
 }
 
 fn display_index_for_selected_model(tui: &LocalModelsTui) -> Option<usize> {
-    let selected_entry_id = tui.selected_entry().map(|entry| entry.id.as_str())?;
-    grouped_display_index(tui.entries.iter().collect(), selected_entry_id, 0)
+    let selected_entry_id = tui.selected_entry().map(model_key)?;
+    grouped_display_index(tui.entries.iter().collect(), &selected_entry_id, 0)
 }
 
 pub(super) fn grouped_display_index(
@@ -125,18 +154,22 @@ pub(super) fn grouped_display_index(
     let mut index = start_index;
     let mut current_group: Option<&str> = None;
     for entry in entries {
-        let group = entry.group_id.as_deref().unwrap_or("Custom");
+        let group = entry.group_id.as_deref().unwrap_or("Custom models");
         if current_group != Some(group) {
             if current_group.is_some() {
                 index += 1;
             }
-            index += 1;
+            index += 2;
             current_group = Some(group);
         }
-        if entry.id == selected_entry_id {
+        if model_key(entry) == selected_entry_id {
             return Some(index);
         }
         index += 1;
     }
     None
+}
+
+fn model_key(entry: &LocalModelEntry) -> String {
+    format!("{}/{}", entry.provider_id, entry.id)
 }
