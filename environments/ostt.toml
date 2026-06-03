@@ -41,12 +41,12 @@ reference_level_db = -20
 output_format = "mp3 -ab 16k -ar 12000"
 
 [text]
-# Deterministic post-transcription replacements.
-# Keywords help the model recognize terms; replacements fix final text casing,
+# Deterministic post-transcription replace rules.
+# Keywords help the model recognize terms; replace fixes final text casing,
 # acronyms, project names, and common misrecognitions.
 #
 # Examples:
-# [text.replacements]
+# [text.replace]
 # "ostt" = "OSTT"
 # "api" = "API"
 # "typescript" = "TypeScript"

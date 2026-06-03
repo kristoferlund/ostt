@@ -17,29 +17,29 @@ use std::io::{self, Stdout};
 use tui_input::backend::crossterm::EventHandler;
 use tui_input::Input;
 
-pub async fn handle_replacements() -> Result<()> {
+pub async fn handle_replace() -> Result<()> {
     let config = OsttConfig::load().map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    let mut view = ReplacementsView::new(config)?;
+    let mut view = ReplaceView::new(config)?;
     view.run()
 }
 
 enum InputField {
     Source,
-    Replacement,
+    Target,
 }
 
-struct ReplacementsView {
+struct ReplaceView {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     list_state: ListState,
     config: OsttConfig,
     input_mode: bool,
     active_field: InputField,
     source_input: Input,
-    replacement_input: Input,
+    target_input: Input,
     cleaned_up: bool,
 }
 
-impl ReplacementsView {
+impl ReplaceView {
     fn new(config: OsttConfig) -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -48,7 +48,7 @@ impl ReplacementsView {
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
         let mut list_state = ListState::default();
-        if !config.text.replacements.is_empty() {
+        if !config.text.replace.is_empty() {
             list_state.select(Some(0));
         }
 
@@ -59,7 +59,7 @@ impl ReplacementsView {
             input_mode: false,
             active_field: InputField::Source,
             source_input: Input::default(),
-            replacement_input: Input::default(),
+            target_input: Input::default(),
             cleaned_up: false,
         })
     }
@@ -97,7 +97,7 @@ impl ReplacementsView {
             KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
             KeyCode::Up => self.list_state.select_previous(),
             KeyCode::Down => self.list_state.select_next(),
-            KeyCode::Char('x') | KeyCode::Delete => self.delete_selected_replacement()?,
+            KeyCode::Char('x') | KeyCode::Delete => self.delete_selected_replace_rule()?,
             KeyCode::Char('a') => {
                 self.input_mode = true;
                 self.active_field = InputField::Source;
@@ -110,8 +110,8 @@ impl ReplacementsView {
     fn handle_input_mode_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Enter => match self.active_field {
-                InputField::Source => self.active_field = InputField::Replacement,
-                InputField::Replacement => self.add_replacement()?,
+                InputField::Source => self.active_field = InputField::Target,
+                InputField::Target => self.add_replace_rule()?,
             },
             KeyCode::Tab | KeyCode::BackTab => self.toggle_active_field(),
             KeyCode::Esc => self.reset_input(),
@@ -119,8 +119,8 @@ impl ReplacementsView {
                 InputField::Source => {
                     self.source_input.handle_event(&Event::Key(key));
                 }
-                InputField::Replacement => {
-                    self.replacement_input.handle_event(&Event::Key(key));
+                InputField::Target => {
+                    self.target_input.handle_event(&Event::Key(key));
                 }
             },
         }
@@ -129,22 +129,22 @@ impl ReplacementsView {
 
     fn toggle_active_field(&mut self) {
         self.active_field = match self.active_field {
-            InputField::Source => InputField::Replacement,
-            InputField::Replacement => InputField::Source,
+            InputField::Source => InputField::Target,
+            InputField::Target => InputField::Source,
         };
     }
 
-    fn add_replacement(&mut self) -> Result<()> {
+    fn add_replace_rule(&mut self) -> Result<()> {
         let source = self.source_input.value().trim();
         if source.is_empty() {
             return Ok(());
         }
 
-        self.config.text.replacements.insert(
+        self.config.text.replace.insert(
             source.to_string(),
-            self.replacement_input.value().trim().to_string(),
+            self.target_input.value().trim().to_string(),
         );
-        save_replacements(&self.config.text.replacements)?;
+        save_replace_rules(&self.config.text.replace)?;
         self.select_valid_index();
         self.reset_input();
         Ok(())
@@ -154,21 +154,21 @@ impl ReplacementsView {
         self.input_mode = false;
         self.active_field = InputField::Source;
         self.source_input = Input::default();
-        self.replacement_input = Input::default();
+        self.target_input = Input::default();
     }
 
-    fn delete_selected_replacement(&mut self) -> Result<()> {
+    fn delete_selected_replace_rule(&mut self) -> Result<()> {
         let Some(index) = self.list_state.selected() else {
             return Ok(());
         };
-        self.config.text.replacements.shift_remove_index(index);
-        save_replacements(&self.config.text.replacements)?;
+        self.config.text.replace.shift_remove_index(index);
+        save_replace_rules(&self.config.text.replace)?;
         self.select_valid_index();
         Ok(())
     }
 
     fn select_valid_index(&mut self) {
-        let len = self.config.text.replacements.len();
+        let len = self.config.text.replace.len();
         if len == 0 {
             self.list_state.select(None);
             return;
@@ -178,33 +178,33 @@ impl ReplacementsView {
     }
 
     fn draw(&mut self) -> Result<()> {
-        let replacements = self
+        let replace_rules = self
             .config
             .text
-            .replacements
+            .replace
             .iter()
-            .map(|(source, replacement)| (source.clone(), replacement.clone()))
+            .map(|(source, target)| (source.clone(), target.clone()))
             .collect::<Vec<_>>();
         let input_mode = self.input_mode;
         let source_value = self.source_input.value().to_string();
-        let replacement_value = self.replacement_input.value().to_string();
+        let target_value = self.target_input.value().to_string();
         let source_cursor = self.source_input.cursor();
-        let replacement_cursor = self.replacement_input.cursor();
+        let target_cursor = self.target_input.cursor();
         let source_active = matches!(self.active_field, InputField::Source);
         let list_state = &mut self.list_state;
 
         self.terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
-            render_title(frame, layout.title, "Replacements");
-            Self::render_replacements_list(frame, layout.body, &replacements, list_state);
+            render_title(frame, layout.title, "Replace");
+            Self::render_replace_list(frame, layout.body, &replace_rules, list_state);
 
             if input_mode {
                 Self::render_add_dialog(
                     frame,
                     &source_value,
-                    &replacement_value,
+                    &target_value,
                     source_cursor,
-                    replacement_cursor,
+                    target_cursor,
                     source_active,
                 );
                 render_footer(frame, layout.footer, "↵ next/add, tab switch, esc cancel");
@@ -220,15 +220,15 @@ impl ReplacementsView {
         Ok(())
     }
 
-    fn render_replacements_list(
+    fn render_replace_list(
         frame: &mut Frame,
         area: Rect,
-        replacements: &[(String, String)],
+        replace_rules: &[(String, String)],
         list_state: &mut ListState,
     ) {
-        let items = replacements
+        let items = replace_rules
             .iter()
-            .map(|(source, replacement)| ListItem::new(format!("{source} → {replacement}")))
+            .map(|(source, target)| ListItem::new(format!("{source} → {target}")))
             .collect::<Vec<_>>();
 
         let list = List::new(items)
@@ -240,9 +240,9 @@ impl ReplacementsView {
     fn render_add_dialog(
         frame: &mut Frame,
         source: &str,
-        replacement: &str,
+        target: &str,
         source_cursor: usize,
-        replacement_cursor: usize,
+        target_cursor: usize,
         source_active: bool,
     ) {
         let area = crate::ui::components::dialog::centered_fixed_rect(70, 11, frame.area());
@@ -258,7 +258,7 @@ impl ReplacementsView {
             width: area.width.saturating_sub(4),
             height: area.height.saturating_sub(2),
         };
-        let title = "New replacement";
+        let title = "New replace";
         let escape = "esc";
         let spacer_width = inner
             .width
@@ -283,12 +283,12 @@ impl ReplacementsView {
             height: 1,
             ..inner
         };
-        let replacement_label_area = Rect {
+        let target_label_area = Rect {
             y: inner.y.saturating_add(5),
             height: 1,
             ..inner
         };
-        let replacement_input_area = Rect {
+        let target_input_area = Rect {
             y: inner.y.saturating_add(6),
             height: 1,
             ..inner
@@ -296,8 +296,8 @@ impl ReplacementsView {
 
         Self::render_label(frame, source_label_area, "Find");
         Self::render_input(frame, source_input_area, source, source_active);
-        Self::render_label(frame, replacement_label_area, "Replace");
-        Self::render_input(frame, replacement_input_area, replacement, !source_active);
+        Self::render_label(frame, target_label_area, "Replace");
+        Self::render_input(frame, target_input_area, target, !source_active);
 
         let action_area = Rect {
             y: inner.y.saturating_add(8),
@@ -317,7 +317,7 @@ impl ReplacementsView {
         let (cursor_area, cursor) = if source_active {
             (source_input_area, source_cursor)
         } else {
-            (replacement_input_area, replacement_cursor)
+            (target_input_area, target_cursor)
         };
         let cursor_x = cursor_area.x.saturating_add(cursor as u16);
         frame.set_cursor_position(Position::new(cursor_x, cursor_area.y));
@@ -355,30 +355,30 @@ impl ReplacementsView {
     }
 }
 
-impl Drop for ReplacementsView {
+impl Drop for ReplaceView {
     fn drop(&mut self) {
         let _ = self.cleanup();
     }
 }
 
-fn save_replacements(replacements: &indexmap::IndexMap<String, String>) -> Result<()> {
+fn save_replace_rules(replace_rules: &indexmap::IndexMap<String, String>) -> Result<()> {
     let config_path = crate::app_dirs::config_path()?;
     let content = fs::read_to_string(&config_path)?;
-    let updated = replace_text_section(&content, replacements);
+    let updated = replace_text_section(&content, replace_rules);
     fs::write(config_path, updated)?;
     Ok(())
 }
 
 fn replace_text_section(
     content: &str,
-    replacements: &indexmap::IndexMap<String, String>,
+    replace_rules: &indexmap::IndexMap<String, String>,
 ) -> String {
     let without_text = remove_top_level_section(content, "text");
-    if replacements.is_empty() {
+    if replace_rules.is_empty() {
         return ensure_trailing_newline(&without_text);
     }
 
-    let section = render_text_replacements_section(replacements);
+    let section = render_text_replace_section(replace_rules);
     let mut lines = without_text.lines().collect::<Vec<_>>();
     let insert_at = lines
         .iter()
@@ -390,13 +390,13 @@ fn replace_text_section(
     ensure_trailing_newline(&trim_extra_blank_lines(&lines.join("\n")))
 }
 
-fn render_text_replacements_section(replacements: &indexmap::IndexMap<String, String>) -> String {
-    let mut section = String::from("[text.replacements]\n");
-    for (source, replacement) in replacements {
+fn render_text_replace_section(replace_rules: &indexmap::IndexMap<String, String>) -> String {
+    let mut section = String::from("[text.replace]\n");
+    for (source, target) in replace_rules {
         section.push_str(&format!(
             "{} = {}\n",
             toml_basic_string(source),
-            toml_basic_string(replacement)
+            toml_basic_string(target)
         ));
     }
     section.push('\n');
@@ -456,10 +456,10 @@ mod tests {
     use super::*;
     use indexmap::IndexMap;
 
-    fn replacements(entries: &[(&str, &str)]) -> IndexMap<String, String> {
+    fn replace_rules(entries: &[(&str, &str)]) -> IndexMap<String, String> {
         entries
             .iter()
-            .map(|(source, replacement)| (source.to_string(), replacement.to_string()))
+            .map(|(source, target)| (source.to_string(), target.to_string()))
             .collect()
     }
 
@@ -472,24 +472,24 @@ device = "default"
 provider = "deepgram"
 model = "nova-3"
 
-[text.replacements]
+[text.replace]
 "api" = "API"
 
 [popup]
 width = 90
 "#;
 
-        let updated = replace_text_section(content, &replacements(&[("ostt", "OSTT")]));
+        let updated = replace_text_section(content, &replace_rules(&[("ostt", "OSTT")]));
 
         assert!(updated.contains("provider = \"deepgram\""));
         assert!(updated.contains("model = \"nova-3\""));
-        assert!(updated.contains("[text.replacements]\n\"ostt\" = \"OSTT\""));
+        assert!(updated.contains("[text.replace]\n\"ostt\" = \"OSTT\""));
         assert!(updated.contains("\"ostt\" = \"OSTT\"\n\n[popup]"));
         assert!(!updated.contains("\"api\" = \"API\""));
     }
 
     #[test]
-    fn empty_replacements_remove_text_section_only() {
+    fn empty_replace_rules_remove_text_section_only() {
         let content = r#"[audio]
 device = "default"
 
@@ -499,7 +499,7 @@ model = "nova-3"
 
 [text]
 
-[text.replacements]
+[text.replace]
 "api" = "API"
 
 [popup]
@@ -510,7 +510,7 @@ width = 90
 
         assert!(updated.contains("[transcription]"));
         assert!(!updated.contains("[text]"));
-        assert!(!updated.contains("[text.replacements]"));
+        assert!(!updated.contains("[text.replace]"));
         assert!(updated.contains("[popup]"));
     }
 }

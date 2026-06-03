@@ -92,7 +92,7 @@ pub async fn handle_record(
     .await
     {
         Ok(text) => {
-            let text = crate::text::apply_replacements(text.trim(), &config.text.replacements)?;
+            let text = crate::text::apply_replace(text.trim(), &config.text.replace)?;
             history::save_transcription(&text).context("failed to save transcription history")?;
             Some(text)
         }

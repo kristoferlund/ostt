@@ -185,7 +185,7 @@ pub type ProviderConfigs = IndexMap<String, ProviderConfig>;
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TextConfig {
     #[serde(default)]
-    pub replacements: IndexMap<String, String>,
+    pub replace: IndexMap<String, String>,
 }
 
 /// Popup window configuration for the `launch` subcommand.
@@ -866,7 +866,7 @@ fn config_to_table(config: &OsttConfig) -> anyhow::Result<toml::Table> {
             provider_config_to_value(provider_config)?,
         );
     }
-    if !config.text.replacements.is_empty() {
+    if !config.text.replace.is_empty() {
         table.insert("text".to_string(), toml::Value::try_from(&config.text)?);
     }
     if !config.process.actions.is_empty() {
@@ -947,9 +947,9 @@ pub fn validate_config(config: &OsttConfig) -> anyhow::Result<()> {
         anyhow::bail!("Provider 'local' is no longer supported. Use provider = \"whisper\".");
     }
 
-    for source in config.text.replacements.keys() {
+    for source in config.text.replace.keys() {
         if source.trim().is_empty() {
-            anyhow::bail!("Text replacement source must not be empty.");
+            anyhow::bail!("Text replace source must not be empty.");
         }
     }
 
@@ -1352,7 +1352,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_text_section_defaults_to_empty_replacements() {
+    fn missing_text_section_defaults_to_empty_replace() {
         let toml_str = r#"
             [audio]
             device = "default"
@@ -1360,30 +1360,30 @@ mod tests {
 
         let config = parse_ostt_config(toml_str).unwrap();
 
-        assert!(config.text.replacements.is_empty());
+        assert!(config.text.replace.is_empty());
     }
 
     #[test]
-    fn empty_text_replacements_section_parses() {
+    fn empty_text_replace_section_parses() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [text.replacements]
+            [text.replace]
         "#;
 
         let config = parse_ostt_config(toml_str).unwrap();
 
-        assert!(config.text.replacements.is_empty());
+        assert!(config.text.replace.is_empty());
     }
 
     #[test]
-    fn text_replacements_preserve_configured_values() {
+    fn text_replace_preserves_configured_values() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [text.replacements]
+            [text.replace]
             ostt = "OSTT"
             api = "API"
             typescript = "TypeScript"
@@ -1391,24 +1391,24 @@ mod tests {
 
         let config = parse_ostt_config(toml_str).unwrap();
 
-        assert_eq!(config.text.replacements["ostt"], "OSTT");
-        assert_eq!(config.text.replacements["api"], "API");
-        assert_eq!(config.text.replacements["typescript"], "TypeScript");
+        assert_eq!(config.text.replace["ostt"], "OSTT");
+        assert_eq!(config.text.replace["api"], "API");
+        assert_eq!(config.text.replace["typescript"], "TypeScript");
     }
 
     #[test]
-    fn empty_text_replacement_source_fails_validation() {
+    fn empty_text_replace_source_fails_validation() {
         let toml_str = r#"
             [audio]
             device = "default"
 
-            [text.replacements]
+            [text.replace]
             "" = "OSTT"
         "#;
 
         let err = parse_ostt_config(toml_str).unwrap_err().to_string();
 
-        assert!(err.contains("Text replacement source must not be empty"));
+        assert!(err.contains("Text replace source must not be empty"));
     }
 
     #[test]
