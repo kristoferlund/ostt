@@ -8,12 +8,21 @@ use anyhow::Result;
 /// Handles the keywords management command.
 ///
 /// Shows a TUI for viewing, adding, and removing keywords.
+/// When the active transcription model is not a Deepgram model, displays a
+/// notice informing the user that keyword support may be limited.
 pub async fn handle_keywords() -> Result<()> {
     let config_dir = crate::app_dirs::config_dir();
 
+    // Determine whether the active model is Deepgram-backed.
+    // show_provider_warning = true means "not Deepgram → show the notice".
+    let show_provider_warning = crate::config::get_selected_model()
+        .unwrap_or(None)
+        .map(|m| !m.starts_with("deepgram"))
+        .unwrap_or(false); // no model selected → no warning (edge case)
+
     let mut manager = KeywordsManager::new(&config_dir)?;
 
-    let mut view = KeywordsView::new(manager.load_keywords()?)?;
+    let mut view = KeywordsView::new(manager.load_keywords()?, show_provider_warning)?;
     view.run(&mut manager)?;
 
     Ok(())

@@ -43,7 +43,7 @@ OSTT is built for people who treat the terminal as a normal place for voice inpu
 - **Scriptable post-processing** - Transform transcripts with AI prompts or bash commands using `ostt -p` and `ostt process`.
 - **Retry without re-recording** - Save recordings locally, then re-transcribe them with a different provider or model.
 - **File transcription and replay** - Transcribe existing audio files and replay saved recordings from history.
-- **Keywords and custom vocabulary** - Improve recognition for names, technical terms, and project-specific language.
+- **Keywords and custom vocabulary** - Improve recognition for names, technical terms, and project-specific language. Keyword support varies by provider: Deepgram offers the most complete support, while Whisper-based (local) models do not support keywords.
 - **Open source, no subscription** - Public code, local configuration, and no vendor lock-in beyond the providers you choose.
 
 ## Documentation

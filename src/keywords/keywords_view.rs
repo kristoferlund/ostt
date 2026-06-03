@@ -35,6 +35,9 @@ pub struct KeywordsView {
     input: Input,
     /// Whether cleanup has been performed
     cleaned_up: bool,
+    /// Whether to show the provider compatibility warning.
+    /// True when the active transcription provider is not Deepgram.
+    show_provider_warning: bool,
 }
 
 impl KeywordsView {
@@ -42,10 +45,11 @@ impl KeywordsView {
     ///
     /// # Arguments
     /// * `keywords` - List of keywords to display
+    /// * `show_provider_warning` - Show a notice when the active provider is not Deepgram
     ///
     /// # Errors
     /// - If terminal cannot be initialized
-    pub fn new(keywords: Vec<String>) -> Result<Self> {
+    pub fn new(keywords: Vec<String>, show_provider_warning: bool) -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -65,6 +69,7 @@ impl KeywordsView {
             input_mode: false,
             input: Input::default(),
             cleaned_up: false,
+            show_provider_warning,
         })
     }
 
@@ -215,6 +220,7 @@ impl KeywordsView {
         let keywords = self.keywords.clone();
         let list_state = &mut self.list_state;
 
+        let show_provider_warning = self.show_provider_warning;
         self.terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
             render_title(frame, layout.title, "Keywords");
@@ -230,7 +236,7 @@ impl KeywordsView {
                 );
                 render_footer(frame, layout.footer, "↵ add, esc cancel");
             } else {
-                Self::draw_normal(frame, layout.body, &keywords, list_state);
+                Self::draw_normal(frame, layout.body, &keywords, list_state, show_provider_warning);
                 render_footer(
                     frame,
                     layout.footer,
@@ -243,8 +249,33 @@ impl KeywordsView {
     }
 
     /// Draws the UI when *not* in input mode.
-    fn draw_normal(frame: &mut Frame, area: Rect, keywords: &[String], list_state: &mut ListState) {
-        Self::render_keywords_list(frame, area, keywords, list_state);
+    fn draw_normal(
+        frame: &mut Frame,
+        area: Rect,
+        keywords: &[String],
+        list_state: &mut ListState,
+        show_provider_warning: bool,
+    ) {
+        if show_provider_warning {
+            // Reserve one line at the bottom for the provider notice.
+            let layout = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(1)])
+                .split(area);
+
+            Self::render_keywords_list(frame, layout[0], keywords, list_state);
+
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![Span::styled(
+                    "ℹ  The keywords feature works best with the Deepgram provider.",
+                    Style::default().fg(Color::Yellow),
+                )]))
+                .alignment(Alignment::Left),
+                layout[1],
+            );
+        } else {
+            Self::render_keywords_list(frame, area, keywords, list_state);
+        }
     }
 
     /// Draws the UI when in input mode.
