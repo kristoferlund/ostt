@@ -72,16 +72,16 @@ Depends on: `1.1`, `1.2`
 
 Files: `src/commands/record.rs`, `src/transcription/context.rs`, `src/transcription/mod.rs`, `src/transcription/local_models.rs`, `src/recording/ffmpeg.rs`, `src/config/file.rs`
 
-- [ ] **1.3.1** Add a record preflight entry point that runs after TUI initialization and before audio startup.
-- [ ] **1.3.2** Preflight selected model resolution, including model override and param overrides.
-- [ ] **1.3.3** Preflight cloud providers by checking known provider/model and available API key.
-- [ ] **1.3.4** Preflight built-in Whisper provider by checking the selected model file exists/is downloaded without loading the model or checking daemon state.
-- [ ] **1.3.5** Ensure custom `command` and `http` providers do not perform runtime executable, endpoint, or network probes beyond existing config validation.
-- [ ] **1.3.6** Preflight ffmpeg availability for the current recording save path.
-- [ ] **1.3.7** Show every preflight failure immediately through the TUI error screen and keep the popup open until dismissed.
-- [ ] **1.3.8** Add fixture-based tests for no-model, missing cloud key, missing local model file, custom-provider no-probe behavior, and missing ffmpeg.
-- [ ] **1.3.9** Verify: `cargo check`
-- [ ] **1.3.10** Verify: `cargo test transcription`
+- [x] **1.3.1** Add a record preflight entry point that runs after TUI initialization and before audio startup.
+- [x] **1.3.2** Preflight selected model resolution, including model override and param overrides.
+- [x] **1.3.3** Preflight cloud providers by checking known provider/model and available API key.
+- [x] **1.3.4** Preflight built-in Whisper provider by checking the selected model file exists/is downloaded without loading the model or checking daemon state.
+- [x] **1.3.5** Ensure custom `command` and `http` providers do not perform runtime executable, endpoint, or network probes beyond existing config validation.
+- [x] **1.3.6** Preflight ffmpeg availability for the current recording save path.
+- [x] **1.3.7** Show every preflight failure immediately through the TUI error screen and keep the popup open until dismissed.
+- [x] **1.3.8** Add fixture-based tests for no-model, missing cloud key, missing local model file, custom-provider no-probe behavior, and missing ffmpeg.
+- [x] **1.3.9** Verify: `cargo check`
+- [x] **1.3.10** Verify: `cargo test transcription`
 
 ### Spec 1.4 — Error Dialog Detail And ffmpeg Messaging
 

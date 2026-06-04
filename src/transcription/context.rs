@@ -9,6 +9,10 @@ pub(crate) struct TranscriptionContext {
     pub(crate) keywords: Vec<String>,
 }
 
+pub(crate) struct TranscriptionPreflightContext {
+    pub(crate) selected_model: SelectedModel,
+}
+
 pub(crate) fn build_context(
     ostt_config: &OsttConfig,
     model_override: Option<SelectedModel>,
@@ -28,6 +32,17 @@ pub(crate) fn build_context(
         config: transcription_config,
         keywords,
     })
+}
+
+pub(crate) fn build_preflight_context(
+    ostt_config: &OsttConfig,
+    model_override: Option<SelectedModel>,
+    param_overrides: &[String],
+) -> anyhow::Result<TranscriptionPreflightContext> {
+    let selected_model = resolve_selected_model(ostt_config, model_override)?;
+    config_for_selected_model(ostt_config, &selected_model, Vec::new(), param_overrides)?;
+
+    Ok(TranscriptionPreflightContext { selected_model })
 }
 
 fn resolve_selected_model(

@@ -21,7 +21,7 @@ pub mod provider;
 
 pub use animation::TranscriptionAnimation;
 pub use api::{transcribe, TranscriptionConfig, TranscriptionResponse};
-pub(crate) use context::build_context;
+pub(crate) use context::{build_context, build_preflight_context};
 pub use model::{all_models, find_model, models_for_provider, ModelOptionKind, ModelSpec};
 pub use provider::TranscriptionProvider;
 

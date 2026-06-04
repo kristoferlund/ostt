@@ -44,6 +44,9 @@ pub async fn handle_record(
     let mut tui = RecordingTui::new_pending_audio(config)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .context("failed to initialize recording UI")?;
+    run_record_preflight(config, model_override.clone(), param_overrides)
+        .context("record preflight failed")
+        .map_err(|err| show_recording_error(&mut tui, "Setup Error", err))?;
     let term = Arc::new(AtomicBool::new(false));
 
     let mut audio_recorder = AudioRecorder::new(config);
@@ -164,6 +167,51 @@ fn show_recording_error(
     let message = error.to_string();
     show_recording_message(tui, title, &message);
     error
+}
+
+fn run_record_preflight(
+    config: &OsttConfig,
+    model_override: Option<SelectedModel>,
+    param_overrides: &[String],
+) -> anyhow::Result<()> {
+    run_record_preflight_with_ffmpeg_check(
+        config,
+        model_override,
+        param_overrides,
+        crate::recording::ffmpeg::find_ffmpeg,
+    )
+}
+
+fn run_record_preflight_with_ffmpeg_check<F>(
+    config: &OsttConfig,
+    model_override: Option<SelectedModel>,
+    param_overrides: &[String],
+    find_ffmpeg: F,
+) -> anyhow::Result<()>
+where
+    F: FnOnce() -> anyhow::Result<std::path::PathBuf>,
+{
+    let preflight_context =
+        crate::transcription::build_preflight_context(config, model_override, param_overrides)?;
+    if preflight_context.selected_model.provider_id == "whisper" {
+        crate::transcription::local_models::resolve_installed_model_path(
+            &preflight_context.selected_model.model_id,
+        )
+        .map_err(|err| {
+            anyhow::anyhow!(
+                "local model 'whisper/{}' is unavailable: {err}",
+                preflight_context.selected_model.model_id
+            )
+        })?;
+    }
+
+    let output_format =
+        resolve_recording_output_format(config, Some(&preflight_context.selected_model));
+    find_ffmpeg().map_err(|err| {
+        anyhow::anyhow!("ffmpeg is required to save recordings as '{output_format}': {err}")
+    })?;
+
+    Ok(())
 }
 
 fn show_audio_startup_error(tui: &mut RecordingTui, error: anyhow::Error) -> anyhow::Error {
@@ -496,6 +544,110 @@ async fn transcribe_recording_with_animation(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{ProviderConfig, ProviderModelConfig, ProviderSettings};
+    use indexmap::IndexMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{env, ffi::OsString, fs, path::PathBuf};
+
+    struct EnvGuard {
+        home: Option<OsString>,
+        xdg_config_home: Option<OsString>,
+        xdg_data_home: Option<OsString>,
+        dir: PathBuf,
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            crate::transcription::local_models::set_test_models_dir(None);
+            restore_env("HOME", self.home.clone());
+            restore_env("XDG_CONFIG_HOME", self.xdg_config_home.clone());
+            restore_env("XDG_DATA_HOME", self.xdg_data_home.clone());
+            let _ = fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    fn restore_env(key: &str, value: Option<OsString>) {
+        if let Some(value) = value {
+            env::set_var(key, value);
+        } else {
+            env::remove_var(key);
+        }
+    }
+
+    fn isolated_env() -> EnvGuard {
+        let home = env::var_os("HOME");
+        let xdg_config_home = env::var_os("XDG_CONFIG_HOME");
+        let xdg_data_home = env::var_os("XDG_DATA_HOME");
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = env::temp_dir().join(format!("ostt-record-preflight-test-{unique}"));
+        crate::transcription::local_models::set_test_models_dir(Some(dir.join("models")));
+        env::set_var("HOME", &dir);
+        env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
+        env::set_var("XDG_DATA_HOME", dir.join(".local").join("share"));
+
+        EnvGuard {
+            home,
+            xdg_config_home,
+            xdg_data_home,
+            dir,
+        }
+    }
+
+    fn ffmpeg_ok() -> anyhow::Result<PathBuf> {
+        Ok(PathBuf::from("/usr/bin/ffmpeg"))
+    }
+
+    fn command_config() -> OsttConfig {
+        let mut config = OsttConfig::default();
+        config.transcription.provider = Some("command".to_string());
+        config.transcription.model = Some("test-profile".to_string());
+        config.provider_configs.insert(
+            "command".to_string(),
+            ProviderConfig {
+                models: IndexMap::from([(
+                    "test-profile".to_string(),
+                    ProviderModelConfig {
+                        settings: ProviderSettings {
+                            command: Some(
+                                "definitely-not-an-installed-ostt-test-command {audio_path}"
+                                    .to_string(),
+                            ),
+                            ..ProviderSettings::default()
+                        },
+                        ..ProviderModelConfig::default()
+                    },
+                )]),
+                ..ProviderConfig::default()
+            },
+        );
+        config
+    }
+
+    fn http_config() -> OsttConfig {
+        let mut config = OsttConfig::default();
+        config.transcription.provider = Some("http".to_string());
+        config.transcription.model = Some("test-profile".to_string());
+        config.provider_configs.insert(
+            "http".to_string(),
+            ProviderConfig {
+                models: IndexMap::from([(
+                    "test-profile".to_string(),
+                    ProviderModelConfig {
+                        settings: ProviderSettings {
+                            endpoint: Some("http://127.0.0.1:9/transcribe".to_string()),
+                            ..ProviderSettings::default()
+                        },
+                        ..ProviderModelConfig::default()
+                    },
+                )]),
+                ..ProviderConfig::default()
+            },
+        );
+        config
+    }
 
     #[test]
     fn audio_startup_error_includes_primary_details_and_next_step() {
@@ -536,5 +688,80 @@ mod tests {
         } else {
             assert!(!message.contains("Privacy & Security > Microphone"));
         }
+    }
+
+    #[test]
+    fn record_preflight_reports_no_selected_model_before_ffmpeg_check() {
+        let config = OsttConfig::default();
+
+        let err = run_record_preflight_with_ffmpeg_check(&config, None, &[], ffmpeg_ok)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("No transcription model selected"));
+        assert!(err.contains("ostt auth"));
+        assert!(err.contains("ostt model"));
+    }
+
+    #[test]
+    fn record_preflight_reports_missing_cloud_api_key() {
+        let _guard = crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = isolated_env();
+        let mut config = OsttConfig::default();
+        config.transcription.provider = Some("openai".to_string());
+        config.transcription.model = Some("gpt-4o-transcribe".to_string());
+
+        let err = run_record_preflight_with_ffmpeg_check(&config, None, &[], ffmpeg_ok)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("No API key for OpenAI"));
+        assert!(err.contains("ostt auth"));
+        assert!(err.contains("ostt model"));
+    }
+
+    #[test]
+    fn record_preflight_reports_missing_local_model_file() {
+        let _guard = crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = isolated_env();
+        let mut config = OsttConfig::default();
+        config.transcription.provider = Some("whisper".to_string());
+        config.transcription.model = Some("missing-local-model".to_string());
+
+        let err = run_record_preflight_with_ffmpeg_check(&config, None, &[], ffmpeg_ok)
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("local model 'whisper/missing-local-model' is unavailable"));
+        assert!(err.contains("not downloaded"));
+    }
+
+    #[test]
+    fn record_preflight_does_not_probe_custom_provider_runtime_targets() {
+        let command_config = command_config();
+        run_record_preflight_with_ffmpeg_check(&command_config, None, &[], ffmpeg_ok)
+            .expect("command provider should not probe executable availability");
+
+        let http_config = http_config();
+        run_record_preflight_with_ffmpeg_check(&http_config, None, &[], ffmpeg_ok)
+            .expect("http provider should not probe endpoint reachability");
+    }
+
+    #[test]
+    fn record_preflight_reports_missing_ffmpeg() {
+        let config = command_config();
+
+        let err = run_record_preflight_with_ffmpeg_check(&config, None, &[], || {
+            Err(anyhow::anyhow!("ffmpeg not found. Please install ffmpeg."))
+        })
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("ffmpeg is required to save recordings as"));
+        assert!(err.contains("ffmpeg not found"));
     }
 }

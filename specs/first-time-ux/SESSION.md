@@ -85,3 +85,51 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 3: Spec 1.3 — Record Preflight Before Audio Recording
+
+Accomplished:
+- Added record preflight immediately after `RecordingTui::new_pending_audio(config)` and before `AudioRecorder::start_recording()`.
+- Reused existing selected-model, model override, param override, cloud known-model, external profile, and API-key resolution logic for preflight.
+- Added local Whisper model file availability preflight without loading the model or checking daemon state.
+- Added ffmpeg availability preflight for the resolved recording output format.
+- Routed preflight failures through the existing record TUI setup error screen before audio startup.
+- Added fixture-based tests for no selected model, missing cloud API key, missing local model file, custom provider no-probe behavior, and missing ffmpeg.
+- Marked all Spec 1.3 tasks complete in `PLAN.md` as they were completed.
+
+Decisions made:
+- Introduced a narrow transcription preflight context rather than broadening `build_context`, so preflight can validate model/config without loading keywords.
+- Kept custom `command` and `http` preflight to existing config/profile resolution only; no command execution, endpoint reachability, network, or executable checks were added.
+- Included local-model and ffmpeg preflight causes in the primary error string because the current TUI error display still renders `anyhow::Error::to_string()` until Spec 1.4.
+
+Files changed:
+- `src/commands/record.rs`
+- `src/transcription/context.rs`
+- `src/transcription/mod.rs`
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Reused `RecordingTui::new_pending_audio`, `RecordingTui::show_error`, and `show_recording_error` for preflight failures.
+- Reused `resolve_selected_model`, `config_for_selected_model`, missing API-key guidance, `resolve_installed_model_path`, `resolve_recording_output_format`, and `ffmpeg::find_ffmpeg`.
+- Introduced `build_preflight_context` and `TranscriptionPreflightContext` in `src/transcription/context.rs`.
+- Introduced private `run_record_preflight` and `run_record_preflight_with_ffmpeg_check` in `src/commands/record.rs`; the latter exists only to test ffmpeg behavior without depending on host ffmpeg.
+
+Verification results:
+- `cargo check` passed.
+- `cargo test transcription` passed with 63 tests.
+- Additional targeted test `cargo test commands::record` passed with 8 tests.
+
+Constraints for later sessions:
+- Spec 1.4 should consolidate or replace the current `show_recording_error` top-level-only formatting with full useful error-chain formatting; do not add a parallel record TUI formatter without deciding how it relates to `format_audio_startup_error` and preflight messages.
+- Runtime ffmpeg conversion errors still occur in `AudioRecorder::convert_with_ffmpeg`; Spec 1.4 must preserve that path even though preflight now checks availability.
+- Later sessions should reuse `run_record_preflight` semantics for record setup failures rather than adding another pre-audio validation path.
+
+Obstacles encountered:
+- The first extra `cargo test commands::record` run failed because local-model and ffmpeg causes were only in the anyhow source chain while the existing TUI formatter displays only the top-level message. The preflight messages were adjusted to include those narrow causes in the primary string, then the test passed.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.
