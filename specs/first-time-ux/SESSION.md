@@ -261,3 +261,45 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 7: Spec 1.5.B — Ghostty macOS Launch And Best-Effort Positioning
+
+Accomplished:
+- Changed macOS Ghostty launch command construction to use `open -na Ghostty.app --args ...`.
+- Preserved non-macOS Ghostty direct binary invocation behavior.
+- Kept fixed popup position defaults and recorded the screen-aware centering deferral.
+- Added deterministic launch command-shape tests for macOS Ghostty and non-macOS Ghostty.
+- Marked all Spec 1.5.B tasks complete in `PLAN.md` as they were completed.
+
+Decisions made:
+- Added a narrow private `LaunchPlatform` switch so tests can cover macOS and non-macOS Ghostty command construction on any host.
+- Deferred screen-aware centering because the current popup configuration only exposes fixed `x`/`y` coordinates, and deterministic centering would require platform screen-size probing or a new dependency.
+- Did not modify `src/config/file.rs`; the existing `PopupConfig` fixed defaults remain sufficient for this scoped section.
+
+Files changed:
+- `src/commands/launch.rs`
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Reused Session 6 launch command construction and `build_spawn_command` popup context behavior.
+- Introduced private `LaunchPlatform` and `current_launch_platform()` in `src/commands/launch.rs`.
+- Introduced private `build_terminal_args_for_platform(...)` for deterministic tests while keeping `build_terminal_args(...)` as the runtime entry point.
+
+Verification results:
+- `cargo check` passed.
+- `cargo test commands::launch` passed with 5 tests.
+
+Constraints for later sessions:
+- Spec 1.6 should continue to reuse `paste::notify_no_popup_error` for no-popup failure surfaces.
+- Future launch changes should preserve `OSTT_POPUP=1` in `build_spawn_command`.
+- Screen-aware centering remains deferred unless a later scope allows deterministic screen-size input or a dependency/probing strategy.
+
+Obstacles encountered:
+- None.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.

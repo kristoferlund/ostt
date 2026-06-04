@@ -36,6 +36,20 @@ enum TerminalEmulator {
     Xfce4Terminal,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LaunchPlatform {
+    Macos,
+    Other,
+}
+
+fn current_launch_platform() -> LaunchPlatform {
+    if cfg!(target_os = "macos") {
+        LaunchPlatform::Macos
+    } else {
+        LaunchPlatform::Other
+    }
+}
+
 impl TerminalEmulator {
     /// Returns the command name for this terminal.
     fn command_name(&self) -> &'static str {
@@ -182,6 +196,24 @@ fn build_terminal_args(
     ostt_bin: &str,
     ostt_args: &[String],
 ) -> Vec<String> {
+    build_terminal_args_for_platform(
+        current_launch_platform(),
+        terminal,
+        binary,
+        config,
+        ostt_bin,
+        ostt_args,
+    )
+}
+
+fn build_terminal_args_for_platform(
+    platform: LaunchPlatform,
+    terminal: TerminalEmulator,
+    binary: &str,
+    config: &PopupConfig,
+    ostt_bin: &str,
+    ostt_args: &[String],
+) -> Vec<String> {
     match terminal {
         TerminalEmulator::Ghostty => {
             // Ghostty uses a shell wrapper to source profile for PATH
@@ -197,8 +229,7 @@ fn build_terminal_args(
                 ostt_cmd
             );
 
-            let mut args = vec![
-                binary.to_string(),
+            let mut ghostty_args = vec![
                 "--class=ostt-popup".to_string(),
                 "--title=ostt".to_string(),
                 format!("--window-position-x={}", config.x),
@@ -212,14 +243,26 @@ fn build_terminal_args(
                 "--macos-window-shadow=false".to_string(),
             ];
             if config.borderless {
-                args.push("--window-decoration=none".to_string());
+                ghostty_args.push("--window-decoration=none".to_string());
             }
-            args.extend([
+            ghostty_args.extend([
                 "-e".to_string(),
                 "/bin/bash".to_string(),
                 "-c".to_string(),
                 shell_cmd,
             ]);
+
+            let mut args = if platform == LaunchPlatform::Macos {
+                vec![
+                    "open".to_string(),
+                    "-na".to_string(),
+                    "Ghostty.app".to_string(),
+                    "--args".to_string(),
+                ]
+            } else {
+                vec![binary.to_string()]
+            };
+            args.extend(ghostty_args);
             args
         }
         TerminalEmulator::Kitty => {
@@ -403,6 +446,62 @@ mod tests {
             .iter()
             .any(|arg| arg == "macos_quit_when_last_window_closed=yes"));
         assert_eq!(args.last(), Some(&"-c".to_string()));
+    }
+
+    #[test]
+    fn macos_ghostty_args_use_open_app_wrapper() {
+        let args = build_terminal_args_for_platform(
+            LaunchPlatform::Macos,
+            TerminalEmulator::Ghostty,
+            "/Applications/Ghostty.app/Contents/MacOS/ghostty",
+            &PopupConfig::default(),
+            "/usr/local/bin/ostt",
+            &["--paste".to_string()],
+        );
+
+        assert_eq!(
+            &args[..4],
+            [
+                "open".to_string(),
+                "-na".to_string(),
+                "Ghostty.app".to_string(),
+                "--args".to_string(),
+            ]
+        );
+        assert!(!args
+            .iter()
+            .any(|arg| arg.contains("Contents/MacOS/ghostty")));
+        assert!(args.iter().any(|arg| arg == "--class=ostt-popup"));
+        assert!(args.iter().any(|arg| arg == "--window-position-x=630"));
+        assert!(args
+            .windows(3)
+            .any(|args| args == ["-e", "/bin/bash", "-c"]));
+        assert!(args
+            .last()
+            .is_some_and(|arg| arg.contains("exec '/usr/local/bin/ostt' '--paste'")));
+    }
+
+    #[test]
+    fn non_macos_ghostty_args_use_direct_binary() {
+        let args = build_terminal_args_for_platform(
+            LaunchPlatform::Other,
+            TerminalEmulator::Ghostty,
+            "/usr/bin/ghostty",
+            &PopupConfig::default(),
+            "ostt",
+            &["-c".to_string()],
+        );
+
+        assert_eq!(args.first(), Some(&"/usr/bin/ghostty".to_string()));
+        assert!(!args.iter().any(|arg| arg == "open"));
+        assert!(args.iter().any(|arg| arg == "--class=ostt-popup"));
+        assert!(args.iter().any(|arg| arg == "--window-height=15"));
+        assert!(args
+            .windows(3)
+            .any(|args| args == ["-e", "/bin/bash", "-c"]));
+        assert!(args
+            .last()
+            .is_some_and(|arg| arg.contains("exec 'ostt' '-c'")));
     }
 
     #[test]

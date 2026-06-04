@@ -133,15 +133,15 @@ Depends on: `1.5.A`
 
 Files: `src/commands/launch.rs`, `src/config/file.rs`
 
-- [ ] **1.5.10** Change macOS Ghostty command construction to use `open -na Ghostty.app --args ...` where appropriate.
-- [ ] **1.5.11** Preserve non-macOS Ghostty direct binary invocation behavior.
-- [ ] **1.5.12** Attempt screen-aware centering only if it can be implemented simply and tested deterministically without new heavy dependencies.
-- [ ] **1.5.13** If screen-aware centering is not implemented, record the deferral reason in `SESSION.md` and keep fixed defaults.
-- [ ] **1.5.14** Add tests for macOS Ghostty `open -na ... --args` command shape.
-- [ ] **1.5.15** Add tests for non-macOS Ghostty direct command shape.
-- [ ] **1.5.16** Add deterministic position-calculation tests if screen-aware centering is implemented.
-- [ ] **1.5.17** Verify: `cargo check`
-- [ ] **1.5.18** Verify: `cargo test commands::launch`
+- [x] **1.5.10** Change macOS Ghostty command construction to use `open -na Ghostty.app --args ...` where appropriate.
+- [x] **1.5.11** Preserve non-macOS Ghostty direct binary invocation behavior.
+- [x] **1.5.12** Attempt screen-aware centering only if it can be implemented simply and tested deterministically without new heavy dependencies.
+- [x] **1.5.13** If screen-aware centering is not implemented, record the deferral reason in `SESSION.md` and keep fixed defaults.
+- [x] **1.5.14** Add tests for macOS Ghostty `open -na ... --args` command shape.
+- [x] **1.5.15** Add tests for non-macOS Ghostty direct command shape.
+- [x] **1.5.16** Add deterministic position-calculation tests if screen-aware centering is implemented.
+- [x] **1.5.17** Verify: `cargo check`
+- [x] **1.5.18** Verify: `cargo test commands::launch`
 
 ### Spec 1.6 — Explicit Clipboard And Paste Output Failures
 
