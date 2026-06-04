@@ -105,13 +105,13 @@ Depends on: `1.2`, `1.3`, `1.4`
 
 Files: `src/commands/record.rs`, `src/recording/tui.rs`, `src/recording/ffmpeg.rs`, `src/transcription/context.rs`, `src/transcription/local_models.rs`, `SESSION.md`
 
-- [ ] **R1.1** Read `SESSION.md` and recent commits; list the record-flow helpers/APIs that later sessions must reuse.
-- [ ] **R1.2** Review the record path from TUI initialization through preflight, audio startup, save, transcription, and error display for duplicate or conflicting patterns.
-- [ ] **R1.3** Make only small consistency fixes needed to align existing record-flow helpers; if a larger redesign seems needed, stop and ask.
-- [ ] **R1.4** Append a handoff note naming the established TUI, preflight, and error-formatting patterns for future sessions.
-- [ ] **R1.5** Verify: `cargo check`
-- [ ] **R1.6** Verify: `cargo test commands::record`
-- [ ] **R1.7** Verify: `cargo test recording`
+- [x] **R1.1** Read `SESSION.md` and recent commits; list the record-flow helpers/APIs that later sessions must reuse.
+- [x] **R1.2** Review the record path from TUI initialization through preflight, audio startup, save, transcription, and error display for duplicate or conflicting patterns.
+- [x] **R1.3** Make only small consistency fixes needed to align existing record-flow helpers; if a larger redesign seems needed, stop and ask.
+- [x] **R1.4** Append a handoff note naming the established TUI, preflight, and error-formatting patterns for future sessions.
+- [x] **R1.5** Verify: `cargo check`
+- [x] **R1.6** Verify: `cargo test commands::record`
+- [x] **R1.7** Verify: `cargo test recording`
 
 ### Spec 1.5.A — Launch Failure Notification And Popup Context
 

@@ -175,3 +175,45 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 5: Review R1 — Record Flow Integration Review
+
+Accomplished:
+- Reviewed the record path from TUI initialization through preflight, audio startup, save, transcription, processing, and error display.
+- Confirmed no duplicate or conflicting record-flow helper pattern requires a source change in this review scope.
+- Marked R1 review tasks complete in `PLAN.md` as they were completed.
+
+Decisions made:
+- Kept R1.3 as a no-op because the existing helpers already form one coherent record-flow path.
+- Treated `format_recording_error` as the single record TUI dialog formatter for setup, recording, transcription, and processing failures.
+
+Files changed:
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Reused `RecordingTui::new_pending_audio(config)` for terminal takeover before preflight/audio startup.
+- Reused `RecordingTui::set_sample_rate(sample_rate)` after successful audio startup.
+- Reused `run_record_preflight` and `build_preflight_context` for model, params, cloud key, local Whisper file, custom provider config-only, and ffmpeg availability checks.
+- Reused `ffmpeg::find_ffmpeg` as both the preflight and runtime conversion ffmpeg discovery path.
+- Reused `show_recording_error`, `show_audio_startup_error`, and `format_recording_error` as the established TUI error display path.
+
+Verification results:
+- `cargo check` passed.
+- `cargo test commands::record` passed with 9 tests.
+- `cargo test recording` passed with 5 tests.
+
+Constraints for later sessions:
+- Later record-related changes should keep one `RecordingTui` instance alive from `new_pending_audio` through recording, transcription animation, processing animation, and action picker.
+- Later sessions should not add a parallel record preflight path; extend `run_record_preflight` only if the record preflight scope explicitly grows.
+- Later sessions should not add another record TUI error formatter; consolidate through `format_recording_error` unless a deliberate replacement is made.
+- Runtime ffmpeg conversion must continue to call `find_ffmpeg`; preflight is not the only ffmpeg failure surface.
+
+Obstacles encountered:
+- None.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.
