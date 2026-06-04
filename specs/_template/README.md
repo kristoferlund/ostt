@@ -57,14 +57,17 @@ Once all spec files are written, use the reusable prompt in `_template/Generate 
 
 The plan decomposes each spec into small checklist tasks and defines session boundaries so the implementation can be done incrementally with `./loop.sh`.
 
+For larger or tightly coupled work, include small review sections after major clusters. Review sessions do not add new feature scope; they inspect prior session notes and recent commits, align existing helpers/patterns, make only small consistency fixes, and stop to ask before any larger redesign.
+
 ### 5. Execute the plan
 
 Each session:
 
 1. Reads the current phase's `PLAN.md` and `SESSION.md`.
 2. Finds the first incomplete section (at most 10 tasks).
-3. Implements those tasks, verifying after each.
-4. Commits, appends a summary to `SESSION.md`, and stops.
+3. Reads recent commits and identifies helpers/patterns already introduced for the feature.
+4. Implements those tasks, verifying after each.
+5. Commits, appends a handoff summary to `SESSION.md`, and stops.
 
 Repeat until all checkboxes are `[x]`.
 
@@ -92,5 +95,7 @@ specs/
 
 - **Do not create markdown files** outside of the `specs/` folder during implementation. Specs, plans, and session notes live here; code lives in `src/`.
 - **SESSION.md is append-only.** Each session adds a new `## Session N: ...` heading with a summary.
+- **SESSION.md is the handoff layer.** Summaries should include decisions made, files changed, helpers/APIs introduced or reused, verification results, constraints for later sessions, obstacles, open questions, and out-of-scope observations.
 - **PLAN.md tracks progress** via `- [ ]` / `- [x]` checkboxes. Agents must update checkboxes immediately after finishing each task, not in batches.
-- **One section per session.** A section is a `####` heading with at most 10 tasks. Agents stop and commit after completing one section.
+- **One section per session.** A section or sub-section has at most 10 tasks. Agents stop and commit after completing one section.
+- **Do not fork patterns.** If a previous session introduced a helper/API for the same concern, later sessions should reuse it unless they document why it is unsuitable.
