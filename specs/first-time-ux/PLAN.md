@@ -166,12 +166,12 @@ Depends on: `1.1`, `1.2`, `1.3`, `1.4`, `R1`, `1.5.A`, `1.5.B`, `1.6`
 
 Files: `src/commands/record.rs`, `src/commands/launch.rs`, `src/commands/output.rs`, `src/paste.rs`, `SESSION.md`
 
-- [ ] **R2.1** Read `SESSION.md` and recent commits; identify the final established patterns for TUI errors, no-popup notifications, preflight, and output failures.
-- [ ] **R2.2** Review launch, record, clipboard, and paste flows for duplicate helpers, inconsistent messages, or behavior that violates deferred/non-goal scope.
-- [ ] **R2.3** Make only small consistency fixes; if a larger redesign or extra scope is required, stop and ask.
-- [ ] **R2.4** Append a final handoff note summarizing implemented behavior, remaining deferrals, and any manual verification needed.
-- [ ] **R2.5** Verify: `cargo check`
-- [ ] **R2.6** Verify: `cargo clippy -- -D warnings`
+- [x] **R2.1** Read `SESSION.md` and recent commits; identify the final established patterns for TUI errors, no-popup notifications, preflight, and output failures.
+- [x] **R2.2** Review launch, record, clipboard, and paste flows for duplicate helpers, inconsistent messages, or behavior that violates deferred/non-goal scope.
+- [x] **R2.3** Make only small consistency fixes; if a larger redesign or extra scope is required, stop and ask.
+- [x] **R2.4** Append a final handoff note summarizing implemented behavior, remaining deferrals, and any manual verification needed.
+- [x] **R2.5** Verify: `cargo check`
+- [!] **R2.6** Verify: `cargo clippy -- -D warnings`
 - [ ] **R2.7** Verify: `cargo test`
 
 ## Verification Protocol

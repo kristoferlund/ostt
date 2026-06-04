@@ -17,7 +17,7 @@ pub fn copy_to_clipboard(text: &str) -> anyhow::Result<()> {
 pub(crate) fn read_clipboard() -> anyhow::Result<String> {
     #[cfg(target_os = "macos")]
     {
-        return read_command("pbpaste", &[]);
+        read_command("pbpaste", &[])
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -35,7 +35,7 @@ pub(crate) fn read_clipboard() -> anyhow::Result<String> {
 pub(crate) fn set_clipboard(text: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return write_command("pbcopy", &[], text);
+        write_command("pbcopy", &[], text)
     }
 
     #[cfg(not(target_os = "macos"))]

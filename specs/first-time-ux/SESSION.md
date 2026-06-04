@@ -352,3 +352,54 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 9: Spec R2 — Final Popup UX Coherence Review
+
+Accomplished:
+- Reviewed final first-time popup UX behavior across launch, record, output, clipboard, and paste flows.
+- Confirmed the scoped flows consistently reuse the established record TUI error, record preflight, no-popup notification, popup context, and strict explicit-output failure paths.
+- Applied small scoped/immediate clippy fixes found by the R2 verification run.
+- Marked R2.1 through R2.5 complete and R2.6 failed in `PLAN.md`; R2.7 remains unchecked because the protocol required stopping after the repeated clippy failure.
+
+Decisions made:
+- Kept R2.3 as a no-op for behavior changes because the existing helpers are already coherent and adding feature code would be unnecessary scope expansion.
+- Limited clippy fixes to R2 files and the clipboard utility directly used by the scoped output flow.
+- Preserved fixed popup positioning; screen-aware centering remains deferred from Session 7.
+
+Files changed:
+- `src/clipboard.rs`
+- `src/commands/output.rs`
+- `src/commands/record.rs`
+- `src/paste.rs`
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Reused `RecordingTui::new_pending_audio`, `RecordingTui::set_sample_rate`, `run_record_preflight`, `show_recording_error`, and `format_recording_error` as the record-flow pattern.
+- Reused `paste::notify_no_popup_error` and `paste::notify_no_popup_error_if_popup_context` as the no-popup notification pattern.
+- Reused `OSTT_POPUP=1` propagation from launch command setup through post-popup output and detached paste-helper failure handling.
+- Reused `commands::output::write_text` and `clipboard::set_clipboard` as the strict explicit output/clipboard path.
+- Introduced private `WriteTextRequest` in `src/commands/output.rs` only to keep the existing testable output helper under the clippy argument limit.
+
+Verification results:
+- `cargo check` passed.
+- First `cargo clippy -- -D warnings` failed on scoped files plus unrelated out-of-scope files.
+- Applied small scoped/immediate clippy fixes in `src/clipboard.rs`, `src/commands/output.rs`, `src/commands/record.rs`, and `src/paste.rs`: removed needless returns, replaced side-effect `map_err` calls with `inspect_err`, removed a redundant notification closure, and grouped the private output test helper arguments to avoid `too_many_arguments`.
+- Retried `cargo clippy -- -D warnings`; it failed again only on out-of-scope files: `src/commands/retry.rs`, `src/commands/transcribe.rs`, `src/model/local_model_view/local_model_list_view.rs`, `src/model/model_view.rs`, and `src/transcription/api/mod.rs`.
+- `cargo test` was not run because the protocol requires stopping after the same verification task fails twice.
+
+Constraints for later sessions:
+- Do not add parallel notification, preflight, or record TUI error-formatting helpers without first replacing or consolidating the existing helpers.
+- Keep explicit output modes contractual: if the requested output cannot be completed, return/report an error.
+- Keep custom command/http provider preflight config-only unless a later spec explicitly expands runtime probing scope.
+- Runtime ffmpeg conversion must continue to call the shared ffmpeg discovery/remediation path; preflight is not the only ffmpeg failure surface.
+- Before R2 can complete, resolve the remaining out-of-scope clippy failures listed above, then rerun `cargo clippy -- -D warnings` and `cargo test`.
+
+Obstacles encountered:
+- Full clippy verification is currently blocked by pre-existing or out-of-scope warnings/errors outside the R2 file list.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.

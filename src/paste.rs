@@ -23,7 +23,7 @@ pub(crate) fn notify_no_popup_error_if_popup_context(title: &str, message: &str)
         title,
         message,
         is_popup_context(),
-        |title, message| notify_no_popup_error(title, message),
+        notify_no_popup_error,
     )
 }
 
@@ -235,9 +235,8 @@ pub(crate) fn handle_paste_helper(config: &crate::config::OsttConfig) -> anyhow:
         .read_to_string(&mut text)
         .context("failed to read paste helper input")?;
     wait_for_focus_after_popup(&config.output.paste);
-    paste_text(&text, &config.output.paste).map_err(|err| {
+    paste_text(&text, &config.output.paste).inspect_err(|err| {
         notify_no_popup_error_if_popup_context("Paste Failed", &err.to_string());
-        err
     })
 }
 
@@ -274,7 +273,7 @@ fn active_hyprland_window_title() -> Option<String> {
 fn send_paste_key(paste_key: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return send_macos_key(paste_key);
+        send_macos_key(paste_key)
     }
 
     #[cfg(not(target_os = "macos"))]
