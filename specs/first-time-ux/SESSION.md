@@ -303,3 +303,52 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 8: Spec 1.6 — Explicit Clipboard And Paste Output Failures
+
+Accomplished:
+- Changed explicit `--clipboard`/`-c` output to return clipboard backend errors instead of warning-only success.
+- Kept optional clipboard restoration in paste mode best-effort.
+- Changed paste-key automation failure to return an error after copying transcription text to the clipboard as fallback.
+- Added macOS Accessibility remediation text to paste automation failure messages.
+- Routed popup-context paste-helper failures and post-TUI record/output failures through the existing no-popup notification helper.
+- Added deterministic tests for explicit clipboard failure, paste-key fallback behavior, remediation text, and popup-context notification gating.
+- Marked all Spec 1.6 tasks complete in `PLAN.md` as they were completed.
+
+Decisions made:
+- Reused the existing strict `set_clipboard` backend path for explicit clipboard output rather than maintaining a separate warning-only implementation.
+- Reused `paste::notify_no_popup_error` by adding a narrow popup-context wrapper instead of creating another notification helper.
+- Kept paste-helper notification conditional on `OSTT_POPUP=1`, which is set by the launch flow from earlier sessions.
+
+Files changed:
+- `src/clipboard.rs`
+- `src/commands/output.rs`
+- `src/commands/record.rs`
+- `src/paste.rs`
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Reused `clipboard::set_clipboard` as the strict implementation behind `copy_to_clipboard`.
+- Reused `paste::notify_no_popup_error(title, message)` for no-popup user-visible errors.
+- Introduced `paste::notify_no_popup_error_if_popup_context(title, message) -> bool` for post-popup failure paths.
+- Introduced private testable helpers `write_text_with_handlers`, `paste_text_with_handlers`, and `paste_key_failure_message_for_os`.
+
+Verification results:
+- `cargo check` initially completed with unused-import warnings after simplifying `clipboard.rs`; removed the imports and reran successfully warning-free.
+- `cargo test paste` passed with 9 tests.
+- Additional targeted test `cargo test explicit_clipboard_failure_returns_user_visible_error` passed because the listed paste filter does not run the new output-module clipboard test.
+
+Constraints for later sessions:
+- Future no-popup failure surfaces should reuse `notify_no_popup_error_if_popup_context` or `notify_no_popup_error` rather than adding another OS notification path.
+- Explicit output modes should continue returning errors when the requested output cannot be completed.
+- Optional clipboard restoration after successful paste remains best-effort.
+
+Obstacles encountered:
+- The listed `cargo test paste` filter did not cover the new explicit clipboard output test, so a single targeted test was run separately.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.

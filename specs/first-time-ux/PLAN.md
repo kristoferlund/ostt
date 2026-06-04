@@ -149,16 +149,16 @@ Depends on: `1.5.A`
 
 Files: `src/clipboard.rs`, `src/commands/output.rs`, `src/commands/record.rs`, `src/paste.rs`
 
-- [ ] **1.6.1** Change explicit `--clipboard`/`-c` output so clipboard backend failure is a returned user-visible error instead of warning-only success.
-- [ ] **1.6.2** Preserve best-effort clipboard behavior only for optional clipboard copies that are not the requested output mode.
-- [ ] **1.6.3** Change paste-key automation failure to leave transcription text in the clipboard and return/report an error.
-- [ ] **1.6.4** Add macOS Accessibility remediation text for AppleScript/System Events paste failures.
-- [ ] **1.6.5** Make detached paste-helper failures in popup context attempt OS notification/native alert because the popup has closed.
-- [ ] **1.6.6** Ensure record popup paste failures after TUI cleanup use the no-popup notification path rather than only stderr/logging.
-- [ ] **1.6.7** Add tests for explicit clipboard failure behavior.
-- [ ] **1.6.8** Add tests for paste-key failure behavior and remediation text.
-- [ ] **1.6.9** Verify: `cargo check`
-- [ ] **1.6.10** Verify: `cargo test paste`
+- [x] **1.6.1** Change explicit `--clipboard`/`-c` output so clipboard backend failure is a returned user-visible error instead of warning-only success.
+- [x] **1.6.2** Preserve best-effort clipboard behavior only for optional clipboard copies that are not the requested output mode.
+- [x] **1.6.3** Change paste-key automation failure to leave transcription text in the clipboard and return/report an error.
+- [x] **1.6.4** Add macOS Accessibility remediation text for AppleScript/System Events paste failures.
+- [x] **1.6.5** Make detached paste-helper failures in popup context attempt OS notification/native alert because the popup has closed.
+- [x] **1.6.6** Ensure record popup paste failures after TUI cleanup use the no-popup notification path rather than only stderr/logging.
+- [x] **1.6.7** Add tests for explicit clipboard failure behavior.
+- [x] **1.6.8** Add tests for paste-key failure behavior and remediation text.
+- [x] **1.6.9** Verify: `cargo check`
+- [x] **1.6.10** Verify: `cargo test paste`
 
 ### Review R2 — Final Popup UX Coherence Review
 

@@ -6,6 +6,8 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+const MACOS_ACCESSIBILITY_REMEDIATION: &str = "Grant accessibility permissions to your terminal app or OSTT launcher in System Settings > Privacy & Security > Accessibility.";
+
 #[cfg(not(target_os = "macos"))]
 const POPUP_TITLE: &str = "ostt";
 
@@ -14,6 +16,35 @@ pub(crate) fn notify_no_popup_error(title: &str, message: &str) {
         tracing::debug!("No-popup notification failed: {err}");
         eprintln!("{title}: {message}");
     }
+}
+
+pub(crate) fn notify_no_popup_error_if_popup_context(title: &str, message: &str) -> bool {
+    notify_no_popup_error_if_popup_context_with(
+        title,
+        message,
+        is_popup_context(),
+        |title, message| notify_no_popup_error(title, message),
+    )
+}
+
+fn notify_no_popup_error_if_popup_context_with<F>(
+    title: &str,
+    message: &str,
+    is_popup_context: bool,
+    notify: F,
+) -> bool
+where
+    F: FnOnce(&str, &str),
+{
+    if !is_popup_context {
+        return false;
+    }
+    notify(title, message);
+    true
+}
+
+fn is_popup_context() -> bool {
+    std::env::var("OSTT_POPUP").is_ok_and(|value| value == "1")
 }
 
 #[cfg(target_os = "macos")]
@@ -91,6 +122,30 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
         config.restore_delay_ms
     );
 
+    paste_text_with_handlers(
+        text,
+        config,
+        read_clipboard,
+        set_clipboard,
+        send_paste_key,
+        thread::sleep,
+    )
+}
+
+fn paste_text_with_handlers<R, S, K, L>(
+    text: &str,
+    config: &PasteConfig,
+    mut read_clipboard: R,
+    mut set_clipboard: S,
+    mut send_paste_key: K,
+    mut sleep: L,
+) -> anyhow::Result<()>
+where
+    R: FnMut() -> anyhow::Result<String>,
+    S: FnMut(&str) -> anyhow::Result<()>,
+    K: FnMut(&str) -> anyhow::Result<()>,
+    L: FnMut(Duration),
+{
     let previous_clipboard = if config.restore_clipboard {
         match read_clipboard() {
             Ok(value) => Some(value),
@@ -110,14 +165,10 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
     log_active_window("before paste key");
     if let Err(err) = send_paste_key(&config.paste_key) {
         tracing::warn!("Failed to send paste key '{}': {err}", config.paste_key);
-        eprintln!(
-            "Warning: Failed to send paste key '{}'. Text was copied to the clipboard.",
-            config.paste_key
-        );
-        return Ok(());
+        return Err(err.context(paste_key_failure_message(&config.paste_key)));
     }
 
-    thread::sleep(Duration::from_millis(config.restore_delay_ms));
+    sleep(Duration::from_millis(config.restore_delay_ms));
 
     if let Some(previous_clipboard) = previous_clipboard {
         if let Err(err) = set_clipboard(&previous_clipboard) {
@@ -127,6 +178,20 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
     }
 
     Ok(())
+}
+
+fn paste_key_failure_message(paste_key: &str) -> String {
+    paste_key_failure_message_for_os(paste_key, cfg!(target_os = "macos"))
+}
+
+fn paste_key_failure_message_for_os(paste_key: &str, is_macos: bool) -> String {
+    let mut message =
+        format!("Failed to send paste key '{paste_key}'. Text was copied to the clipboard.");
+    if is_macos {
+        message.push_str("\nNext step: ");
+        message.push_str(MACOS_ACCESSIBILITY_REMEDIATION);
+    }
+    message
 }
 
 pub(crate) fn spawn_detached_paste_helper(text: &str) -> anyhow::Result<()> {
@@ -170,7 +235,10 @@ pub(crate) fn handle_paste_helper(config: &crate::config::OsttConfig) -> anyhow:
         .read_to_string(&mut text)
         .context("failed to read paste helper input")?;
     wait_for_focus_after_popup(&config.output.paste);
-    paste_text(&text, &config.output.paste)
+    paste_text(&text, &config.output.paste).map_err(|err| {
+        notify_no_popup_error_if_popup_context("Paste Failed", &err.to_string());
+        err
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -349,4 +417,82 @@ fn run_status(command: &mut Command, name: &str) -> anyhow::Result<()> {
         anyhow::bail!("{name} failed with status {status}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn paste_key_failure_returns_error_and_leaves_text_in_clipboard() {
+        let config = PasteConfig {
+            restore_clipboard: true,
+            restore_delay_ms: 0,
+            ..PasteConfig::default()
+        };
+        let clipboard_writes = RefCell::new(Vec::new());
+
+        let err = paste_text_with_handlers(
+            "new text",
+            &config,
+            || Ok("old text".to_string()),
+            |value| {
+                clipboard_writes.borrow_mut().push(value.to_string());
+                Ok(())
+            },
+            |_| Err(anyhow::anyhow!("xdotool failed")),
+            |_| {},
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Text was copied to the clipboard"));
+        assert_eq!(clipboard_writes.into_inner(), vec!["new text"]);
+    }
+
+    #[test]
+    fn macos_paste_failure_message_mentions_accessibility() {
+        let message = paste_key_failure_message_for_os("cmd+v", true);
+
+        assert!(message.contains("Privacy & Security > Accessibility"));
+        assert!(message.contains("OSTT launcher"));
+    }
+
+    #[test]
+    fn non_macos_paste_failure_message_omits_accessibility() {
+        let message = paste_key_failure_message_for_os("ctrl+v", false);
+
+        assert!(!message.contains("Privacy & Security > Accessibility"));
+    }
+
+    #[test]
+    fn popup_context_notification_helper_only_notifies_in_popup_context() {
+        let calls = RefCell::new(Vec::new());
+
+        let notified = notify_no_popup_error_if_popup_context_with(
+            "Paste Failed",
+            "paste failed",
+            true,
+            |title, message| {
+                calls
+                    .borrow_mut()
+                    .push((title.to_string(), message.to_string()))
+            },
+        );
+
+        assert!(notified);
+        assert_eq!(
+            calls.into_inner(),
+            vec![("Paste Failed".to_string(), "paste failed".to_string())]
+        );
+
+        let skipped = notify_no_popup_error_if_popup_context_with(
+            "Paste Failed",
+            "paste failed",
+            false,
+            |_, _| panic!("notification should not run outside popup context"),
+        );
+
+        assert!(!skipped);
+    }
 }

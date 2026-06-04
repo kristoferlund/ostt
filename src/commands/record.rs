@@ -473,7 +473,10 @@ fn write_record_output(
     paste_config: &crate::config::PasteConfig,
 ) -> anyhow::Result<()> {
     if paste {
-        crate::paste::spawn_detached_paste_helper(output_text)?;
+        crate::paste::spawn_detached_paste_helper(output_text).map_err(|err| {
+            crate::paste::notify_no_popup_error_if_popup_context("Paste Failed", &err.to_string());
+            err
+        })?;
         tracing::debug!("Transcription sent to detached paste helper");
         return Ok(());
     }
