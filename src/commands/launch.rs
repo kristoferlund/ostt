@@ -8,7 +8,14 @@ use anyhow::{anyhow, Context};
 use std::process::{Command, Stdio};
 
 use crate::config::file::PopupConfig;
+use crate::paste::notify_no_popup_error;
 use crate::recording::active;
+
+const LAUNCH_FAILURE_TITLE: &str = "OSTT popup launch failed";
+const TERMINAL_SETUP_GUIDANCE: &str =
+    "Install Ghostty, kitty, or Alacritty, or set [popup].terminal in ~/.config/ostt/ostt.toml.";
+const POPUP_CONTEXT_ENV: &str = "OSTT_POPUP";
+const POPUP_CONTEXT_VALUE: &str = "1";
 
 /// Shell-quotes a string by wrapping in single quotes and escaping internal single quotes.
 fn shell_quote(s: &str) -> String {
@@ -101,20 +108,29 @@ impl TerminalEmulator {
     }
 }
 
+fn unsupported_terminal_message(name: &str) -> String {
+    format!(
+        "Unsupported terminal '{name}'. {TERMINAL_SETUP_GUIDANCE} Supported terminals: ghostty, kitty, alacritty, foot, konsole, gnome-terminal, xfce4-terminal."
+    )
+}
+
+fn terminal_not_found_message(name: &str) -> String {
+    format!("Terminal '{name}' not found. {TERMINAL_SETUP_GUIDANCE}")
+}
+
+fn no_terminal_found_message() -> String {
+    format!("No supported terminal emulator found. {TERMINAL_SETUP_GUIDANCE}")
+}
+
 /// Detects the best available terminal emulator.
 fn detect_terminal(config: &PopupConfig) -> anyhow::Result<(TerminalEmulator, String)> {
     // If user specified a terminal in config, use it
     if let Some(ref name) = config.terminal {
         let terminal = TerminalEmulator::from_name(name)
-            .ok_or_else(|| anyhow!(
-                "Unknown terminal '{}'. Supported: ghostty, kitty, alacritty, foot, konsole, gnome-terminal, xfce4-terminal",
-                name
-            ))?;
-        let binary = terminal.find_binary()
-            .ok_or_else(|| anyhow!(
-                "Terminal '{}' not found. Install it or choose a different terminal in [popup] config.",
-                name
-            ))?;
+            .ok_or_else(|| anyhow!(unsupported_terminal_message(name)))?;
+        let binary = terminal
+            .find_binary()
+            .ok_or_else(|| anyhow!(terminal_not_found_message(name)))?;
         return Ok((terminal, binary));
     }
 
@@ -130,11 +146,7 @@ fn detect_terminal(config: &PopupConfig) -> anyhow::Result<(TerminalEmulator, St
         }
     }
 
-    Err(anyhow!(
-        "No supported terminal emulator found.\n\
-         Install one of: ghostty, kitty, alacritty\n\
-         Or set the terminal in ~/.config/ostt/ostt.toml under [popup]."
-    ))
+    Err(anyhow!(no_terminal_found_message()))
 }
 
 /// Resolves the ostt binary path (the currently running executable).
@@ -144,6 +156,22 @@ fn ostt_binary_path() -> anyhow::Result<String> {
         .to_str()
         .map(|s| s.to_string())
         .ok_or_else(|| anyhow!("ostt binary path contains invalid UTF-8"))
+}
+
+fn report_launch_failure(message: &str) {
+    eprintln!("Error: {message}");
+    notify_no_popup_error(LAUNCH_FAILURE_TITLE, message);
+}
+
+fn build_spawn_command(program: &str, args: &[String]) -> Command {
+    let mut command = Command::new(program);
+    command
+        .args(args)
+        .env(POPUP_CONTEXT_ENV, POPUP_CONTEXT_VALUE)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command
 }
 
 /// Builds the terminal command arguments for spawning ostt.
@@ -308,7 +336,13 @@ pub async fn handle_launch(
     let popup = &config.popup;
 
     // Detect terminal
-    let (terminal, binary) = detect_terminal(popup)?;
+    let (terminal, binary) = match detect_terminal(popup) {
+        Ok(terminal) => terminal,
+        Err(err) => {
+            report_launch_failure(&err.to_string());
+            return Err(err);
+        }
+    };
     tracing::debug!("Using terminal: {} ({})", terminal.command_name(), binary);
 
     // Get ostt binary path
@@ -323,13 +357,16 @@ pub async fn handle_launch(
 
     tracing::debug!("Spawning: {} {:?}", program, spawn_args);
 
-    let child = Command::new(program)
-        .args(spawn_args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+    let child = match build_spawn_command(program, spawn_args)
         .spawn()
-        .with_context(|| format!("Failed to spawn {}", terminal.command_name()))?;
+        .with_context(|| format!("Failed to spawn {}", terminal.command_name()))
+    {
+        Ok(child) => child,
+        Err(err) => {
+            report_launch_failure(&err.to_string());
+            return Err(err);
+        }
+    };
 
     tracing::debug!("Terminal spawned with PID {}", child.id());
 
@@ -366,5 +403,40 @@ mod tests {
             .iter()
             .any(|arg| arg == "macos_quit_when_last_window_closed=yes"));
         assert_eq!(args.last(), Some(&"-c".to_string()));
+    }
+
+    #[test]
+    fn launch_terminal_errors_are_actionable() {
+        for message in [
+            unsupported_terminal_message("wezterm"),
+            terminal_not_found_message("ghostty"),
+            no_terminal_found_message(),
+        ] {
+            assert!(message.contains("Install Ghostty, kitty, or Alacritty"));
+            assert!(message.contains("[popup].terminal"));
+            assert!(message.contains("~/.config/ostt/ostt.toml"));
+        }
+    }
+
+    #[test]
+    fn launch_spawn_command_sets_popup_context() {
+        let command = build_spawn_command("ghostty", &["-e".to_string(), "ostt".to_string()]);
+
+        assert_eq!(command.get_program().to_str(), Some("ghostty"));
+        assert_eq!(
+            command
+                .get_args()
+                .map(|arg| arg.to_string_lossy().into_owned())
+                .collect::<Vec<_>>(),
+            vec!["-e".to_string(), "ostt".to_string()]
+        );
+        assert_eq!(
+            command
+                .get_envs()
+                .find(|(key, _)| key.to_str() == Some(POPUP_CONTEXT_ENV))
+                .and_then(|(_, value)| value)
+                .and_then(|value| value.to_str()),
+            Some(POPUP_CONTEXT_VALUE)
+        );
     }
 }

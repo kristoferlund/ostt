@@ -217,3 +217,47 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 6: Spec 1.5.A — Launch Failure Notification And Popup Context
+
+Accomplished:
+- Added a no-popup notification helper that uses macOS `osascript`, non-macOS `notify-send` when available, and stderr fallback.
+- Routed `ostt launch` terminal detection and spawn failures through explicit stderr plus the no-popup notification helper.
+- Updated missing/unsupported terminal messages to mention installing Ghostty, kitty, or Alacritty, or setting `[popup].terminal` in `~/.config/ostt/ostt.toml`.
+- Added `OSTT_POPUP=1` to popup terminal spawn setup so the launched recorder inherits popup context.
+- Added launch tests for actionable terminal guidance and popup context spawn setup without executing a terminal.
+- Marked all Spec 1.5.A tasks complete in `PLAN.md` as they were completed.
+
+Decisions made:
+- Put the no-popup notification helper in `src/paste.rs` because later explicit paste/clipboard failure work needs the same no-popup surface after the popup closes.
+- Kept launch failure handling narrow in `src/commands/launch.rs` instead of adding a broad app-wide error framework.
+- Used existing terminal command construction and added popup context at spawn setup so all supported terminals inherit the same environment path.
+
+Files changed:
+- `src/commands/launch.rs`
+- `src/paste.rs`
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Introduced `paste::notify_no_popup_error(title, message)` for no-popup native alert/notification attempts with stderr fallback.
+- Introduced private launch helpers `unsupported_terminal_message`, `terminal_not_found_message`, `no_terminal_found_message`, `report_launch_failure`, and `build_spawn_command`.
+- Reused existing `build_terminal_args` and terminal detection flow.
+
+Verification results:
+- `cargo check` passed.
+- `cargo test commands::launch` passed with 3 tests.
+
+Constraints for later sessions:
+- Spec 1.6 should reuse `paste::notify_no_popup_error` for detached paste-helper or post-popup failure surfaces instead of adding another notification helper.
+- Spec 1.5.B should preserve `OSTT_POPUP=1` when changing Ghostty macOS launch command construction.
+- Do not expand the notification helper into a broad app-wide framework unless a later scoped task requires it.
+
+Obstacles encountered:
+- An intermediate `cargo check` warned that the fallback notification helper was unused; launch now uses it directly and the final `cargo check` is warning-free.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.

@@ -117,15 +117,15 @@ Files: `src/commands/record.rs`, `src/recording/tui.rs`, `src/recording/ffmpeg.r
 
 Files: `src/app.rs`, `src/commands/launch.rs`, `src/paste.rs`
 
-- [ ] **1.5.1** Add a narrow popup-safe notification/native-alert helper for no-popup surfaces: macOS `osascript`, Linux `notify-send` when available, stderr fallback.
-- [ ] **1.5.2** Route terminal detection failures in `ostt launch` through stderr plus the notification/native-alert helper.
-- [ ] **1.5.3** Route terminal spawn failures in `ostt launch` through stderr plus the notification/native-alert helper.
-- [ ] **1.5.4** Make missing/unsupported terminal errors mention installing Ghostty, kitty, or Alacritty, or setting `[popup].terminal`.
-- [ ] **1.5.5** Set popup context for spawned recorder processes, for example `OSTT_POPUP=1`.
-- [ ] **1.5.6** Add tests for actionable launch failure messages.
-- [ ] **1.5.7** Add tests that popup context is included in launch command/spawn setup without executing terminals.
-- [ ] **1.5.8** Verify: `cargo check`
-- [ ] **1.5.9** Verify: `cargo test commands::launch`
+- [x] **1.5.1** Add a narrow popup-safe notification/native-alert helper for no-popup surfaces: macOS `osascript`, Linux `notify-send` when available, stderr fallback.
+- [x] **1.5.2** Route terminal detection failures in `ostt launch` through stderr plus the notification/native-alert helper.
+- [x] **1.5.3** Route terminal spawn failures in `ostt launch` through stderr plus the notification/native-alert helper.
+- [x] **1.5.4** Make missing/unsupported terminal errors mention installing Ghostty, kitty, or Alacritty, or setting `[popup].terminal`.
+- [x] **1.5.5** Set popup context for spawned recorder processes, for example `OSTT_POPUP=1`.
+- [x] **1.5.6** Add tests for actionable launch failure messages.
+- [x] **1.5.7** Add tests that popup context is included in launch command/spawn setup without executing terminals.
+- [x] **1.5.8** Verify: `cargo check`
+- [x] **1.5.9** Verify: `cargo test commands::launch`
 
 ### Spec 1.5.B — Ghostty macOS Launch And Best-Effort Positioning
 

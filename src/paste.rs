@@ -9,6 +9,49 @@ use std::time::Duration;
 #[cfg(not(target_os = "macos"))]
 const POPUP_TITLE: &str = "ostt";
 
+pub(crate) fn notify_no_popup_error(title: &str, message: &str) {
+    if let Err(err) = try_notify_no_popup_error(title, message) {
+        tracing::debug!("No-popup notification failed: {err}");
+        eprintln!("{title}: {message}");
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn try_notify_no_popup_error(title: &str, message: &str) -> anyhow::Result<()> {
+    let script = format!(
+        "display alert {} message {} as critical",
+        applescript_string(title),
+        applescript_string(message)
+    );
+    run_status(Command::new("osascript").args(["-e", &script]), "osascript")
+}
+
+#[cfg(target_os = "macos")]
+fn applescript_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn try_notify_no_popup_error(title: &str, message: &str) -> anyhow::Result<()> {
+    if !command_exists("notify-send") {
+        anyhow::bail!("notify-send not found");
+    }
+    run_status(
+        Command::new("notify-send").args([title, message]),
+        "notify-send",
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn command_exists(command: &str) -> bool {
+    Command::new("which")
+        .arg(command)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 pub(crate) fn wait_for_focus_after_popup(config: &PasteConfig) {
     #[cfg(not(target_os = "macos"))]
     {
