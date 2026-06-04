@@ -42,12 +42,12 @@ Deferrals: installer changes, hotkey docs, `ostt doctor`, local daemon checks, r
 
 Files: `src/transcription/context.rs`, `src/transcription/mod.rs`
 
-- [ ] **1.1.1** Update the no-selected-model error to exactly: `No transcription model selected. Run 'ostt auth' to add an API key, then 'ostt model' to choose a model.`
-- [ ] **1.1.2** Update the missing cloud API key error to include both credential setup via `ostt auth` and model confirmation/selection via `ostt model`.
-- [ ] **1.1.3** Add or update unit tests covering the no-model guidance text.
-- [ ] **1.1.4** Add or update unit tests covering stable missing-API-key guidance substrings.
-- [ ] **1.1.5** Verify: `cargo check`
-- [ ] **1.1.6** Verify: `cargo test transcription::context`
+- [x] **1.1.1** Update the no-selected-model error to exactly: `No transcription model selected. Run 'ostt auth' to add an API key, then 'ostt model' to choose a model.`
+- [x] **1.1.2** Update the missing cloud API key error to include both credential setup via `ostt auth` and model confirmation/selection via `ostt model`.
+- [x] **1.1.3** Add or update unit tests covering the no-model guidance text.
+- [x] **1.1.4** Add or update unit tests covering stable missing-API-key guidance substrings.
+- [x] **1.1.5** Verify: `cargo check`
+- [x] **1.1.6** Verify: `cargo test transcription::context`
 
 ### Spec 1.2 — Record TUI Lifecycle Starts Immediately
 
