@@ -18,11 +18,7 @@ pub(crate) fn write_text(
         paste_config,
         label,
     };
-    write_text_with_handlers(
-        request,
-        copy_to_clipboard,
-        crate::paste::paste_text,
-    )
+    write_text_with_handlers(request, copy_to_clipboard, crate::paste::paste_text)
 }
 
 struct WriteTextRequest<'a> {

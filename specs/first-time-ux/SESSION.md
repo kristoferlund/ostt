@@ -440,3 +440,51 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 11: Spec R2 — Verification Follow-Up
+
+Accomplished:
+- Resolved the remaining `cargo clippy -- -D warnings` failures from the prior R2 handoff.
+- Fixed the macOS Ghostty popup-context risk by injecting `OSTT_POPUP=1` into the Ghostty shell command via `exec env`, so it does not depend only on environment propagation through `open`.
+- Updated Ghostty launch tests to assert the shell command includes `OSTT_POPUP=1`.
+- Marked R2.6 complete in `PLAN.md`.
+
+Decisions made:
+- Used small option structs for `handle_retry` and `handle_transcribe` instead of suppressing `clippy::too_many_arguments`.
+- Kept lint fixes minimal in the previously out-of-scope files: one option comparison simplification, one no-op loop removal, and one identical-branch simplification.
+- Preserved the existing launch `Command` environment setup and added shell-level popup context for Ghostty as a defensive fix for macOS `open` behavior.
+
+Files changed:
+- `src/app.rs`
+- `src/commands/launch.rs`
+- `src/commands/retry.rs`
+- `src/commands/transcribe.rs`
+- `src/model/local_model_view/local_model_list_view.rs`
+- `src/model/model_view.rs`
+- `src/transcription/api/mod.rs`
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Introduced `commands::retry::RetryOptions` and `commands::transcribe::TranscribeOptions` to keep CLI handlers under the clippy argument limit.
+- Reused the established `OSTT_POPUP=1` popup context value in both process environment and Ghostty shell command construction.
+- Introduced no new notification, preflight, or record TUI error-formatting helpers.
+
+Verification results:
+- `cargo check` passed.
+- `cargo test commands::launch` passed with 5 tests.
+- `cargo clippy -- -D warnings` passed.
+- `cargo test` passed with 218 unit tests plus main/doc test targets with 0 tests.
+
+Constraints for later sessions:
+- Preserve both popup context paths for Ghostty: `build_spawn_command` environment and `exec env OSTT_POPUP=1 ...` inside the shell command.
+- Continue using the existing notification, preflight, and record TUI error-formatting helpers rather than adding parallel helpers.
+
+Obstacles encountered:
+- Initial launch tests failed because they expected the old shell command shape without `exec env OSTT_POPUP=1`; assertions were updated and rerun successfully.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.

@@ -225,7 +225,7 @@ fn build_terminal_args_for_platform(
             }
 
             let shell_cmd = format!(
-                "source ~/.bash_profile 2>/dev/null || source ~/.zprofile 2>/dev/null || source ~/.profile 2>/dev/null; clear; exec {}",
+                "source ~/.bash_profile 2>/dev/null || source ~/.zprofile 2>/dev/null || source ~/.profile 2>/dev/null; clear; exec env {POPUP_CONTEXT_ENV}={POPUP_CONTEXT_VALUE} {}",
                 ostt_cmd
             );
 
@@ -476,9 +476,9 @@ mod tests {
         assert!(args
             .windows(3)
             .any(|args| args == ["-e", "/bin/bash", "-c"]));
-        assert!(args
-            .last()
-            .is_some_and(|arg| arg.contains("exec '/usr/local/bin/ostt' '--paste'")));
+        assert!(args.last().is_some_and(
+            |arg| arg.contains("exec env OSTT_POPUP=1 '/usr/local/bin/ostt' '--paste'")
+        ));
     }
 
     #[test]
@@ -501,7 +501,7 @@ mod tests {
             .any(|args| args == ["-e", "/bin/bash", "-c"]));
         assert!(args
             .last()
-            .is_some_and(|arg| arg.contains("exec 'ostt' '-c'")));
+            .is_some_and(|arg| arg.contains("exec env OSTT_POPUP=1 'ostt' '-c'")));
     }
 
     #[test]

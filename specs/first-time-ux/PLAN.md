@@ -171,7 +171,7 @@ Files: `src/commands/record.rs`, `src/commands/launch.rs`, `src/commands/output.
 - [x] **R2.3** Make only small consistency fixes; if a larger redesign or extra scope is required, stop and ask.
 - [x] **R2.4** Append a final handoff note summarizing implemented behavior, remaining deferrals, and any manual verification needed.
 - [x] **R2.5** Verify: `cargo check`
-- [!] **R2.6** Verify: `cargo clippy -- -D warnings`
+- [x] **R2.6** Verify: `cargo clippy -- -D warnings`
 - [x] **R2.7** Verify: `cargo test`
 
 ## Verification Protocol

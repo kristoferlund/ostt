@@ -20,15 +20,19 @@ use std::path::PathBuf;
 /// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
 pub async fn handle_transcribe(
     config_data: &config::OsttConfig,
-    file: PathBuf,
-    clipboard: bool,
-    paste: bool,
-    output_file: Option<String>,
-    process: Option<String>,
-    model_override: Option<config::SelectedModel>,
-    param_overrides: &[String],
+    options: TranscribeOptions<'_>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Transcribe Command ===");
+
+    let TranscribeOptions {
+        file,
+        clipboard,
+        paste,
+        output_file,
+        process,
+        model_override,
+        param_overrides,
+    } = options;
 
     // Validate the input file exists
     if !file.exists() {
@@ -69,4 +73,14 @@ pub async fn handle_transcribe(
     )?;
 
     Ok(())
+}
+
+pub struct TranscribeOptions<'a> {
+    pub file: PathBuf,
+    pub clipboard: bool,
+    pub paste: bool,
+    pub output_file: Option<String>,
+    pub process: Option<String>,
+    pub model_override: Option<config::SelectedModel>,
+    pub param_overrides: &'a [String],
 }
