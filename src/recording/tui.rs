@@ -24,6 +24,8 @@ use crate::ui::is_cancel_key;
 
 use super::visualizations::{resize_waveform, update_waveform, SpectrumAnalyzer};
 
+const PENDING_AUDIO_SAMPLE_RATE: u32 = 48_000;
+
 /// User input command during recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingCommand {
@@ -116,6 +118,23 @@ impl RecordingTui {
             spectrum_analyzer,
             cleaned_up: false,
         })
+    }
+
+    /// Creates a TUI before the audio device has reported its actual sample rate.
+    pub fn new_pending_audio(config: &OsttConfig) -> Result<Self, Box<dyn Error>> {
+        Self::new(config, PENDING_AUDIO_SAMPLE_RATE)
+    }
+
+    /// Updates sample-rate-dependent state after audio startup succeeds.
+    pub fn set_sample_rate(&mut self, sample_rate: u32) {
+        self.sample_rate = sample_rate;
+        let now = std::time::Instant::now();
+        self.recording_start_time = now;
+        self.last_sample_time = now;
+        self.peak_hold_time = now;
+        self.pause_duration = std::time::Duration::ZERO;
+        self.pause_start_time = None;
+        self.is_paused = false;
     }
 
     /// Renders the visualization with current volume and recording duration.

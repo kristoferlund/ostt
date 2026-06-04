@@ -41,17 +41,18 @@ pub async fn handle_record(
         config.audio.reference_level_db
     );
 
-    let mut audio_recorder = AudioRecorder::new(config);
-    audio_recorder
-        .start_recording()
-        .context("failed to start audio recording")?;
-    let actual_sample_rate = audio_recorder.sample_rate();
-
-    // The UI depends on the device's actual sample rate for timing and spectrum analysis.
-    let mut tui = RecordingTui::new(config, actual_sample_rate)
+    let mut tui = RecordingTui::new_pending_audio(config)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .context("failed to initialize recording UI")?;
     let term = Arc::new(AtomicBool::new(false));
+
+    let mut audio_recorder = AudioRecorder::new(config);
+    audio_recorder
+        .start_recording()
+        .context("failed to start audio recording")
+        .map_err(|err| show_audio_startup_error(&mut tui, err))?;
+    let actual_sample_rate = audio_recorder.sample_rate();
+    tui.set_sample_rate(actual_sample_rate);
 
     // External popup/launcher integrations use SIGUSR1 to finish the active recording.
     let active_recording_guard =
@@ -161,10 +162,83 @@ fn show_recording_error(
     error: anyhow::Error,
 ) -> anyhow::Error {
     let message = error.to_string();
-    if let Err(display_err) = tui.show_error(title, &message) {
+    show_recording_message(tui, title, &message);
+    error
+}
+
+fn show_audio_startup_error(tui: &mut RecordingTui, error: anyhow::Error) -> anyhow::Error {
+    let message = format_audio_startup_error(&error);
+    show_recording_message(tui, "Recording Error", &message);
+    error
+}
+
+fn show_recording_message(tui: &mut RecordingTui, title: &str, message: &str) {
+    if let Err(display_err) = tui.show_error(title, message) {
         tracing::warn!("Failed to show recording error in TUI: {display_err}");
     }
-    error
+}
+
+fn format_audio_startup_error(error: &anyhow::Error) -> String {
+    let primary = error.to_string();
+    let details = error
+        .chain()
+        .skip(1)
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let mut message = primary.clone();
+
+    if !details.is_empty() {
+        message.push_str("\n\nDetails: ");
+        message.push_str(&details.join(" -> "));
+    }
+
+    let searchable = if details.is_empty() {
+        primary
+    } else {
+        format!("{primary}\n{}", details.join("\n"))
+    };
+
+    if let Some(next_step) = audio_startup_next_step(&searchable) {
+        message.push_str("\n\nNext step: ");
+        message.push_str(next_step);
+    }
+
+    message
+}
+
+fn audio_startup_next_step(error_text: &str) -> Option<&'static str> {
+    let normalized = error_text.to_ascii_lowercase();
+
+    if cfg!(target_os = "macos")
+        && (normalized.contains("permission")
+            || normalized.contains("access denied")
+            || normalized.contains("permission denied")
+            || normalized.contains("not permitted"))
+    {
+        return Some(
+            "Grant microphone access to your terminal app in System Settings > Privacy & Security > Microphone, then retry.",
+        );
+    }
+
+    if normalized.contains("no audio input device") {
+        return Some("Connect or enable a microphone, then retry.");
+    }
+
+    if normalized.contains("audio input device") && normalized.contains("not found") {
+        return Some("Run 'ostt config list-devices' and update [audio].device, then retry.");
+    }
+
+    if normalized.contains("input device configuration") {
+        return Some("Select a working input device with 'ostt config list-devices', then retry.");
+    }
+
+    if normalized.contains("audio input stream") {
+        return Some(
+            "Check that your microphone is available and not blocked by another app, then retry.",
+        );
+    }
+
+    None
 }
 
 fn resolve_recording_output_format(
@@ -415,6 +489,52 @@ async fn transcribe_recording_with_animation(
         Err(e) => {
             tracing::error!("Transcription task failed: {}", e);
             Err(anyhow::anyhow!("Transcription task failed: {e}"))
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn audio_startup_error_includes_primary_details_and_next_step() {
+        let error = anyhow::anyhow!("No audio input device available")
+            .context("failed to start audio recording");
+
+        let message = format_audio_startup_error(&error);
+
+        assert!(message.contains("failed to start audio recording"));
+        assert!(message.contains("Details: No audio input device available"));
+        assert!(message.contains("Next step: Connect or enable a microphone, then retry."));
+    }
+
+    #[test]
+    fn audio_startup_error_guides_configured_device_not_found() {
+        let error = anyhow::anyhow!(
+            "Audio input device 'Missing Mic' not found. Use 'ostt config list-devices' to see available devices."
+        )
+        .context("failed to start audio recording");
+
+        let message = format_audio_startup_error(&error);
+
+        assert!(message.contains("Run 'ostt config list-devices' and update [audio].device"));
+    }
+
+    #[test]
+    fn audio_startup_error_mentions_macos_microphone_permission_when_likely() {
+        let error = anyhow::anyhow!("permission denied")
+            .context("Failed to create audio input stream")
+            .context("failed to start audio recording");
+
+        let message = format_audio_startup_error(&error);
+
+        if cfg!(target_os = "macos") {
+            assert!(message.contains(
+                "Grant microphone access to your terminal app in System Settings > Privacy & Security > Microphone, then retry."
+            ));
+        } else {
+            assert!(!message.contains("Privacy & Security > Microphone"));
         }
     }
 }

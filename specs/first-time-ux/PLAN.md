@@ -55,16 +55,16 @@ Depends on: `1.1`
 
 Files: `src/commands/record.rs`, `src/recording/tui.rs`, `src/recording/audio.rs`
 
-- [ ] **1.2.1** Adjust `RecordingTui` or add a narrow TUI context so `handle_record` can take over the terminal before preflight/audio startup.
-- [ ] **1.2.2** Preserve reuse of the same TUI context for early errors, waveform rendering, transcription animation, processing animation, and action picker.
-- [ ] **1.2.3** Refactor `handle_record` so TUI initialization happens before `AudioRecorder::start_recording()`.
-- [ ] **1.2.4** Update sample-rate-dependent state after audio startup succeeds without requiring a second terminal takeover.
-- [ ] **1.2.5** Route no-input-device, configured-device-not-found, device-config, stream-create, and stream-start failures through the TUI error screen.
-- [ ] **1.2.6** Add macOS microphone permission remediation text for likely permission/device-denial startup errors.
-- [ ] **1.2.7** Add tests for startup-error formatting or routing without real audio hardware.
-- [ ] **1.2.8** Verify: `cargo check`
-- [ ] **1.2.9** Verify: `cargo test recording::tui`
-- [ ] **1.2.10** Verify: `cargo test commands::record`
+- [x] **1.2.1** Adjust `RecordingTui` or add a narrow TUI context so `handle_record` can take over the terminal before preflight/audio startup.
+- [x] **1.2.2** Preserve reuse of the same TUI context for early errors, waveform rendering, transcription animation, processing animation, and action picker.
+- [x] **1.2.3** Refactor `handle_record` so TUI initialization happens before `AudioRecorder::start_recording()`.
+- [x] **1.2.4** Update sample-rate-dependent state after audio startup succeeds without requiring a second terminal takeover.
+- [x] **1.2.5** Route no-input-device, configured-device-not-found, device-config, stream-create, and stream-start failures through the TUI error screen.
+- [x] **1.2.6** Add macOS microphone permission remediation text for likely permission/device-denial startup errors.
+- [x] **1.2.7** Add tests for startup-error formatting or routing without real audio hardware.
+- [x] **1.2.8** Verify: `cargo check`
+- [x] **1.2.9** Verify: `cargo test recording::tui`
+- [x] **1.2.10** Verify: `cargo test commands::record`
 
 ### Spec 1.3 — Record Preflight Before Audio Recording
 
