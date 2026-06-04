@@ -89,15 +89,15 @@ Depends on: `1.2`
 
 Files: `src/commands/record.rs`, `src/recording/tui.rs`, `src/recording/ffmpeg.rs`, `src/recording/storage.rs`, `src/recording/audio.rs`
 
-- [ ] **1.4.1** Add narrow error formatting for record TUI dialogs that includes primary error, useful cause chain/root cause, and concrete next step when available.
-- [ ] **1.4.2** Update record error display paths to use the full formatted error instead of only `anyhow::Error::to_string()`.
-- [ ] **1.4.3** Improve ffmpeg-not-found remediation for macOS with Homebrew, macOS without Homebrew, and Linux.
-- [ ] **1.4.4** Preserve runtime ffmpeg conversion error handling even when preflight exists.
-- [ ] **1.4.5** Ensure nested save/encode errors expose the root cause text in the TUI error screen.
-- [ ] **1.4.6** Add tests for error-chain formatting.
-- [ ] **1.4.7** Add tests for ffmpeg remediation message generation.
-- [ ] **1.4.8** Verify: `cargo check`
-- [ ] **1.4.9** Verify: `cargo test recording`
+- [x] **1.4.1** Add narrow error formatting for record TUI dialogs that includes primary error, useful cause chain/root cause, and concrete next step when available.
+- [x] **1.4.2** Update record error display paths to use the full formatted error instead of only `anyhow::Error::to_string()`.
+- [x] **1.4.3** Improve ffmpeg-not-found remediation for macOS with Homebrew, macOS without Homebrew, and Linux.
+- [x] **1.4.4** Preserve runtime ffmpeg conversion error handling even when preflight exists.
+- [x] **1.4.5** Ensure nested save/encode errors expose the root cause text in the TUI error screen.
+- [x] **1.4.6** Add tests for error-chain formatting.
+- [x] **1.4.7** Add tests for ffmpeg remediation message generation.
+- [x] **1.4.8** Verify: `cargo check`
+- [x] **1.4.9** Verify: `cargo test recording`
 
 ### Review R1 — Record Flow Integration Review
 

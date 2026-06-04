@@ -133,3 +133,45 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 4: Spec 1.4 — Error Dialog Detail And ffmpeg Messaging
+
+Accomplished:
+- Added shared record TUI error formatting that shows primary error, cause chain, root cause when nested, and known next steps.
+- Routed record TUI error display paths, including transcription failure dialogs, through the shared full-chain formatter.
+- Improved missing-ffmpeg remediation for macOS with Homebrew, macOS without Homebrew, Linux, and other platforms.
+- Preserved runtime ffmpeg lookup/conversion error handling in `AudioRecorder::convert_with_ffmpeg` while keeping preflight checks.
+- Added tests for nested recording error-chain formatting and ffmpeg remediation message generation.
+- Marked all Spec 1.4 tasks complete in `PLAN.md` as they were completed.
+
+Decisions made:
+- Replaced the narrow startup formatter with `format_recording_error` instead of adding another parallel TUI formatter.
+- Kept ffmpeg remediation generation inside `src/recording/ffmpeg.rs` so both preflight and runtime conversion use the same missing-ffmpeg message through `find_ffmpeg`.
+
+Files changed:
+- `src/commands/record.rs`
+- `src/recording/ffmpeg.rs`
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Reused `RecordingTui::show_error`, `show_recording_error`, `show_audio_startup_error`, and `audio_startup_next_step`.
+- Introduced private `format_recording_error` and `record_error_next_step` in `src/commands/record.rs`.
+- Introduced private ffmpeg remediation helpers `missing_ffmpeg_message`, `missing_ffmpeg_message_for`, `current_os`, `homebrew_likely_available`, and `command_exists` in `src/recording/ffmpeg.rs`.
+
+Verification results:
+- `cargo check` passed after removing an unused wrapper warning found on the first run.
+- `cargo test recording` passed with 5 tests.
+
+Constraints for later sessions:
+- Review R1 should treat `format_recording_error` as the established record TUI error-formatting path and avoid adding another record dialog formatter unless consolidating deliberately.
+- Runtime ffmpeg conversion still calls `find_ffmpeg`; future changes should not rely on preflight as the only ffmpeg failure surface.
+
+Obstacles encountered:
+- Initial `cargo check` passed but warned that the old startup formatter wrapper was unused; removed the wrapper and reran successfully.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.

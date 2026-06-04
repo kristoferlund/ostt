@@ -104,7 +104,7 @@ pub async fn handle_record(
         }
         Err(e) => {
             tracing::warn!("Transcription failed: {}", e);
-            let message = format!("Transcription failed: {e}");
+            let message = format_recording_error(&e);
             if let Err(display_err) = tui.show_error("Transcription Error", &message) {
                 tracing::warn!("Failed to show transcription error in TUI: {display_err}");
             }
@@ -164,7 +164,7 @@ fn show_recording_error(
     title: &str,
     error: anyhow::Error,
 ) -> anyhow::Error {
-    let message = error.to_string();
+    let message = format_recording_error(&error);
     show_recording_message(tui, title, &message);
     error
 }
@@ -215,7 +215,7 @@ where
 }
 
 fn show_audio_startup_error(tui: &mut RecordingTui, error: anyhow::Error) -> anyhow::Error {
-    let message = format_audio_startup_error(&error);
+    let message = format_recording_error(&error);
     show_recording_message(tui, "Recording Error", &message);
     error
 }
@@ -226,18 +226,26 @@ fn show_recording_message(tui: &mut RecordingTui, title: &str, message: &str) {
     }
 }
 
-fn format_audio_startup_error(error: &anyhow::Error) -> String {
+fn format_recording_error(error: &anyhow::Error) -> String {
     let primary = error.to_string();
     let details = error
         .chain()
         .skip(1)
         .map(ToString::to_string)
         .collect::<Vec<_>>();
-    let mut message = primary.clone();
+
+    let mut message = format!("Primary error: {primary}");
 
     if !details.is_empty() {
-        message.push_str("\n\nDetails: ");
+        message.push_str("\n\nCaused by: ");
         message.push_str(&details.join(" -> "));
+
+        if details.len() > 1 {
+            if let Some(root_cause) = details.last() {
+                message.push_str("\nRoot cause: ");
+                message.push_str(root_cause);
+            }
+        }
     }
 
     let searchable = if details.is_empty() {
@@ -246,12 +254,16 @@ fn format_audio_startup_error(error: &anyhow::Error) -> String {
         format!("{primary}\n{}", details.join("\n"))
     };
 
-    if let Some(next_step) = audio_startup_next_step(&searchable) {
+    if let Some(next_step) = record_error_next_step(&searchable) {
         message.push_str("\n\nNext step: ");
         message.push_str(next_step);
     }
 
     message
+}
+
+fn record_error_next_step(error_text: &str) -> Option<&'static str> {
+    audio_startup_next_step(error_text)
 }
 
 fn audio_startup_next_step(error_text: &str) -> Option<&'static str> {
@@ -654,11 +666,27 @@ mod tests {
         let error = anyhow::anyhow!("No audio input device available")
             .context("failed to start audio recording");
 
-        let message = format_audio_startup_error(&error);
+        let message = format_recording_error(&error);
 
-        assert!(message.contains("failed to start audio recording"));
-        assert!(message.contains("Details: No audio input device available"));
+        assert!(message.contains("Primary error: failed to start audio recording"));
+        assert!(message.contains("Caused by: No audio input device available"));
         assert!(message.contains("Next step: Connect or enable a microphone, then retry."));
+    }
+
+    #[test]
+    fn recording_error_includes_cause_chain_and_root_cause() {
+        let error = anyhow::anyhow!("ffmpeg exited with code 1")
+            .context("audio encoding failed")
+            .context("failed to stop recorder and encode audio")
+            .context("failed to save recording");
+
+        let message = format_recording_error(&error);
+
+        assert!(message.contains("Primary error: failed to save recording"));
+        assert!(message.contains(
+            "Caused by: failed to stop recorder and encode audio -> audio encoding failed -> ffmpeg exited with code 1"
+        ));
+        assert!(message.contains("Root cause: ffmpeg exited with code 1"));
     }
 
     #[test]
@@ -668,7 +696,7 @@ mod tests {
         )
         .context("failed to start audio recording");
 
-        let message = format_audio_startup_error(&error);
+        let message = format_recording_error(&error);
 
         assert!(message.contains("Run 'ostt config list-devices' and update [audio].device"));
     }
@@ -679,7 +707,7 @@ mod tests {
             .context("Failed to create audio input stream")
             .context("failed to start audio recording");
 
-        let message = format_audio_startup_error(&error);
+        let message = format_recording_error(&error);
 
         if cfg!(target_os = "macos") {
             assert!(message.contains(
