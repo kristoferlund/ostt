@@ -7,9 +7,10 @@ use std::thread;
 use std::time::Duration;
 
 const MACOS_ACCESSIBILITY_REMEDIATION: &str = "Grant accessibility permissions to your terminal app or OSTT launcher in System Settings > Privacy & Security > Accessibility.";
-
-#[cfg(not(target_os = "macos"))]
 const POPUP_TITLE: &str = "ostt";
+
+#[cfg(target_os = "macos")]
+const MACOS_POPUP_APPS: &[&str] = &["Ghostty", "kitty", "Alacritty"];
 
 pub(crate) fn notify_no_popup_error(title: &str, message: &str) {
     if let Err(err) = try_notify_no_popup_error(title, message) {
@@ -84,6 +85,13 @@ fn command_exists(command: &str) -> bool {
 }
 
 pub(crate) fn wait_for_focus_after_popup(config: &PasteConfig) {
+    #[cfg(target_os = "macos")]
+    {
+        if wait_for_macos_focus_after_popup(config) {
+            return;
+        }
+    }
+
     #[cfg(not(target_os = "macos"))]
     {
         use std::time::Instant;
@@ -112,6 +120,67 @@ pub(crate) fn wait_for_focus_after_popup(config: &PasteConfig) {
     }
 
     thread::sleep(Duration::from_millis(config.post_popup_delay_ms));
+}
+
+#[cfg(target_os = "macos")]
+fn wait_for_macos_focus_after_popup(config: &PasteConfig) -> bool {
+    use std::time::Instant;
+
+    let deadline = Instant::now() + Duration::from_millis(config.post_popup_delay_ms);
+    while Instant::now() < deadline {
+        let Some((app_name, window_title)) = active_macos_app_window() else {
+            return false;
+        };
+
+        if !is_macos_popup_window(&app_name, &window_title) {
+            tracing::debug!(
+                "Paste mode: focus returned to macOS app '{app_name}' window '{window_title}'"
+            );
+            return true;
+        }
+
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    tracing::debug!(
+        "Paste mode: macOS focus settle timeout reached after {}ms",
+        config.post_popup_delay_ms
+    );
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn active_macos_app_window() -> Option<(String, String)> {
+    let script = r#"
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set windowTitle to ""
+    try
+        set windowTitle to name of front window of frontApp
+    end try
+    return appName & tab & windowTitle
+end tell
+"#;
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (app_name, window_title) = text.trim_end().split_once('\t')?;
+    Some((app_name.to_string(), window_title.to_string()))
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_popup_window(app_name: &str, window_title: &str) -> bool {
+    MACOS_POPUP_APPS
+        .iter()
+        .any(|popup_app| app_name.eq_ignore_ascii_case(popup_app))
+        && window_title == POPUP_TITLE
 }
 
 pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()> {
@@ -493,5 +562,14 @@ mod tests {
         );
 
         assert!(!skipped);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_focus_detection_matches_only_popup_terminal_window() {
+        assert!(is_macos_popup_window("Ghostty", "ostt"));
+        assert!(is_macos_popup_window("kitty", "ostt"));
+        assert!(!is_macos_popup_window("Ghostty", "notes"));
+        assert!(!is_macos_popup_window("Safari", "ostt"));
     }
 }
