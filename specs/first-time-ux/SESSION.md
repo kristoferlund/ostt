@@ -403,3 +403,40 @@ Open questions:
 
 Out-of-scope observations:
 - `loop.sh` remains modified from prior work and was left untouched/uncommitted.
+
+## Session 10: Spec R2 — Final Popup UX Coherence Review
+
+Accomplished:
+- Read prior session notes, recent commits, the first-time UX spec, and the R2-listed source files.
+- Confirmed the remaining unchecked R2 task was `R2.7 Verify: cargo test`.
+- Ran `cargo test` successfully and marked R2.7 complete in `PLAN.md`.
+
+Decisions made:
+- Made no source changes because the scoped remaining task was verification-only and the established helper patterns already matched the prior R2 handoff.
+- Did not broaden into R2.6 clippy work because it remains marked failed due out-of-scope files from Session 9.
+
+Files changed:
+- `specs/first-time-ux/PLAN.md`
+- `specs/first-time-ux/SESSION.md`
+
+Helpers/APIs introduced or reused:
+- Reused the established record TUI error pattern: `RecordingTui::new_pending_audio`, `run_record_preflight`, `show_recording_error`, and `format_recording_error`.
+- Reused the established no-popup notification pattern: `paste::notify_no_popup_error` and `paste::notify_no_popup_error_if_popup_context`.
+- Reused the established popup context and explicit-output patterns: `OSTT_POPUP=1`, `commands::output::write_text`, and strict clipboard errors.
+- Introduced no new helpers or APIs.
+
+Verification results:
+- `cargo test` passed with 218 unit tests plus main/doc test targets with 0 tests.
+
+Constraints for later sessions:
+- R2.6 remains marked `[!]`; completing final verification still requires resolving the clippy warnings in the out-of-scope files listed in Session 9 and rerunning `cargo clippy -- -D warnings`.
+- Do not add parallel notification, preflight, or record TUI error-formatting helpers without replacing or consolidating the existing ones.
+
+Obstacles encountered:
+- None for `cargo test`.
+
+Open questions:
+- None.
+
+Out-of-scope observations:
+- `loop.sh` remains modified from prior work and was left untouched/uncommitted.
