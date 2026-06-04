@@ -188,6 +188,10 @@ fn build_spawn_command(program: &str, args: &[String]) -> Command {
     command
 }
 
+fn shell_env_assignments() -> String {
+    format!("{POPUP_CONTEXT_ENV}={POPUP_CONTEXT_VALUE}")
+}
+
 /// Builds the terminal command arguments for spawning ostt.
 fn build_terminal_args(
     terminal: TerminalEmulator,
@@ -225,7 +229,8 @@ fn build_terminal_args_for_platform(
             }
 
             let shell_cmd = format!(
-                "source ~/.bash_profile 2>/dev/null || source ~/.zprofile 2>/dev/null || source ~/.profile 2>/dev/null; clear; exec env {POPUP_CONTEXT_ENV}={POPUP_CONTEXT_VALUE} {}",
+                "source ~/.bash_profile 2>/dev/null || source ~/.zprofile 2>/dev/null || source ~/.profile 2>/dev/null; clear; exec env {} {}",
+                shell_env_assignments(),
                 ostt_cmd
             );
 
