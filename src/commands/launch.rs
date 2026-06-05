@@ -13,7 +13,7 @@ use crate::recording::active;
 
 const LAUNCH_FAILURE_TITLE: &str = "OSTT popup launch failed";
 const TERMINAL_SETUP_GUIDANCE: &str =
-    "Install Ghostty, kitty, or Alacritty, or set [popup].terminal in ~/.config/ostt/ostt.toml.";
+    "Install a supported terminal such as Ghostty, kitty, or Alacritty, or set [popup].terminal in ~/.config/ostt/ostt.toml.";
 const POPUP_CONTEXT_ENV: &str = "OSTT_POPUP";
 const POPUP_CONTEXT_VALUE: &str = "1";
 
@@ -516,7 +516,8 @@ mod tests {
             terminal_not_found_message("ghostty"),
             no_terminal_found_message(),
         ] {
-            assert!(message.contains("Install Ghostty, kitty, or Alacritty"));
+            assert!(message
+                .contains("Install a supported terminal such as Ghostty, kitty, or Alacritty"));
             assert!(message.contains("[popup].terminal"));
             assert!(message.contains("~/.config/ostt/ostt.toml"));
         }
