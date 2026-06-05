@@ -4,7 +4,7 @@
 //! mouse support, selection, and clipboard integration.
 
 use crate::history::TranscriptionEntry;
-use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
+use crate::ui::{render_app_layout, render_footer, render_title, render_toast, scroll, Toast};
 use anyhow::Result;
 use crossterm::{
     event::{
@@ -221,6 +221,12 @@ impl HistoryView {
             let list = List::new(items)
                 .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
+            let viewport_item_count = (list_area.height as usize / 2).max(1);
+            scroll::keep_selected_in_view(
+                &mut self.list_state,
+                viewport_item_count,
+                self.entries.len(),
+            );
             frame.render_stateful_widget(list, list_area, &mut self.list_state);
 
             render_footer(frame, layout.footer, "↑↓ select, ↵ copy, esc/q exit");

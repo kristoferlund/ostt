@@ -4,6 +4,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, ListState};
 use ratatui::Frame;
 
+use crate::ui::scroll::update_scroll_offset;
 use crate::ui::{render_app_layout, render_footer};
 
 use super::local_model_view_helpers::format_bytes;
@@ -12,7 +13,7 @@ use super::types::{LocalModelEntry, LocalModelsTui};
 pub(super) struct LocalModelListView;
 
 impl LocalModelListView {
-    pub(super) fn render(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
+    pub(super) fn render(frame: &mut Frame<'_>, tui: &mut LocalModelsTui) {
         let layout = render_app_layout(frame, frame.area());
         let body = Rect {
             x: layout.title.x,
@@ -30,7 +31,16 @@ impl LocalModelListView {
         );
 
         let selected_display_index = display_index_for_selected_model(tui);
-        let mut state = ListState::default().with_selected(selected_display_index);
+        update_scroll_offset(
+            &mut tui.scroll_offset,
+            selected_display_index,
+            body.height as usize,
+            items.len(),
+            crate::ui::scroll::DEFAULT_SCROLL_MARGIN,
+        );
+        let mut state = ListState::default()
+            .with_selected(selected_display_index)
+            .with_offset(tui.scroll_offset);
         // highlight_style is intentionally blank — selection bg is applied per-span below
         // so pill background colours are preserved on the selected row.
         frame.render_stateful_widget(

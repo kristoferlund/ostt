@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- List-based TUI screens now use consistent scroll-margin behavior across model, keyword, replace, history, and process action views.
+- `ostt model` now opens on the currently active model instead of the first row.
+
+### Fixed
+
+- Fixed `ostt model select whisper/<model>` for installed standard local Whisper model files that are not persisted in local model metadata.
+- Fixed test environment isolation so running the test suite cannot write to the user's real `~/.config/ostt/ostt.toml` when `XDG_CONFIG_HOME` is set.
+
 ## 0.0.20 - 2026-06-05
 
 ### Changed

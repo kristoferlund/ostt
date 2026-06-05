@@ -80,6 +80,7 @@ pub(crate) struct LocalModelsTui {
     pub selected: usize,
     pub mode: LocalModelsMode,
     pub downloaded_model_disk_usage_bytes: u64,
+    pub scroll_offset: usize,
     pub toast: Option<crate::ui::Toast>,
     /// Model ID currently loaded in the daemon, if any.
     pub daemon_model_id: Option<String>,
@@ -90,11 +91,16 @@ impl LocalModelsTui {
         entries: Vec<LocalModelEntry>,
         downloaded_model_disk_usage_bytes: u64,
     ) -> Self {
+        let selected = entries
+            .iter()
+            .position(|entry| entry.is_active)
+            .unwrap_or(0);
         Self {
             entries,
-            selected: 0,
+            selected,
             mode: LocalModelsMode::Browse,
             downloaded_model_disk_usage_bytes,
+            scroll_offset: 0,
             toast: None,
             daemon_model_id: None,
         }

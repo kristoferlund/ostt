@@ -4,7 +4,7 @@
 //! and lets the user select one via keyboard navigation.
 
 use crate::config::file::ProcessAction;
-use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title};
+use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title, scroll};
 use anyhow::Result;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
@@ -50,6 +50,7 @@ pub fn render_process_view(
     let list =
         List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
+    scroll::keep_selected_in_view(list_state, list_area.height as usize, actions.len());
     frame.render_stateful_widget(list, list_area, list_state);
 
     render_footer(frame, layout.footer, "↑/↓ select, ↵ confirm, esc/q cancel");

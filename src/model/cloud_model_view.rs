@@ -1,7 +1,7 @@
 use crate::config::{self, SelectedModel};
 use crate::model::UserQuit;
 use crate::transcription::{self, TranscriptionProvider};
-use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
+use crate::ui::{render_app_layout, render_footer, render_title, render_toast, scroll, Toast};
 use crossterm::event::{self, Event, KeyCode};
 use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Modifier, Style};
@@ -65,6 +65,7 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
 
     let mut toast: Option<Toast> = None;
     let mut selected = active_cloud_model_index(&sections).unwrap_or(0);
+    let mut scroll_offset = 0;
     let mut mode = CloudModelMode::Browse;
 
     loop {
@@ -80,7 +81,16 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
                     render_title(frame, layout.title, "Cloud models");
                     let (items, selected_display_index) =
                         cloud_model_list_items(&sections, selected);
-                    let mut state = ListState::default().with_selected(selected_display_index);
+                    scroll::update_scroll_offset(
+                        &mut scroll_offset,
+                        selected_display_index,
+                        layout.body.height as usize,
+                        items.len(),
+                        scroll::DEFAULT_SCROLL_MARGIN,
+                    );
+                    let mut state = ListState::default()
+                        .with_selected(selected_display_index)
+                        .with_offset(scroll_offset);
                     frame.render_stateful_widget(
                         List::new(items).highlight_style(Style::default()),
                         layout.body,

@@ -729,13 +729,15 @@ pub fn activate_model_for_provider(
     model_id: &str,
 ) -> anyhow::Result<SelectedModel> {
     let path = resolve_installed_model_path(model_id)?;
-    let entry = find_model_entry_for_provider(provider_id, model_id)?;
     if !path.exists() {
         return Err(ModelError::NotDownloaded(model_id.to_string()).into());
     }
-    config::save_selected_model(&entry.provider_id, model_id)?;
+    if provider_id != "whisper" {
+        find_model_entry_for_provider(provider_id, model_id)?;
+    }
+    config::save_selected_model(provider_id, model_id)?;
     Ok(SelectedModel {
-        provider_id: entry.provider_id,
+        provider_id: provider_id.to_string(),
         model_id: model_id.to_string(),
     })
 }
@@ -950,6 +952,7 @@ mod tests {
     fn models_dir_defaults_to_home_local_share() {
         let _guard = test_env_lock();
         let previous_home = env::var_os("HOME");
+        let previous_xdg_config_home = env::var_os("XDG_CONFIG_HOME");
         let previous_xdg_data_home = env::var_os("XDG_DATA_HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -958,6 +961,7 @@ mod tests {
         let home = env::temp_dir().join(format!("ostt-models-home-test-{unique}"));
         set_test_models_dir(None);
         env::set_var("HOME", &home);
+        env::set_var("XDG_CONFIG_HOME", home.join(".config"));
         env::remove_var("XDG_DATA_HOME");
 
         assert_eq!(
@@ -977,6 +981,11 @@ mod tests {
             env::set_var("XDG_DATA_HOME", previous_xdg_data_home);
         } else {
             env::remove_var("XDG_DATA_HOME");
+        }
+        if let Some(previous_xdg_config_home) = previous_xdg_config_home {
+            env::set_var("XDG_CONFIG_HOME", previous_xdg_config_home);
+        } else {
+            env::remove_var("XDG_CONFIG_HOME");
         }
     }
 

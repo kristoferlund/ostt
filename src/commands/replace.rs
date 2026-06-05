@@ -1,5 +1,5 @@
 use crate::config::OsttConfig;
-use crate::ui::{render_app_layout, render_footer, render_title};
+use crate::ui::{render_app_layout, render_footer, render_title, scroll};
 use anyhow::Result;
 use ratatui::crossterm::{
     event::{
@@ -234,6 +234,7 @@ impl ReplaceView {
         let list = List::new(items)
             .block(Block::default())
             .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White));
+        scroll::keep_selected_in_view(list_state, area.height as usize, replace_rules.len());
         frame.render_stateful_widget(list, area, list_state);
     }
 

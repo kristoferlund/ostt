@@ -103,7 +103,7 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
             last_daemon_probe = std::time::Instant::now();
         }
 
-        terminal.draw(|frame| render_local_models(frame, &tui))?;
+        terminal.draw(|frame| render_local_models(frame, &mut tui))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
@@ -118,9 +118,10 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
     Ok(())
 }
 
-fn render_local_models(frame: &mut Frame<'_>, tui: &LocalModelsTui) {
+fn render_local_models(frame: &mut Frame<'_>, tui: &mut LocalModelsTui) {
     // Dialog modes render over the browse list so users keep their place.
-    match &tui.mode {
+    let mode = tui.mode.clone();
+    match &mode {
         LocalModelsMode::Browse => LocalModelListView::render(frame, tui),
         LocalModelsMode::Info { entry } => {
             LocalModelInfoView::render(frame, entry);
@@ -907,6 +908,7 @@ mod tests {
     fn with_isolated_models_dir(test: impl FnOnce(PathBuf)) {
         let _guard = test_env_lock();
         let previous_home = std::env::var_os("HOME");
+        let previous_xdg_config_home = std::env::var_os("XDG_CONFIG_HOME");
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time before unix epoch")
@@ -915,6 +917,7 @@ mod tests {
         let models_dir = dir.join("models");
         set_test_models_dir(Some(models_dir.clone()));
         std::env::set_var("HOME", &dir);
+        std::env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
 
         test(models_dir);
 
@@ -923,6 +926,11 @@ mod tests {
             std::env::set_var("HOME", previous_home);
         } else {
             std::env::remove_var("HOME");
+        }
+        if let Some(previous_xdg_config_home) = previous_xdg_config_home {
+            std::env::set_var("XDG_CONFIG_HOME", previous_xdg_config_home);
+        } else {
+            std::env::remove_var("XDG_CONFIG_HOME");
         }
         let _ = fs::remove_dir_all(dir);
     }
@@ -941,6 +949,53 @@ mod tests {
             category: None,
             group_id: None,
         }
+    }
+
+    #[test]
+    fn model_picker_opens_on_active_model() {
+        let entries = vec![
+            LocalModelEntry {
+                id: "whisper-1".to_string(),
+                provider_id: "openai".to_string(),
+                name: "Whisper".to_string(),
+                description: String::new(),
+                size_mb: 0,
+                is_downloaded: true,
+                is_active: false,
+                is_daemon_loaded: false,
+                is_available_in_registry: false,
+                languages: Vec::new(),
+                url: String::new(),
+                recommended_hardware: None,
+                category: None,
+                sha256: None,
+                group_id: Some("OpenAI".to_string()),
+            },
+            LocalModelEntry {
+                id: "base".to_string(),
+                provider_id: "whisper".to_string(),
+                name: "Base".to_string(),
+                description: String::new(),
+                size_mb: 0,
+                is_downloaded: true,
+                is_active: true,
+                is_daemon_loaded: false,
+                is_available_in_registry: true,
+                languages: Vec::new(),
+                url: String::new(),
+                recommended_hardware: None,
+                category: None,
+                sha256: None,
+                group_id: Some("Local models".to_string()),
+            },
+        ];
+
+        let tui = types::LocalModelsTui::new(entries, 0);
+
+        assert_eq!(
+            tui.selected_entry().map(|entry| entry.id.as_str()),
+            Some("base")
+        );
     }
 
     #[test]

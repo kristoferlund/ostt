@@ -101,6 +101,8 @@ mod tests {
         let _guard = crate::transcription::local_models::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous_home = std::env::var_os("HOME");
+        let previous_xdg_config_home = std::env::var_os("XDG_CONFIG_HOME");
 
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -109,6 +111,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("ostt-model-test-{unique}"));
         fs::create_dir_all(&dir).expect("create temp dir");
         std::env::set_var("HOME", &dir);
+        std::env::set_var("XDG_CONFIG_HOME", dir.join(".config"));
         crate::transcription::local_models::set_test_models_dir(Some(dir.join("models")));
 
         config::save_selected_model("openai", "whisper-1").expect("save cloud selection");
@@ -122,6 +125,16 @@ mod tests {
         assert_eq!(selected.model_id, "whisper-1");
 
         crate::transcription::local_models::set_test_models_dir(None);
+        if let Some(previous_home) = previous_home {
+            std::env::set_var("HOME", previous_home);
+        } else {
+            std::env::remove_var("HOME");
+        }
+        if let Some(previous_xdg_config_home) = previous_xdg_config_home {
+            std::env::set_var("XDG_CONFIG_HOME", previous_xdg_config_home);
+        } else {
+            std::env::remove_var("XDG_CONFIG_HOME");
+        }
         let _ = fs::remove_dir_all(&dir);
     }
 }

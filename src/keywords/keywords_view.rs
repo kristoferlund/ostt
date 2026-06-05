@@ -4,7 +4,7 @@
 //! mouse support, selection, and inline editing.
 
 use crate::keywords::KeywordsManager;
-use crate::ui::{render_app_layout, render_footer, render_title};
+use crate::ui::{render_app_layout, render_footer, render_title, scroll};
 use anyhow::Result;
 use ratatui::crossterm::{
     event::{
@@ -322,6 +322,7 @@ impl KeywordsView {
         let list =
             List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
 
+        scroll::keep_selected_in_view(list_state, area.height as usize, keywords.len());
         frame.render_stateful_widget(list, area, list_state);
     }
 
