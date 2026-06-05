@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.20 - 2026-06-05
+
 ### Changed
 
 - Popup recording now opens before audio setup completes, so first-run setup, microphone, model, API key, and ffmpeg errors appear inside the popup instead of failing silently.

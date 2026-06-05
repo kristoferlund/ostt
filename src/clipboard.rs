@@ -40,10 +40,10 @@ pub(crate) fn set_clipboard(text: &str) -> anyhow::Result<()> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        if std::env::var("WAYLAND_DISPLAY").is_ok() {
-            if write_command("wl-copy", &["--type", "text/plain", "--trim-newline"], text).is_ok() {
-                return Ok(());
-            }
+        if std::env::var("WAYLAND_DISPLAY").is_ok()
+            && write_command("wl-copy", &["--type", "text/plain", "--trim-newline"], text).is_ok()
+        {
+            return Ok(());
         }
 
         write_command("xclip", &["-selection", "clipboard", "-in", "-quiet"], text)
