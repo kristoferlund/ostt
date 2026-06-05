@@ -17,15 +17,19 @@ use crate::{config, history, transcription};
 /// * `process` - Optional processing action: None = no processing, Some("") = show picker, Some(id) = use action
 pub async fn handle_retry(
     config_data: &config::OsttConfig,
-    recording_index: Option<usize>,
-    clipboard: bool,
-    paste: bool,
-    output_file: Option<String>,
-    process: Option<String>,
-    model_override: Option<config::SelectedModel>,
-    param_overrides: &[String],
+    options: RetryOptions<'_>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Retry Command ===");
+
+    let RetryOptions {
+        recording_index,
+        clipboard,
+        paste,
+        output_file,
+        process,
+        model_override,
+        param_overrides,
+    } = options;
 
     let all_recordings = recording_history::get_all_recordings()?;
 
@@ -87,4 +91,14 @@ pub async fn handle_retry(
             Err(anyhow::anyhow!("Transcription failed: {e}"))
         }
     }
+}
+
+pub struct RetryOptions<'a> {
+    pub recording_index: Option<usize>,
+    pub clipboard: bool,
+    pub paste: bool,
+    pub output_file: Option<String>,
+    pub process: Option<String>,
+    pub model_override: Option<config::SelectedModel>,
+    pub param_overrides: &'a [String],
 }

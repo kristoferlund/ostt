@@ -24,11 +24,12 @@ Instructions:
 2. Read only the source files that are explicitly referenced in the spec files (check the "Files Modified" and "Specification" sections for file paths). Do NOT do a full codebase exploration — the specs already contain the relevant file paths and context. Read each referenced file to understand its current state, types, and patterns.
 3. Analyze dependencies between specs — which specs must be completed before others.
 4. Determine an execution order: start with the smallest, most isolated changes first, then build toward larger changes. Specs with dependencies on other specs go after their dependencies.
-5. Decompose each spec into atomic implementation tasks. Each task should be:
+5. Add lightweight review sections after major clusters of dependent work when useful for coherence. Review sections should inspect prior session notes and recent commits, align existing helpers/patterns, make only small consistency fixes, and stop/ask before any larger redesign.
+6. Decompose each spec into atomic implementation tasks. Each task should be:
    - Small enough for one focused action (create a type, modify a function, add a test)
    - Ordered within its spec group (types before logic, logic before tests)
    - Verifiable (ends with a concrete check: cargo check, cargo test, cargo clippy, etc.)
-6. Include verification tasks within each spec group (e.g., "Verify: cargo test passes").
+7. Include verification tasks within each spec group (e.g., "Verify: cargo test passes").
 
 Write PLAN.md with the following structure:
 
@@ -47,6 +48,7 @@ Write PLAN.md with the following structure:
 ### Tasks
 - One section per spec, in execution order (not necessarily spec number order)
 - IMPORTANT: Each section (or sub-section) can have AT MOST 10 tasks. If a spec has more than 10 tasks, split it into sub-sections (e.g., 2.1.A, 2.1.B, 2.1.C). Each sub-section is the unit of work for one session — the agent completes one sub-section, commits, and stops.
+- Add review sections after major clusters when useful. Use IDs like `R1.1`, `R1.2`. Review sections are also one-session units and have at most 10 tasks.
 - Each section/sub-section contains a checklist of atomic tasks with `- [ ]` checkboxes
 - Each task has a bold ID (e.g., **1.4.1**) and a concise description
 - Specs that depend on others have a "Depends on: X.X" note
@@ -62,12 +64,20 @@ Explain:
 - When to stop early (repeated verification failure)
 - The agent must git commit before stopping every time
 
+### Handoff Protocol
+Explain:
+- SESSION.md is the continuity layer between fresh agent sessions.
+- Before editing, each session must read prior session notes and recent commits, then reuse established helpers and patterns unless clearly unsuitable.
+- Do not create parallel helpers for the same concern without documenting why the existing helper is unsuitable.
+- At the end of every session, append a handoff note with decisions made, files changed, helpers/APIs introduced or reused, verification results, constraints for later sessions, and open questions.
+
 ### Session Prompt Template
 Include a ready-to-paste prompt block that future sessions will use. The prompt must:
 - Reference PLAN.md, SESSION.md and the spec files folder by absolute path
 - Tell the agent to read the plan, find the next incomplete section or sub-section (the first one with unchecked tasks), read its spec file
 - Tell the agent to study the relevant source files in the target codebase
-- Tell the agent to read the notes from previous sessions
+- Tell the agent to read the notes from previous sessions and recent commits before editing
+- Tell the agent to reuse existing helpers/patterns from previous sessions and avoid creating parallel helpers unless documented
 - Tell the agent to implement tasks in order, running verification after each
 - CRITICAL: Tell the agent to update PLAN.md IMMEDIATELY after completing each task (change `- [ ]` to `- [x]`) BEFORE starting the next task. This must not be batched — it is essential for crash recovery so interrupted sessions don't redo completed work.
 - Tell the agent to git commit all changes before stopping
@@ -75,7 +85,7 @@ Include a ready-to-paste prompt block that future sessions will use. The prompt 
 - Include rules: no skipping tasks, no reordering, SCOPE is one section/sub-section only
 - Include the failure protocol: if verification fails twice, mark task with [!], commit partial work, stop
 - Restrict file modifications to the target codebase, PLAN.md, and SESSION.md only
-- Tell the agent to APPEND (not overwrite) a session summary to the end of SESSION.md (in the same directory as PLAN.md). Use heading `## Session N: Spec X.Y — <title>` (increment N). Include: what was accomplished, obstacles encountered, out-of-scope observations.
+- Tell the agent to APPEND (not overwrite) a session summary to the end of SESSION.md (in the same directory as PLAN.md). Use heading `## Session N: Spec X.Y — <title>` (increment N). Include: what was accomplished, decisions made, files changed, helpers/APIs introduced or reused, verification results, constraints for later sessions, obstacles encountered, open questions, out-of-scope observations.
 
 Verification commands for this project (Rust):
 - `cargo check`

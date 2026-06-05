@@ -109,11 +109,7 @@ impl TranscriptionConfig {
 
     /// Returns the built-in whisper defaults only for whisper transcription requests.
     pub fn local_config(&self) -> Option<&LocalTranscriptionConfig> {
-        if self.provider == TranscriptionProvider::Whisper {
-            None
-        } else {
-            None
-        }
+        None
     }
 
     pub fn option_bool(&self, name: &str) -> Option<bool> {

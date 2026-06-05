@@ -6,10 +6,92 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
-#[cfg(not(target_os = "macos"))]
+const MACOS_ACCESSIBILITY_REMEDIATION: &str = "Grant accessibility permissions to your terminal app or OSTT launcher in System Settings > Privacy & Security > Accessibility.";
 const POPUP_TITLE: &str = "ostt";
 
+#[cfg(target_os = "macos")]
+const MACOS_POPUP_APPS: &[&str] = &["Ghostty", "kitty", "Alacritty"];
+
+pub(crate) fn notify_no_popup_error(title: &str, message: &str) {
+    if let Err(err) = try_notify_no_popup_error(title, message) {
+        tracing::debug!("No-popup notification failed: {err}");
+        eprintln!("{title}: {message}");
+    }
+}
+
+pub(crate) fn notify_no_popup_error_if_popup_context(title: &str, message: &str) -> bool {
+    notify_no_popup_error_if_popup_context_with(
+        title,
+        message,
+        is_popup_context(),
+        notify_no_popup_error,
+    )
+}
+
+fn notify_no_popup_error_if_popup_context_with<F>(
+    title: &str,
+    message: &str,
+    is_popup_context: bool,
+    notify: F,
+) -> bool
+where
+    F: FnOnce(&str, &str),
+{
+    if !is_popup_context {
+        return false;
+    }
+    notify(title, message);
+    true
+}
+
+fn is_popup_context() -> bool {
+    std::env::var("OSTT_POPUP").is_ok_and(|value| value == "1")
+}
+
+#[cfg(target_os = "macos")]
+fn try_notify_no_popup_error(title: &str, message: &str) -> anyhow::Result<()> {
+    let script = format!(
+        "display alert {} message {} as critical",
+        applescript_string(title),
+        applescript_string(message)
+    );
+    run_status(Command::new("osascript").args(["-e", &script]), "osascript")
+}
+
+#[cfg(target_os = "macos")]
+fn applescript_string(value: &str) -> String {
+    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn try_notify_no_popup_error(title: &str, message: &str) -> anyhow::Result<()> {
+    if !command_exists("notify-send") {
+        anyhow::bail!("notify-send not found");
+    }
+    run_status(
+        Command::new("notify-send").args([title, message]),
+        "notify-send",
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn command_exists(command: &str) -> bool {
+    Command::new("which")
+        .arg(command)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
+}
+
 pub(crate) fn wait_for_focus_after_popup(config: &PasteConfig) {
+    #[cfg(target_os = "macos")]
+    {
+        if wait_for_macos_focus_after_popup(config) {
+            return;
+        }
+    }
+
     #[cfg(not(target_os = "macos"))]
     {
         use std::time::Instant;
@@ -40,6 +122,67 @@ pub(crate) fn wait_for_focus_after_popup(config: &PasteConfig) {
     thread::sleep(Duration::from_millis(config.post_popup_delay_ms));
 }
 
+#[cfg(target_os = "macos")]
+fn wait_for_macos_focus_after_popup(config: &PasteConfig) -> bool {
+    use std::time::Instant;
+
+    let deadline = Instant::now() + Duration::from_millis(config.post_popup_delay_ms);
+    while Instant::now() < deadline {
+        let Some((app_name, window_title)) = active_macos_app_window() else {
+            return false;
+        };
+
+        if !is_macos_popup_window(&app_name, &window_title) {
+            tracing::debug!(
+                "Paste mode: focus returned to macOS app '{app_name}' window '{window_title}'"
+            );
+            return true;
+        }
+
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    tracing::debug!(
+        "Paste mode: macOS focus settle timeout reached after {}ms",
+        config.post_popup_delay_ms
+    );
+    true
+}
+
+#[cfg(target_os = "macos")]
+fn active_macos_app_window() -> Option<(String, String)> {
+    let script = r#"
+tell application "System Events"
+    set frontApp to first application process whose frontmost is true
+    set appName to name of frontApp
+    set windowTitle to ""
+    try
+        set windowTitle to name of front window of frontApp
+    end try
+    return appName & tab & windowTitle
+end tell
+"#;
+    let output = Command::new("osascript")
+        .args(["-e", script])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let (app_name, window_title) = text.trim_end().split_once('\t')?;
+    Some((app_name.to_string(), window_title.to_string()))
+}
+
+#[cfg(target_os = "macos")]
+fn is_macos_popup_window(app_name: &str, window_title: &str) -> bool {
+    MACOS_POPUP_APPS
+        .iter()
+        .any(|popup_app| app_name.eq_ignore_ascii_case(popup_app))
+        && window_title == POPUP_TITLE
+}
+
 pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()> {
     tracing::debug!(
         "Paste mode: paste_key='{}', restore_clipboard={}, restore_delay_ms={}",
@@ -48,6 +191,30 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
         config.restore_delay_ms
     );
 
+    paste_text_with_handlers(
+        text,
+        config,
+        read_clipboard,
+        set_clipboard,
+        send_paste_key,
+        thread::sleep,
+    )
+}
+
+fn paste_text_with_handlers<R, S, K, L>(
+    text: &str,
+    config: &PasteConfig,
+    mut read_clipboard: R,
+    mut set_clipboard: S,
+    mut send_paste_key: K,
+    mut sleep: L,
+) -> anyhow::Result<()>
+where
+    R: FnMut() -> anyhow::Result<String>,
+    S: FnMut(&str) -> anyhow::Result<()>,
+    K: FnMut(&str) -> anyhow::Result<()>,
+    L: FnMut(Duration),
+{
     let previous_clipboard = if config.restore_clipboard {
         match read_clipboard() {
             Ok(value) => Some(value),
@@ -67,14 +234,10 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
     log_active_window("before paste key");
     if let Err(err) = send_paste_key(&config.paste_key) {
         tracing::warn!("Failed to send paste key '{}': {err}", config.paste_key);
-        eprintln!(
-            "Warning: Failed to send paste key '{}'. Text was copied to the clipboard.",
-            config.paste_key
-        );
-        return Ok(());
+        return Err(err.context(paste_key_failure_message(&config.paste_key)));
     }
 
-    thread::sleep(Duration::from_millis(config.restore_delay_ms));
+    sleep(Duration::from_millis(config.restore_delay_ms));
 
     if let Some(previous_clipboard) = previous_clipboard {
         if let Err(err) = set_clipboard(&previous_clipboard) {
@@ -84,6 +247,20 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
     }
 
     Ok(())
+}
+
+fn paste_key_failure_message(paste_key: &str) -> String {
+    paste_key_failure_message_for_os(paste_key, cfg!(target_os = "macos"))
+}
+
+fn paste_key_failure_message_for_os(paste_key: &str, is_macos: bool) -> String {
+    let mut message =
+        format!("Failed to send paste key '{paste_key}'. Text was copied to the clipboard.");
+    if is_macos {
+        message.push_str("\nNext step: ");
+        message.push_str(MACOS_ACCESSIBILITY_REMEDIATION);
+    }
+    message
 }
 
 pub(crate) fn spawn_detached_paste_helper(text: &str) -> anyhow::Result<()> {
@@ -127,7 +304,9 @@ pub(crate) fn handle_paste_helper(config: &crate::config::OsttConfig) -> anyhow:
         .read_to_string(&mut text)
         .context("failed to read paste helper input")?;
     wait_for_focus_after_popup(&config.output.paste);
-    paste_text(&text, &config.output.paste)
+    paste_text(&text, &config.output.paste).inspect_err(|err| {
+        notify_no_popup_error_if_popup_context("Paste Failed", &err.to_string());
+    })
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -163,7 +342,7 @@ fn active_hyprland_window_title() -> Option<String> {
 fn send_paste_key(paste_key: &str) -> anyhow::Result<()> {
     #[cfg(target_os = "macos")]
     {
-        return send_macos_key(paste_key);
+        send_macos_key(paste_key)
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -306,4 +485,91 @@ fn run_status(command: &mut Command, name: &str) -> anyhow::Result<()> {
         anyhow::bail!("{name} failed with status {status}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::RefCell;
+
+    #[test]
+    fn paste_key_failure_returns_error_and_leaves_text_in_clipboard() {
+        let config = PasteConfig {
+            restore_clipboard: true,
+            restore_delay_ms: 0,
+            ..PasteConfig::default()
+        };
+        let clipboard_writes = RefCell::new(Vec::new());
+
+        let err = paste_text_with_handlers(
+            "new text",
+            &config,
+            || Ok("old text".to_string()),
+            |value| {
+                clipboard_writes.borrow_mut().push(value.to_string());
+                Ok(())
+            },
+            |_| Err(anyhow::anyhow!("xdotool failed")),
+            |_| {},
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("Text was copied to the clipboard"));
+        assert_eq!(clipboard_writes.into_inner(), vec!["new text"]);
+    }
+
+    #[test]
+    fn macos_paste_failure_message_mentions_accessibility() {
+        let message = paste_key_failure_message_for_os("cmd+v", true);
+
+        assert!(message.contains("Privacy & Security > Accessibility"));
+        assert!(message.contains("OSTT launcher"));
+    }
+
+    #[test]
+    fn non_macos_paste_failure_message_omits_accessibility() {
+        let message = paste_key_failure_message_for_os("ctrl+v", false);
+
+        assert!(!message.contains("Privacy & Security > Accessibility"));
+    }
+
+    #[test]
+    fn popup_context_notification_helper_only_notifies_in_popup_context() {
+        let calls = RefCell::new(Vec::new());
+
+        let notified = notify_no_popup_error_if_popup_context_with(
+            "Paste Failed",
+            "paste failed",
+            true,
+            |title, message| {
+                calls
+                    .borrow_mut()
+                    .push((title.to_string(), message.to_string()))
+            },
+        );
+
+        assert!(notified);
+        assert_eq!(
+            calls.into_inner(),
+            vec![("Paste Failed".to_string(), "paste failed".to_string())]
+        );
+
+        let skipped = notify_no_popup_error_if_popup_context_with(
+            "Paste Failed",
+            "paste failed",
+            false,
+            |_, _| panic!("notification should not run outside popup context"),
+        );
+
+        assert!(!skipped);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_focus_detection_matches_only_popup_terminal_window() {
+        assert!(is_macos_popup_window("Ghostty", "ostt"));
+        assert!(is_macos_popup_window("kitty", "ostt"));
+        assert!(!is_macos_popup_window("Ghostty", "notes"));
+        assert!(!is_macos_popup_window("Safari", "ostt"));
+    }
 }

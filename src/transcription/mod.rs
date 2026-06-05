@@ -21,7 +21,7 @@ pub mod provider;
 
 pub use animation::TranscriptionAnimation;
 pub use api::{transcribe, TranscriptionConfig, TranscriptionResponse};
-pub(crate) use context::build_context;
+pub(crate) use context::{build_context, build_preflight_context};
 pub use model::{all_models, find_model, models_for_provider, ModelOptionKind, ModelSpec};
 pub use provider::TranscriptionProvider;
 
@@ -82,9 +82,8 @@ pub fn config_for_selected_model(
         )
     })?;
 
-    let api_key = crate::config::get_api_key(&selected_model.provider_id)?.ok_or_else(|| {
-        anyhow::anyhow!("No API key for {}. Please run 'ostt auth'", provider.name())
-    })?;
+    let api_key = crate::config::get_api_key(&selected_model.provider_id)?
+        .ok_or_else(|| anyhow::anyhow!(missing_api_key_guidance(provider.name())))?;
 
     Ok(TranscriptionConfig::new_cloud(
         provider,
@@ -111,6 +110,12 @@ fn external_profile_config<'a>(
                 selected_model.model_id
             )
         })
+}
+
+fn missing_api_key_guidance(provider_name: &str) -> String {
+    format!(
+        "No API key for {provider_name}. Run 'ostt auth' to add an API key, then 'ostt model' to confirm or choose a model."
+    )
 }
 
 pub(crate) fn local_inference_backend() -> &'static str {
@@ -202,5 +207,21 @@ fn local_gpu_devices() -> Vec<String> {
         }
 
         devices
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_api_key_guidance_mentions_auth_and_model_steps() {
+        let message = missing_api_key_guidance("OpenAI");
+
+        assert!(message.contains("No API key for OpenAI"));
+        assert!(message.contains("ostt auth"));
+        assert!(message.contains("add an API key"));
+        assert!(message.contains("ostt model"));
+        assert!(message.contains("confirm or choose a model"));
     }
 }

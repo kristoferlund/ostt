@@ -733,13 +733,15 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 .transpose()?;
             commands::handle_retry(
                 &config_data,
-                index,
-                clipboard,
-                paste,
-                output,
-                process,
-                model_override,
-                &cli.params,
+                commands::retry::RetryOptions {
+                    recording_index: index,
+                    clipboard,
+                    paste,
+                    output_file: output,
+                    process,
+                    model_override,
+                    param_overrides: &cli.params,
+                },
             )
             .await?;
         }
@@ -759,13 +761,15 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 .transpose()?;
             commands::handle_transcribe(
                 &config_data,
-                file,
-                clipboard,
-                paste,
-                output,
-                process,
-                model_override,
-                &cli.params,
+                commands::transcribe::TranscribeOptions {
+                    file,
+                    clipboard,
+                    paste,
+                    output_file: output,
+                    process,
+                    model_override,
+                    param_overrides: &cli.params,
+                },
             )
             .await?;
         }

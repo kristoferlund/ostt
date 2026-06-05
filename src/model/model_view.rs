@@ -25,16 +25,13 @@ impl ModelView {
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
         tracing::debug!("Model view started");
-        loop {
-            let result = super::local_model_view::run(&mut self.terminal).await;
-            if let Err(e) = result {
-                if e.downcast_ref::<UserQuit>().is_some() {
-                    tracing::debug!("Model view exited via Ctrl+C");
-                    break;
-                }
+        let result = super::local_model_view::run(&mut self.terminal).await;
+        if let Err(e) = result {
+            if e.downcast_ref::<UserQuit>().is_some() {
+                tracing::debug!("Model view exited via Ctrl+C");
+            } else {
                 return Err(e);
             }
-            break;
         }
         Ok(())
     }

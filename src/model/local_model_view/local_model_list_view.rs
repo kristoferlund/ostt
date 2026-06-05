@@ -90,7 +90,7 @@ fn push_grouped_model_items(
             }
             current_group = Some(group);
         }
-        let is_selected = selected_id.as_deref() == Some(model_key(entry).as_str());
+        let is_selected = selected_id == Some(model_key(entry).as_str());
         items.push(local_model_list_item(entry, is_selected));
     }
 }

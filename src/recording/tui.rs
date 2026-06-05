@@ -24,6 +24,8 @@ use crate::ui::is_cancel_key;
 
 use super::visualizations::{resize_waveform, update_waveform, SpectrumAnalyzer};
 
+const PENDING_AUDIO_SAMPLE_RATE: u32 = 48_000;
+
 /// User input command during recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingCommand {
@@ -116,6 +118,23 @@ impl RecordingTui {
             spectrum_analyzer,
             cleaned_up: false,
         })
+    }
+
+    /// Creates a TUI before the audio device has reported its actual sample rate.
+    pub fn new_pending_audio(config: &OsttConfig) -> Result<Self, Box<dyn Error>> {
+        Self::new(config, PENDING_AUDIO_SAMPLE_RATE)
+    }
+
+    /// Updates sample-rate-dependent state after audio startup succeeds.
+    pub fn set_sample_rate(&mut self, sample_rate: u32) {
+        self.sample_rate = sample_rate;
+        let now = std::time::Instant::now();
+        self.recording_start_time = now;
+        self.last_sample_time = now;
+        self.peak_hold_time = now;
+        self.pause_duration = std::time::Duration::ZERO;
+        self.pause_start_time = None;
+        self.is_paused = false;
     }
 
     /// Renders the visualization with current volume and recording duration.
@@ -457,11 +476,21 @@ impl RecordingTui {
                 let background = ratatui::widgets::Block::default().style(Style::reset());
                 frame.render_widget(background, area);
 
+                let horizontal_padding = area.width / 10;
+                let content_width = area.width.saturating_sub(horizontal_padding * 2).max(1);
+                let message_lines = error_message_lines(message);
+                let wrapped_message_height = message_lines
+                    .iter()
+                    .map(|line| wrapped_line_count(line, content_width))
+                    .sum::<u16>();
+                let content_height = wrapped_message_height.saturating_add(4).min(area.height);
                 let padded_area = Rect {
-                    x: area.x.saturating_add(area.width / 10),
-                    y: area.y.saturating_add(area.height / 4),
-                    width: area.width.saturating_sub((area.width / 10) * 2),
-                    height: area.height.saturating_sub(area.height / 2),
+                    x: area.x.saturating_add(horizontal_padding),
+                    y: area
+                        .y
+                        .saturating_add(area.height.saturating_sub(content_height) / 2),
+                    width: content_width,
+                    height: content_height,
                 };
 
                 let title_line = ratatui::text::Line::from(ratatui::text::Span::styled(
@@ -470,13 +499,13 @@ impl RecordingTui {
                 ))
                 .alignment(Alignment::Center);
 
-                let text = ratatui::text::Text::from(vec![
-                    title_line,
-                    ratatui::text::Line::raw(""),
-                    ratatui::text::Line::raw(message),
-                    ratatui::text::Line::raw(""),
-                    ratatui::text::Line::raw("Press any key to close."),
-                ]);
+                let mut lines = Vec::with_capacity(message_lines.len() + 4);
+                lines.push(title_line);
+                lines.push(ratatui::text::Line::raw(""));
+                lines.extend(message_lines.into_iter().map(ratatui::text::Line::raw));
+                lines.push(ratatui::text::Line::raw(""));
+                lines.push(ratatui::text::Line::raw("Press any key to close."));
+                let text = ratatui::text::Text::from(lines);
 
                 let paragraph = Paragraph::new(text)
                     .alignment(Alignment::Center)
@@ -515,6 +544,24 @@ impl RecordingTui {
         self.terminal.show_cursor()?;
         Ok(())
     }
+}
+
+fn error_message_lines(message: &str) -> Vec<String> {
+    let lines = message.lines().collect::<Vec<_>>();
+    if lines.is_empty() {
+        vec![String::new()]
+    } else {
+        lines.into_iter().map(ToString::to_string).collect()
+    }
+}
+
+fn wrapped_line_count(line: &str, width: u16) -> u16 {
+    if line.is_empty() {
+        return 1;
+    }
+
+    let width = usize::from(width.max(1));
+    line.chars().count().div_ceil(width) as u16
 }
 
 impl Drop for RecordingTui {

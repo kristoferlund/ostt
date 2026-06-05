@@ -1,19 +1,21 @@
-Read `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/PLAN.md`, `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/SESSION.md` if it exists, and the spec files in `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/`.
+You are working in target codebase `/Users/kristoferlund/gh/ostt`.
 
-Target codebase: `/Users/kristoferlund/gh/ostt`.
+Read `/Users/kristoferlund/gh/ostt/specs/first-time-ux/PLAN.md`, `/Users/kristoferlund/gh/ostt/specs/first-time-ux/SESSION.md` if it exists, and the spec files folder `/Users/kristoferlund/gh/ostt/specs/first-time-ux`.
 
-Find the next incomplete section or sub-section in `PLAN.md`: the first section or sub-section containing unchecked `- [ ]` tasks. That section or sub-section is the entire scope for this session. Do not work on any later section or sub-section.
+Find the next incomplete section or sub-section in PLAN.md. This is the first section or sub-section containing unchecked tasks. SCOPE is exactly that one section or sub-section only. Do not continue to the next section or sub-section.
 
-Read the spec file named by that section and study the relevant source files in the target codebase. Also read notes from previous sessions in `SESSION.md` before changing code.
+Read `/Users/kristoferlund/gh/ostt/specs/first-time-ux/spec.md`, then study the source files listed for the scoped section in PLAN.md and the immediate callers/types/utilities needed to make safe changes. Do not do broad codebase exploration.
 
-Implement tasks strictly in order. Do not skip tasks. Do not reorder tasks. Scope is one section or sub-section only.
+Before editing, read prior session notes and recent commits. Identify helpers/APIs/patterns already introduced for this feature and reuse them unless clearly unsuitable. Do not create parallel helpers for the same concern without documenting why.
 
-Critical crash-recovery rule: update `PLAN.md` immediately after completing each task, changing that task from `- [ ]` to `- [x]`, before starting the next task. Do not batch these updates.
+Implement tasks in order. No skipping tasks. No reordering tasks. If the scoped spec or task is vague, conflicts with the clarified non-goals, or risks over-implementing beyond the listed files and acceptance criteria, stop and ask the user before editing further.
 
-Run the verification command listed for each verification task when you reach it. If verification fails, fix and rerun once. If it fails a second time, mark the task with `[!]`, append notes to `SESSION.md`, commit partial work, and stop.
+After completing each task, update PLAN.md IMMEDIATELY before starting the next task by changing that task from `- [ ]` to `- [x]`. Do not batch PLAN.md updates. This is required for crash recovery.
 
-Restrict file modifications to the target codebase, `PLAN.md`, and `SESSION.md` only. Do not modify files outside `/Users/kristoferlund/gh/ostt`, except for `PLAN.md` and `SESSION.md` in the spec folder.
+Run the verification task(s) listed in the section as they are reached. If verification fails, fix and retry once. If the same verification task fails twice, mark that task as `- [!]`, append the session summary to SESSION.md, git commit partial work, and stop.
 
-Before stopping, append a session summary to the end of `/Users/kristoferlund/gh/ostt/specs/local-models/Phase 3 - Config & Auth/SESSION.md`. Do not overwrite existing notes. Use heading `## Session N: Spec X.Y - <title>` with `N` incremented from prior sessions. Include what was accomplished, obstacles encountered, and out-of-scope observations.
+Restrict file modifications to `/Users/kristoferlund/gh/ostt`, `/Users/kristoferlund/gh/ostt/specs/first-time-ux/PLAN.md`, and `/Users/kristoferlund/gh/ostt/specs/first-time-ux/SESSION.md` only.
 
-Git commit all changes before stopping. Stop after one section or sub-section, even if all tasks passed. Do not continue to the next section or sub-section.
+Append, do not overwrite, a session summary to `/Users/kristoferlund/gh/ostt/specs/first-time-ux/SESSION.md`. Use heading `## Session N: Spec X.Y — <title>` with N incremented from existing sessions. Include what was accomplished, decisions made, files changed, helpers/APIs introduced or reused, verification results, constraints for later sessions, obstacles encountered, open questions, and out-of-scope observations.
+
+Before stopping, git commit all changes. Commit only files changed for this scoped section or sub-section plus PLAN.md and SESSION.md. Stop after one section or sub-section even if more tasks remain elsewhere.

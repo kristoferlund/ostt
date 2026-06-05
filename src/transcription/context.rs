@@ -9,6 +9,10 @@ pub(crate) struct TranscriptionContext {
     pub(crate) keywords: Vec<String>,
 }
 
+pub(crate) struct TranscriptionPreflightContext {
+    pub(crate) selected_model: SelectedModel,
+}
+
 pub(crate) fn build_context(
     ostt_config: &OsttConfig,
     model_override: Option<SelectedModel>,
@@ -30,6 +34,17 @@ pub(crate) fn build_context(
     })
 }
 
+pub(crate) fn build_preflight_context(
+    ostt_config: &OsttConfig,
+    model_override: Option<SelectedModel>,
+    param_overrides: &[String],
+) -> anyhow::Result<TranscriptionPreflightContext> {
+    let selected_model = resolve_selected_model(ostt_config, model_override)?;
+    config_for_selected_model(ostt_config, &selected_model, Vec::new(), param_overrides)?;
+
+    Ok(TranscriptionPreflightContext { selected_model })
+}
+
 fn resolve_selected_model(
     ostt_config: &OsttConfig,
     model_override: Option<SelectedModel>,
@@ -47,7 +62,7 @@ fn resolve_selected_model(
             model_id: model_id.to_string(),
         }),
         _ => Err(anyhow::anyhow!(
-            "No model selected. Please run 'ostt auth' to select a transcription model"
+            "No transcription model selected. Run 'ostt auth' to add an API key, then 'ostt model' to choose a model."
         )),
     }
 }
@@ -186,6 +201,18 @@ mod tests {
             provider_id: provider_id.to_string(),
             model_id: model_id.to_string(),
         }
+    }
+
+    #[test]
+    fn resolve_selected_model_reports_first_time_guidance() {
+        let err = resolve_selected_model(&OsttConfig::default(), None)
+            .unwrap_err()
+            .to_string();
+
+        assert_eq!(
+            err,
+            "No transcription model selected. Run 'ostt auth' to add an API key, then 'ostt model' to choose a model."
+        );
     }
 
     #[test]
