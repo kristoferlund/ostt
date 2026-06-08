@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Improved `--paste` failure messages on GNOME Wayland so users are told when auto-paste is unavailable for native Wayland apps and the transcribed text remains in the clipboard.
 - Fixed `ostt model select whisper/<model>` for installed standard local Whisper model files that are not persisted in local model metadata.
 - Fixed test environment isolation so running the test suite cannot write to the user's real `~/.config/ostt/ostt.toml` when `XDG_CONFIG_HOME` is set.
 

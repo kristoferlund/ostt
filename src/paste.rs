@@ -6,6 +6,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+#[cfg(any(target_os = "macos", test))]
 const MACOS_ACCESSIBILITY_REMEDIATION: &str = "Grant accessibility permissions to your terminal app or OSTT launcher in System Settings > Privacy & Security > Accessibility.";
 const POPUP_TITLE: &str = "ostt";
 
@@ -250,17 +251,69 @@ where
 }
 
 fn paste_key_failure_message(paste_key: &str) -> String {
-    paste_key_failure_message_for_os(paste_key, cfg!(target_os = "macos"))
+    paste_key_failure_message_for_context(paste_key, paste_key_failure_context())
 }
 
-fn paste_key_failure_message_for_os(paste_key: &str, is_macos: bool) -> String {
-    let mut message =
-        format!("Failed to send paste key '{paste_key}'. Text was copied to the clipboard.");
-    if is_macos {
-        message.push_str("\nNext step: ");
-        message.push_str(MACOS_ACCESSIBILITY_REMEDIATION);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PasteKeyFailureContext {
+    #[cfg(any(target_os = "macos", test))]
+    Macos,
+    GnomeWayland,
+    Other,
+}
+
+fn paste_key_failure_message_for_context(
+    paste_key: &str,
+    context: PasteKeyFailureContext,
+) -> String {
+    let mut message = format!(
+        "Failed to send paste key '{paste_key}'. Text was copied to the clipboard and will stay there so you can paste manually."
+    );
+    match context {
+        #[cfg(any(target_os = "macos", test))]
+        PasteKeyFailureContext::Macos => {
+            message.push_str("\nNext step: ");
+            message.push_str(MACOS_ACCESSIBILITY_REMEDIATION);
+        }
+        PasteKeyFailureContext::GnomeWayland => {
+            message.push_str("\nGNOME Wayland does not support OSTT's normal auto-paste methods for native Wayland apps.");
+        }
+        PasteKeyFailureContext::Other => {}
     }
     message
+}
+
+fn paste_key_failure_context() -> PasteKeyFailureContext {
+    #[cfg(target_os = "macos")]
+    {
+        PasteKeyFailureContext::Macos
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        if is_gnome_wayland_session() {
+            PasteKeyFailureContext::GnomeWayland
+        } else {
+            PasteKeyFailureContext::Other
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn is_gnome_wayland_session() -> bool {
+    if std::env::var("WAYLAND_DISPLAY").is_err() {
+        return false;
+    }
+
+    [
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "DESKTOP_SESSION",
+    ]
+    .iter()
+    .filter_map(|name| std::env::var(name).ok())
+    .any(|value| value.to_ascii_lowercase().contains("gnome"))
+        || std::env::var("GNOME_DESKTOP_SESSION_ID").is_ok()
 }
 
 pub(crate) fn spawn_detached_paste_helper(text: &str) -> anyhow::Result<()> {
@@ -381,8 +434,9 @@ fn send_macos_key(paste_key: &str) -> anyhow::Result<()> {
 #[cfg(not(target_os = "macos"))]
 fn send_linux_key(paste_key: &str) -> anyhow::Result<()> {
     if std::env::var("WAYLAND_DISPLAY").is_ok() {
-        if let Ok(()) = send_wtype_key(paste_key) {
-            return Ok(());
+        match send_wtype_key(paste_key) {
+            Ok(()) => return Ok(()),
+            Err(err) => tracing::debug!("Paste mode: wtype failed: {err}"),
         }
     }
 
@@ -515,12 +569,13 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("Text was copied to the clipboard"));
+        assert!(err.to_string().contains("will stay there"));
         assert_eq!(clipboard_writes.into_inner(), vec!["new text"]);
     }
 
     #[test]
     fn macos_paste_failure_message_mentions_accessibility() {
-        let message = paste_key_failure_message_for_os("cmd+v", true);
+        let message = paste_key_failure_message_for_context("cmd+v", PasteKeyFailureContext::Macos);
 
         assert!(message.contains("Privacy & Security > Accessibility"));
         assert!(message.contains("OSTT launcher"));
@@ -528,9 +583,20 @@ mod tests {
 
     #[test]
     fn non_macos_paste_failure_message_omits_accessibility() {
-        let message = paste_key_failure_message_for_os("ctrl+v", false);
+        let message =
+            paste_key_failure_message_for_context("ctrl+v", PasteKeyFailureContext::Other);
 
         assert!(!message.contains("Privacy & Security > Accessibility"));
+    }
+
+    #[test]
+    fn gnome_wayland_paste_failure_message_explains_native_wayland_limit() {
+        let message =
+            paste_key_failure_message_for_context("ctrl+v", PasteKeyFailureContext::GnomeWayland);
+
+        assert!(message.contains("GNOME Wayland"));
+        assert!(message.contains("native Wayland apps"));
+        assert!(message.contains("paste manually"));
     }
 
     #[test]
