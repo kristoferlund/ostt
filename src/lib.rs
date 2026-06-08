@@ -23,6 +23,7 @@ pub mod history;
 pub mod keywords;
 pub mod logging;
 pub mod model;
+pub(crate) mod notifier;
 pub(crate) mod paste;
 pub mod process;
 pub mod recording;

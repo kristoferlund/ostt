@@ -58,7 +58,7 @@ where
         copy_to_clipboard(output_text)
             .with_context(|| format!("failed to copy {label} to clipboard"))
             .inspect_err(|err| {
-                crate::paste::notify_no_popup_error_if_popup_context(
+                crate::notifier::notify_error_if_popup_context(
                     "Clipboard Failed",
                     &err.to_string(),
                 );
@@ -66,7 +66,7 @@ where
         tracing::debug!("{label} copied to clipboard");
     } else if paste {
         paste_text(output_text, paste_config).inspect_err(|err| {
-            crate::paste::notify_no_popup_error_if_popup_context("Paste Failed", &err.to_string());
+            crate::notifier::notify_error_if_popup_context("Paste Failed", &err.to_string());
         })?;
         tracing::debug!("{label} pasted to focused app");
     } else {

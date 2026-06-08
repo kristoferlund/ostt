@@ -13,78 +13,6 @@ const POPUP_TITLE: &str = "ostt";
 #[cfg(target_os = "macos")]
 const MACOS_POPUP_APPS: &[&str] = &["Ghostty", "kitty", "Alacritty"];
 
-pub(crate) fn notify_no_popup_error(title: &str, message: &str) {
-    if let Err(err) = try_notify_no_popup_error(title, message) {
-        tracing::debug!("No-popup notification failed: {err}");
-        eprintln!("{title}: {message}");
-    }
-}
-
-pub(crate) fn notify_no_popup_error_if_popup_context(title: &str, message: &str) -> bool {
-    notify_no_popup_error_if_popup_context_with(
-        title,
-        message,
-        is_popup_context(),
-        notify_no_popup_error,
-    )
-}
-
-fn notify_no_popup_error_if_popup_context_with<F>(
-    title: &str,
-    message: &str,
-    is_popup_context: bool,
-    notify: F,
-) -> bool
-where
-    F: FnOnce(&str, &str),
-{
-    if !is_popup_context {
-        return false;
-    }
-    notify(title, message);
-    true
-}
-
-fn is_popup_context() -> bool {
-    std::env::var("OSTT_POPUP").is_ok_and(|value| value == "1")
-}
-
-#[cfg(target_os = "macos")]
-fn try_notify_no_popup_error(title: &str, message: &str) -> anyhow::Result<()> {
-    let script = format!(
-        "display alert {} message {} as critical",
-        applescript_string(title),
-        applescript_string(message)
-    );
-    run_status(Command::new("osascript").args(["-e", &script]), "osascript")
-}
-
-#[cfg(target_os = "macos")]
-fn applescript_string(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn try_notify_no_popup_error(title: &str, message: &str) -> anyhow::Result<()> {
-    if !command_exists("notify-send") {
-        anyhow::bail!("notify-send not found");
-    }
-    run_status(
-        Command::new("notify-send").args([title, message]),
-        "notify-send",
-    )
-}
-
-#[cfg(not(target_os = "macos"))]
-fn command_exists(command: &str) -> bool {
-    Command::new("which")
-        .arg(command)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success())
-}
-
 pub(crate) fn wait_for_focus_after_popup(config: &PasteConfig) {
     #[cfg(target_os = "macos")]
     {
@@ -358,7 +286,7 @@ pub(crate) fn handle_paste_helper(config: &crate::config::OsttConfig) -> anyhow:
         .context("failed to read paste helper input")?;
     wait_for_focus_after_popup(&config.output.paste);
     paste_text(&text, &config.output.paste).inspect_err(|err| {
-        notify_no_popup_error_if_popup_context("Paste Failed", &err.to_string());
+        crate::notifier::notify_error_if_popup_context("Paste Failed", &err.to_string());
     })
 }
 
@@ -597,37 +525,6 @@ mod tests {
         assert!(message.contains("GNOME Wayland"));
         assert!(message.contains("native Wayland apps"));
         assert!(message.contains("paste manually"));
-    }
-
-    #[test]
-    fn popup_context_notification_helper_only_notifies_in_popup_context() {
-        let calls = RefCell::new(Vec::new());
-
-        let notified = notify_no_popup_error_if_popup_context_with(
-            "Paste Failed",
-            "paste failed",
-            true,
-            |title, message| {
-                calls
-                    .borrow_mut()
-                    .push((title.to_string(), message.to_string()))
-            },
-        );
-
-        assert!(notified);
-        assert_eq!(
-            calls.into_inner(),
-            vec![("Paste Failed".to_string(), "paste failed".to_string())]
-        );
-
-        let skipped = notify_no_popup_error_if_popup_context_with(
-            "Paste Failed",
-            "paste failed",
-            false,
-            |_, _| panic!("notification should not run outside popup context"),
-        );
-
-        assert!(!skipped);
     }
 
     #[cfg(target_os = "macos")]

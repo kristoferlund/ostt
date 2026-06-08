@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - List-based TUI screens now use consistent scroll-margin behavior across model, keyword, replace, history, and process action views.
+- Popup error notifications now use a shared notifier with desktop notifications first, terminal OSC fallback for supported terminals, and stderr as the final fallback.
 - `ostt model` now opens on the currently active model instead of the first row.
 
 ### Fixed

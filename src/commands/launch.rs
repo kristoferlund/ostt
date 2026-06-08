@@ -8,7 +8,7 @@ use anyhow::{anyhow, Context};
 use std::process::{Command, Stdio};
 
 use crate::config::file::PopupConfig;
-use crate::paste::notify_no_popup_error;
+use crate::notifier::notify_error;
 use crate::recording::active;
 
 const LAUNCH_FAILURE_TITLE: &str = "OSTT popup launch failed";
@@ -174,7 +174,7 @@ fn ostt_binary_path() -> anyhow::Result<String> {
 
 fn report_launch_failure(message: &str) {
     eprintln!("Error: {message}");
-    notify_no_popup_error(LAUNCH_FAILURE_TITLE, message);
+    notify_error(LAUNCH_FAILURE_TITLE, message);
 }
 
 fn build_spawn_command(program: &str, args: &[String]) -> Command {
