@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.21 - 2026-06-08
+
 ### Changed
 
 - List-based TUI screens now use consistent scroll-margin behavior across model, keyword, replace, history, and process action views.
