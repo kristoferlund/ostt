@@ -16,7 +16,7 @@ ostt/
 └── README.md                    # Main documentation
 ```
 
-**Note:** The AUR PKGBUILD is maintained in the separate [AUR repository](https://aur.archlinux.org/packages/ostt), not in this repository.
+**Note:** AUR packages are maintained in four separate AUR repositories (one per variant), not in this repository.
 
 **Note:** The default configuration template is embedded into the binary at compile time using `include_str!()` and is automatically extracted on first run.
 
@@ -46,15 +46,23 @@ ostt auth  # Set up API credentials
 
 ### 3. AUR (Arch/Manjaro Linux)
 
-```bash
-# Using yay
-yay -S ostt
+Prebuilt binary packages (recommended — no compilation, no Rust toolchain). Pick the one that matches your hardware:
 
-# Or using makepkg
-git clone https://aur.archlinux.org/ostt.git
-cd ostt
-makepkg -si
+```bash
+yay -S ostt-bin          # CPU build (x86_64, aarch64)
+yay -S ostt-cuda-bin     # NVIDIA CUDA build (x86_64)
+yay -S ostt-vulkan-bin   # AMD / Intel Vulkan build (x86_64)
 ```
+
+These packages download the official release binary and install it directly. They conflict with each other and with the source package, so only one can be installed at a time.
+
+To build from source instead:
+
+```bash
+yay -S ostt
+```
+
+`paru` works in place of `yay` for any of the above.
 
 ### 4. Debian/Ubuntu (.deb)
 
@@ -252,9 +260,11 @@ ostt uses [cargo-generate-rpm](https://github.com/cat-in-136/cargo-generate-rpm)
 
 ### PKGBUILD (AUR)
 
-Compiles from source and installs:
-- Binary: `/usr/bin/ostt` (with embedded config files)
-- Documentation: `/usr/share/doc/ostt/`
+Four AUR packages are published for each release:
+
+#### `ostt` (source build)
+
+Compiles from source using `cargo`. Slower install but does not depend on pre-built binaries.
 
 **Dependencies:**
 - `alsa-lib` - Audio capture
@@ -264,6 +274,27 @@ Compiles from source and installs:
 **Optional dependencies:**
 - `wl-clipboard` - Clipboard support on Wayland
 - `xclip` - Clipboard support on X11
+
+#### `ostt-bin` (prebuilt CPU binary)
+
+Downloads the official CPU release binary from GitHub. Supported on `x86_64` and `aarch64`.
+
+**Dependencies:** `glibc`, `gcc-libs`, `openssl`, `alsa-lib`, `ffmpeg`
+**Provides/Conflicts:** `ostt`
+
+#### `ostt-cuda-bin` (prebuilt NVIDIA CUDA binary)
+
+Downloads the official CUDA release binary from GitHub. Supported on `x86_64` only.
+
+**Dependencies:** `glibc`, `gcc-libs`, `openssl`, `alsa-lib`, `ffmpeg`, `cuda`, `nvidia-utils`
+**Provides/Conflicts:** `ostt`
+
+#### `ostt-vulkan-bin` (prebuilt AMD/Intel Vulkan binary)
+
+Downloads the official Vulkan release binary from GitHub. Supported on `x86_64` only.
+
+**Dependencies:** `glibc`, `gcc-libs`, `openssl`, `alsa-lib`, `ffmpeg`, `vulkan-icd-loader`
+**Provides/Conflicts:** `ostt`
 
 ### Homebrew Formula (ostt.rb)
 
@@ -323,82 +354,66 @@ Once ostt is established (75+ GitHub stars, stable release history):
 
 ## AUR (Arch User Repository) Distribution
 
-Unlike Homebrew Core, **anyone can publish to the AUR**. It's a community-maintained collection of build scripts.
+Unlike Homebrew Core, **anyone can publish to the AUR**. ostt publishes **four AUR packages** per release:
 
-### Initial AUR Setup (One-Time)
+| Package | Build | Architecture | GPU Support |
+|---------|-------|-------------|-------------|
+| `ostt` | Source (cargo) | x86_64, aarch64 | CPU only |
+| `ostt-bin` | Prebuilt binary | x86_64, aarch64 | CPU only |
+| `ostt-cuda-bin` | Prebuilt binary | x86_64 | NVIDIA CUDA |
+| `ostt-vulkan-bin` | Prebuilt binary | x86_64 | AMD/Intel Vulkan |
+
+All binary packages (`*-bin`) conflict with each other and with the source `ostt` package — only one can be installed at a time.
+
+### Local Repository Structure
+
+The AUR packages are maintained in four sibling directories:
+
+```
+..
+├── ostt/                    # Main ostt repository
+├── aur-ostt/                # AUR: ostt (source build)
+├── aur-ostt-bin/            # AUR: ostt-bin (prebuilt CPU)
+├── aur-ostt-cuda-bin/       # AUR: ostt-cuda-bin (prebuilt CUDA)
+└── aur-ostt-vulkan-bin/     # AUR: ostt-vulkan-bin (prebuilt Vulkan)
+```
+
+### Initial AUR Setup (One-Time Per Package)
 
 1. **Create AUR account:**
    - Go to https://aur.archlinux.org/register
    - Add your SSH public key to your account
 
-2. **Clone the AUR repository:**
+2. **Request each package name** on the AUR (e.g., `ostt-bin`, `ostt-cuda-bin`, `ostt-vulkan-bin`).
+
+3. **Clone each AUR repository:**
    ```bash
    git clone ssh://aur@aur.archlinux.org/ostt.git aur-ostt
-   cd aur-ostt
+   git clone ssh://aur@aur.archlinux.org/ostt-bin.git aur-ostt-bin
+   git clone ssh://aur@aur.archlinux.org/ostt-cuda-bin.git aur-ostt-cuda-bin
+   git clone ssh://aur@aur.archlinux.org/ostt-vulkan-bin.git aur-ostt-vulkan-bin
    ```
 
-3. **Create PKGBUILD file:**
-   ```bash
-   # Create PKGBUILD with the following content
-   # (See example below)
-   
-   # Generate .SRCINFO (required by AUR)
-   makepkg --printsrcinfo > .SRCINFO
-   ```
+4. **Create a PKGBUILD file in each** (see examples in each repo).
 
-   Example PKGBUILD:
-   ```bash
-   # Maintainer: Kristofer Lund <kristoferlund@users.noreply.github.com>
-   pkgname=ostt
-   pkgver=0.0.3
-   pkgrel=1
-   pkgdesc="Open Speech-to-Text: Terminal application for recording and transcribing audio"
-   arch=('x86_64' 'aarch64')
-   url="https://github.com/kristoferlund/ostt"
-   license=('MIT')
-   depends=('alsa-lib' 'openssl' 'ffmpeg')
-   optdepends=('wl-clipboard: Clipboard support on Wayland'
-               'xclip: Clipboard support on X11')
-   makedepends=('cargo' 'rust' 'git' 'pkgconf')
-   options=('!lto')
-   source=("${pkgname}-${pkgver}.tar.gz::https://github.com/kristoferlund/ostt/archive/refs/tags/v${pkgver}.tar.gz")
-   sha256sums=('SKIP')
-   
-   build() {
-     cd "ostt-${pkgver}"
-     cargo build --release --locked
-   }
-   
-   package() {
-     cd "ostt-${pkgver}"
-     install -Dm755 target/release/ostt "${pkgdir}/usr/bin/ostt"
-     install -Dm644 README.md "${pkgdir}/usr/share/doc/ostt/README.md"
-   }
-   
-   check() {
-     cd "ostt-${pkgver}"
-     cargo test --release --locked
-   }
-   ```
-
-4. **Publish to AUR:**
+5. **Publish to AUR:**
    ```bash
    git add PKGBUILD .SRCINFO
-   git commit -m "Initial release: ostt 0.0.1"
+   git commit -m "Initial release: ostt-bin 0.0.20"
    git push
    ```
 
-5. **Done!** Package is live at: https://aur.archlinux.org/packages/ostt
+### Updating AUR Packages
 
-### Updating AUR Package
+After each release, all four packages must be updated. Manual steps for each package:
 
-After each release:
+#### Manual Update (per package)
 
 ```bash
-cd aur-ostt
+cd aur-ostt-bin
 
 # Update version in PKGBUILD
-sed -i 's/pkgver=.*/pkgver=0.0.2/' PKGBUILD
+sed -i 's/pkgver=.*/pkgver=0.0.21/' PKGBUILD
 
 # Update checksums (or use sha256sums=('SKIP') for simplicity)
 updpkgsums
@@ -408,35 +423,15 @@ makepkg --printsrcinfo > .SRCINFO
 
 # Commit and push
 git add PKGBUILD .SRCINFO
-git commit -m "Update to 0.0.2"
+git commit -m "Update to 0.0.21"
 git push
 ```
 
-### Optional: Automate AUR Publishing
+Repeat for `aur-ostt`, `aur-ostt-cuda-bin`, and `aur-ostt-vulkan-bin`.
 
-You can automate AUR updates with a GitHub Action. This requires:
-- AUR SSH key added as GitHub secret
-- Action that updates PKGBUILD and pushes to AUR on release
+### Scripted Publishing (Planned)
 
-Example workflow snippet:
-```yaml
-- name: Publish to AUR
-  run: |
-    # Clone AUR repo
-    git clone ssh://aur@aur.archlinux.org/ostt.git
-    cd ostt
-    
-    # Update PKGBUILD version
-    sed -i 's/pkgver=.*/pkgver=${{ github.ref_name }}/' PKGBUILD
-    
-    # Generate .SRCINFO
-    makepkg --printsrcinfo > .SRCINFO
-    
-    # Push to AUR
-    git add PKGBUILD .SRCINFO
-    git commit -m "Update to ${{ github.ref_name }}"
-    git push
-```
+A helper script at `scripts/update-aur.sh` can update all four AUR packages in one pass. It expects the AUR repositories to be cloned as sibling directories (`../aur-ostt`, `../aur-ostt-bin`, `../aur-ostt-cuda-bin`, `../aur-ostt-vulkan-bin`). This script does not exist yet — manual updates are required for now.
 
 ## Release Process
 
@@ -453,19 +448,44 @@ Example workflow snippet:
    git push origin v0.0.2
    ```
 5. **GitHub Actions automatically:**
-   - Builds for all target platforms
+   - Builds for all target platforms (CPU, CUDA, Vulkan)
    - Creates GitHub release
    - Uploads binaries and installer script
    - Generates Homebrew formula
    - Publishes to `kristoferlund/homebrew-ostt` (if tap repo exists)
-   - Builds and uploads `.deb` (Debian/Ubuntu) and `.rpm` (Fedora/RHEL/openSUSE) packages
-6. **Manually update AUR** (until automated):
+   - Builds and uploads `.deb` (Debian/Ubuntu) and `.rpm` (Fedora/RHEL/openSUSE) packages for CPU, CUDA, and Vulkan variants
+6. **Manually update all four AUR packages** (until automated):
    ```bash
-   cd aur-ostt
-   sed -i 's/pkgver=.*/pkgver=0.0.2/' PKGBUILD
+   # Update source package
+   cd ../aur-ostt
+   sed -i 's/pkgver=.*/pkgver=0.0.21/' PKGBUILD
    makepkg --printsrcinfo > .SRCINFO
    git add PKGBUILD .SRCINFO
-   git commit -m "Update to 0.0.2"
+   git commit -m "Update to 0.0.21"
+   git push
+
+   # Update prebuilt CPU binary package
+   cd ../aur-ostt-bin
+   sed -i 's/pkgver=.*/pkgver=0.0.21/' PKGBUILD
+   makepkg --printsrcinfo > .SRCINFO
+   git add PKGBUILD .SRCINFO
+   git commit -m "Update to 0.0.21"
+   git push
+
+   # Update prebuilt CUDA binary package
+   cd ../aur-ostt-cuda-bin
+   sed -i 's/pkgver=.*/pkgver=0.0.21/' PKGBUILD
+   makepkg --printsrcinfo > .SRCINFO
+   git add PKGBUILD .SRCINFO
+   git commit -m "Update to 0.0.21"
+   git push
+
+   # Update prebuilt Vulkan binary package
+   cd ../aur-ostt-vulkan-bin
+   sed -i 's/pkgver=.*/pkgver=0.0.21/' PKGBUILD
+   makepkg --printsrcinfo > .SRCINFO
+   git add PKGBUILD .SRCINFO
+   git commit -m "Update to 0.0.21"
    git push
    ```
 
