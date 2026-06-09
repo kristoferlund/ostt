@@ -235,7 +235,7 @@ fn active_local_model_from_config(config: &OsttConfig) -> Option<String> {
         config.transcription.provider.as_deref(),
         config.transcription.model.as_deref(),
     ) {
-        (Some("local"), Some(model_id)) => Some(model_id.to_string()),
+        (Some("whisper") | Some("local"), Some(model_id)) => Some(model_id.to_string()),
         _ => None,
     }
 }

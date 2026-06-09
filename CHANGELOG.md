@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.23 - 2026-06-09
+
+### Fixed
+
+- `ostt daemon start` failed with "No local model is active" even after selecting a model via `ostt model`. The daemon's startup check was matching against the old provider identifier `"local"` instead of `"whisper"`, so it could never find the active model.
+
 ## 0.0.22 - 2026-06-09
 
 ### Added
