@@ -198,12 +198,19 @@ fn local_gpu_devices() -> Vec<String> {
                 continue;
             }
 
-            let description = whisper_rs_sys::ggml_backend_dev_description(device);
-            if description.is_null() {
-                devices.push("unknown GPU".to_string());
-            } else {
-                devices.push(CStr::from_ptr(description).to_string_lossy().into_owned());
-            }
+            let name = {
+                let ptr = whisper_rs_sys::ggml_backend_dev_description(device);
+                if ptr.is_null() {
+                    "unknown GPU".to_string()
+                } else {
+                    CStr::from_ptr(ptr).to_string_lossy().into_owned()
+                }
+            };
+            let mut vram_free: usize = 0;
+            let mut vram_total: usize = 0;
+            whisper_rs_sys::ggml_backend_dev_memory(device, &mut vram_free, &mut vram_total);
+            let vram_mb = vram_total / (1024 * 1024);
+            devices.push(format!("{name} ({vram_mb} MB VRAM)"));
         }
 
         devices

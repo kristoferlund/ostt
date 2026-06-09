@@ -204,7 +204,7 @@ fn paste_key_failure_message_for_context(
             message.push_str(MACOS_ACCESSIBILITY_REMEDIATION);
         }
         PasteKeyFailureContext::GnomeWayland => {
-            message.push_str("\nGNOME Wayland does not support OSTT's normal auto-paste methods for native Wayland apps.");
+            message.push_str("\nGNOME Wayland does not support wtype or xdotool for native Wayland apps. Install ydotool and start ydotoold to enable auto-paste.");
         }
         PasteKeyFailureContext::Other => {}
     }
@@ -366,6 +366,10 @@ fn send_linux_key(paste_key: &str) -> anyhow::Result<()> {
             Ok(()) => return Ok(()),
             Err(err) => tracing::debug!("Paste mode: wtype failed: {err}"),
         }
+        match send_ydotool_key(paste_key) {
+            Ok(()) => return Ok(()),
+            Err(err) => tracing::debug!("Paste mode: ydotool failed: {err}"),
+        }
     }
 
     send_xdotool_key(paste_key)
@@ -391,6 +395,21 @@ fn send_wtype_key(paste_key: &str) -> anyhow::Result<()> {
 
     tracing::debug!("Paste mode: running wtype {:?}", args);
     run_status(Command::new("wtype").args(args), "wtype")
+}
+
+#[cfg(not(target_os = "macos"))]
+fn send_ydotool_key(paste_key: &str) -> anyhow::Result<()> {
+    let (modifiers, key) = parse_paste_key(paste_key)?;
+    let mut parts: Vec<String> = modifiers
+        .iter()
+        .map(|modifier| xdotool_modifier(modifier).map(str::to_string))
+        .collect::<anyhow::Result<_>>()?;
+    parts.push(linux_key_name(&key));
+    tracing::debug!("Paste mode: running ydotool key {}", parts.join("+"));
+    run_status(
+        Command::new("ydotool").args(["key", &parts.join("+")]),
+        "ydotool",
+    )
 }
 
 #[cfg(not(target_os = "macos"))]

@@ -89,7 +89,12 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
     }
 
     // Load the model (expensive — this is the whole point of the daemon).
-    tracing::info!("daemon: loading model '{model_id}'");
+    whisper_rs::install_logging_hooks();
+    tracing::info!(
+        "daemon: loading model '{}' with {}",
+        model_id,
+        crate::transcription::local_inference_backend()
+    );
     let model_path = resolve_installed_model_path(model_id)?;
     let model_path_str = model_path
         .to_str()
@@ -103,7 +108,7 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
     .await??;
 
     tracing::info!(
-        "daemon: local transcription backend: {}",
+        "daemon: backend active: {}",
         crate::transcription::local_inference_backend_details()
     );
 
