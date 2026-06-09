@@ -217,7 +217,10 @@ where
 fn show_audio_startup_error(tui: &mut RecordingTui, error: anyhow::Error) -> anyhow::Error {
     let message = format_recording_error(&error);
     show_recording_message(tui, "Audio Device Error", &message);
-    crate::notifier::notify_error("Audio Device Error", &audio_startup_notification_body(&error));
+    crate::notifier::notify_error(
+        "Audio Device Error",
+        &audio_startup_notification_body(&error),
+    );
     error
 }
 

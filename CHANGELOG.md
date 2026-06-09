@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.22 - 2026-06-09
+
+### Added
+
+- GPU builds now report the active backend and detected GPU device (with VRAM) in the log at startup, both before and after model load. The daemon path now also captures whisper.cpp's own backend selection messages via logging hooks.
+- `ydotool` is now tried automatically as a Wayland paste fallback between `wtype` and `xdotool`, enabling `--paste` on GNOME Wayland and other compositors where `wtype` is unsupported. No configuration required.
+
+### Changed
+
+- `ostt --version` now appends `-vulkan` or `-cuda` for GPU builds so users can identify which variant they have installed.
+- Release asset filenames now include the version number (e.g. `ostt-0.0.22-x86_64-unknown-linux-gnu-vulkan.tar.gz`).
+- Audio device errors now fire a desktop notification in addition to showing in the TUI, so the error is visible even when running in popup mode. The error message for output-only default devices now points users to `ostt config list-devices`.
+
+### Fixed
+
+- xclip no longer prints "Waiting for selection requests" noise to the terminal on X11.
+- The `--paste` failure message on GNOME Wayland now tells users to install `ydotool` and start `ydotoold` rather than leaving them without options.
+
 ## 0.0.21 - 2026-06-08
 
 ### Changed
