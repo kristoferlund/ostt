@@ -216,8 +216,20 @@ where
 
 fn show_audio_startup_error(tui: &mut RecordingTui, error: anyhow::Error) -> anyhow::Error {
     let message = format_recording_error(&error);
-    show_recording_message(tui, "Recording Error", &message);
+    show_recording_message(tui, "Audio Device Error", &message);
+    crate::notifier::notify_error("Audio Device Error", &audio_startup_notification_body(&error));
     error
+}
+
+fn audio_startup_notification_body(error: &anyhow::Error) -> String {
+    let searchable = error
+        .chain()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    audio_startup_next_step(&searchable)
+        .map(str::to_string)
+        .unwrap_or_else(|| error.to_string())
 }
 
 fn show_recording_message(tui: &mut RecordingTui, title: &str, message: &str) {
@@ -278,6 +290,10 @@ fn audio_startup_next_step(error_text: &str) -> Option<&'static str> {
         return Some(
             "Grant microphone access to your terminal app in System Settings > Privacy & Security > Microphone, then retry.",
         );
+    }
+
+    if normalized.contains("no longer available") {
+        return Some("The default audio device may not support input. Run 'ostt config list-devices' to find your input device, then set it with 'ostt config'.");
     }
 
     if normalized.contains("no audio input device") {
