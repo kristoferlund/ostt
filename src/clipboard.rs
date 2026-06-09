@@ -65,6 +65,8 @@ fn write_command(program: &str, args: &[&str], text: &str) -> anyhow::Result<()>
     let mut child = Command::new(program)
         .args(args)
         .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .with_context(|| format!("Failed to run {program}"))?;
     let mut stdin = child
