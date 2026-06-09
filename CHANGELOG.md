@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.24 - 2026-06-09
+
 ### Fixed
 
 - `ostt -c` no longer hangs indefinitely on X11 when using xclip. The `-quiet` flag prevented xclip from forking to the background, causing ostt to wait forever. Stdout/stderr were already suppressed via Rust's `Stdio::null()`, making `-quiet` redundant. Reported by @plittlefield in [#85](https://github.com/kristoferlund/ostt/issues/85).
