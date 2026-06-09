@@ -46,7 +46,7 @@ pub(crate) fn set_clipboard(text: &str) -> anyhow::Result<()> {
             return Ok(());
         }
 
-        write_command("xclip", &["-selection", "clipboard", "-in", "-quiet"], text)
+        write_command("xclip", &["-selection", "clipboard", "-in"], text)
     }
 }
 
