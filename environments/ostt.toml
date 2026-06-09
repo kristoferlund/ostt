@@ -12,20 +12,6 @@
 #
 # To see available devices, run: ostt list-devices
 device = "default"
-
-# Peak volume threshold for red indicator (0-100, percentage of reference level)
-# Default 90 means warn at 90% of reference_level_db (10% headroom before clipping)
-peak_volume_threshold = 90
-
-# Reference level in dBFS for 100% meter display
-# Set this to your audio card's maximum input level for accurate metering
-# Typical values:
-#   -6 dBFS: Very hot recording (near clipping)
-#  -12 dBFS: Hot recording (professional standard)
-#  -18 dBFS: Moderate recording level
-#  -20 dBFS: Conservative level (typical audio card max)
-reference_level_db = -20
-
 # Output audio format (uses ffmpeg for conversion)
 # Format: "codec [ffmpeg_options]"
 # All audio is saved mono with ffmpeg handling resampling/compression
@@ -39,56 +25,3 @@ reference_level_db = -20
 #
 # Add more formats as needed - ffmpeg handles the rest!
 output_format = "mp3 -ab 16k -ar 12000"
-
-[text]
-# Deterministic post-transcription replace rules.
-# Keywords help the model recognize terms; replace fixes final text casing,
-# acronyms, project names, and common misrecognitions.
-#
-# Examples:
-# [text.replace]
-# "ostt" = "OSTT"
-# "api" = "API"
-# "typescript" = "TypeScript"
-# "github" = "GitHub"
-
-[output.paste]
-# Paste mode copies the final text to the clipboard, sends this shortcut,
-# then restores the previous clipboard when enabled.
-# Defaults: macOS uses cmd+v, Omarchy uses shift+insert, other Linux uses ctrl+v.
-# Linux paste shortcuts vary by app and desktop; override paste_key when needed.
-paste_key = "ctrl+v"
-restore_clipboard = true
-restore_delay_ms = 750
-post_popup_delay_ms = 1000
-
-# Provider and per-model transcription params.
-# Provider params apply to all models for that provider. Model params override provider params.
-#
-# Examples:
-# [deepgram.params]
-# detect_language = true
-# smart_format = true
-#
-# [deepgram.nova-3.params]
-# detect_language = true
-# smart_format = true
-# keyterm = ["OSTT"]
-#
-# [berget."openai/whisper-large-v3".params]
-# language = "sv"
-#
-# Built-in local Whisper models use the whisper provider.
-# [whisper]
-# output_format = "pcm_s16le -ar 16000"
-#
-# [whisper.params]
-# language = "auto"
-# no_timestamps = true
-# no_context = true
-# temperature = 0.0
-# entropy_thold = 2.4
-# no_speech_thold = 0.6
-#
-# [whisper.turbo.params]
-# language = "sv"

@@ -22,7 +22,11 @@ impl SpectrumAnalyzer {
     }
 
     /// Updates spectrum with new samples, applying smoothing.
-    pub fn update(&mut self, samples: &[i16], sample_rate: u32, reference_level_db: i8) {
+    ///
+    /// Bars attack instantly on rising energy but fall gradually (~15% per
+    /// update), giving the classic analyzer "gravity" feel instead of
+    /// symmetric jitter.
+    pub fn update(&mut self, samples: &[i16], sample_rate: u32, reference_level_db: f32) {
         let new_bins = calculate_spectrum(
             samples,
             sample_rate,
@@ -31,9 +35,12 @@ impl SpectrumAnalyzer {
             &mut self.fft_planner,
         );
 
-        // Apply moving average smoothing to reduce visual jitter
         for (old_val, new_val) in self.display_data.iter_mut().zip(new_bins.iter()) {
-            *old_val = (*old_val + *new_val) / 2;
+            if *new_val >= *old_val {
+                *old_val = *new_val;
+            } else {
+                *old_val = (*old_val * 85 / 100).max(*new_val);
+            }
         }
     }
 
@@ -43,7 +50,7 @@ impl SpectrumAnalyzer {
         new_width: usize,
         samples: &[i16],
         sample_rate: u32,
-        reference_level_db: i8,
+        reference_level_db: f32,
     ) {
         self.num_bins = new_width;
         if !samples.is_empty() {
@@ -65,6 +72,25 @@ impl SpectrumAnalyzer {
     }
 }
 
+/// Remaps spectrum bins to a center-out layout for display.
+///
+/// Low frequencies land in the middle of the display and high frequencies
+/// mirror out toward both edges, so the energetic voice fundamentals sit in
+/// the visual center.
+pub fn center_out_layout(data: &[u64], width: usize) -> Vec<u64> {
+    if data.is_empty() || width == 0 {
+        return vec![0; width];
+    }
+    let half = width as f32 / 2.0;
+    (0..width)
+        .map(|i| {
+            let dist = ((i as f32 + 0.5) - half).abs() / half;
+            let idx = (dist * (data.len() - 1) as f32).round() as usize;
+            data[idx.min(data.len() - 1)]
+        })
+        .collect()
+}
+
 /// Calculates frequency spectrum from audio samples using FFT.
 ///
 /// Returns magnitudes normalized to 0-100, matching volume meter scaling.
@@ -80,7 +106,7 @@ pub fn calculate_spectrum(
     samples: &[i16],
     sample_rate: u32,
     num_bins: usize,
-    reference_level_db: i8,
+    reference_level_db: f32,
     fft_planner: &mut FftPlanner<f32>,
 ) -> Vec<u64> {
     if samples.is_empty() {
@@ -117,7 +143,7 @@ pub fn calculate_spectrum(
     let min_bin = (min_freq / freq_resolution) as usize;
     let max_bin = (max_freq / freq_resolution).min((fft_size / 2) as f32) as usize;
 
-    let noise_gate_db = reference_level_db as f32 - 35.0;
+    let noise_gate_db = reference_level_db - 35.0;
 
     // Distribute FFT bins evenly across display width
     let useful_bins = max_bin - min_bin;
@@ -158,7 +184,7 @@ pub fn calculate_spectrum(
             if adjusted_db < noise_gate_db {
                 *result_bin = 0;
             } else {
-                let db_range = reference_level_db as f32 - noise_gate_db;
+                let db_range = reference_level_db - noise_gate_db;
                 let normalized =
                     ((adjusted_db - noise_gate_db) / db_range * 100.0).clamp(0.0, 100.0);
                 *result_bin = normalized as u64;

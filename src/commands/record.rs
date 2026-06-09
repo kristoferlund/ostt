@@ -35,7 +35,7 @@ pub async fn handle_record(
 ) -> anyhow::Result<()> {
     tracing::info!("=== ostt Audio Recorder Started ===");
     tracing::info!(
-        "Configuration loaded: device={}, peak_threshold={}%, reference_level={}dBFS",
+        "Configuration loaded: device={}, peak_threshold={}%, reference_level={}",
         config.audio.device,
         config.audio.peak_volume_threshold,
         config.audio.reference_level_db
