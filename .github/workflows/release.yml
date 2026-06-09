@@ -255,16 +255,12 @@ jobs:
         run: cargo deb --no-build
       - name: Build .rpm package
         run: cargo generate-rpm
-      - name: Create stable-name copies
-        run: |
-          cp target/debian/*.deb target/debian/ostt_latest_${{ matrix.deb_arch }}.deb
-          cp target/generate-rpm/*.rpm target/generate-rpm/ostt-latest.${{ matrix.rpm_arch }}.rpm
       - name: Create package checksums
         run: |
           cd target/debian
-          sha256sum ostt_latest_${{ matrix.deb_arch }}.deb > ostt_latest_${{ matrix.deb_arch }}.deb.sha256
+          sha256sum *.deb > "$(ls *.deb).sha256"
           cd ../generate-rpm
-          sha256sum ostt-latest.${{ matrix.rpm_arch }}.rpm > ostt-latest.${{ matrix.rpm_arch }}.rpm.sha256
+          sha256sum *.rpm > "$(ls *.rpm).sha256"
       - name: "Upload Linux packages"
         uses: actions/upload-artifact@v4
         with:
@@ -330,37 +326,32 @@ jobs:
         run: cargo deb --no-build --variant cuda
       - name: Build .rpm package (cuda variant)
         run: cargo generate-rpm -s 'name = "ostt-cuda"'
-      - name: Create stable-name copies and archive
+      - name: Create versioned archive and checksums
         run: |
-          # .deb
-          cp target/debian/ostt-cuda_*.deb target/debian/ostt-cuda_latest_amd64.deb
-          # .rpm
-          cp target/generate-rpm/ostt-cuda-*.rpm target/generate-rpm/ostt-cuda-latest.x86_64.rpm
-          # tar.gz archive (named with -cuda suffix for the install script)
+          VERSION=${GITHUB_REF_NAME#v}
+          # tar.gz archive with version in name
           mkdir -p /tmp/ostt-cuda-archive
           cp target/dist/ostt /tmp/ostt-cuda-archive/ostt
-          tar -czf ostt-x86_64-unknown-linux-gnu-cuda.tar.gz \
+          tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
             -C /tmp/ostt-cuda-archive ostt
-      - name: Create checksums
-        run: |
+          sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
+            > "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256"
+          # .deb and .rpm checksums (already versioned by cargo-deb / cargo-generate-rpm)
           cd target/debian
-          sha256sum ostt-cuda_latest_amd64.deb > ostt-cuda_latest_amd64.deb.sha256
+          sha256sum ostt-cuda_*.deb > "$(ls ostt-cuda_*.deb).sha256"
           cd ../generate-rpm
-          sha256sum ostt-cuda-latest.x86_64.rpm > ostt-cuda-latest.x86_64.rpm.sha256
-          cd ../..
-          sha256sum ostt-x86_64-unknown-linux-gnu-cuda.tar.gz \
-            > ostt-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256
+          sha256sum ostt-cuda-*.rpm > "$(ls ostt-cuda-*.rpm).sha256"
       - name: Upload CUDA artifacts
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-build-linux-cuda-amd64
           path: |
-            ostt-x86_64-unknown-linux-gnu-cuda.tar.gz
-            ostt-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256
-            target/debian/ostt-cuda_latest_amd64.deb
-            target/debian/ostt-cuda_latest_amd64.deb.sha256
-            target/generate-rpm/ostt-cuda-latest.x86_64.rpm
-            target/generate-rpm/ostt-cuda-latest.x86_64.rpm.sha256
+            ostt-*-x86_64-unknown-linux-gnu-cuda.tar.gz
+            ostt-*-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256
+            target/debian/ostt-cuda_*.deb
+            target/debian/ostt-cuda_*.deb.sha256
+            target/generate-rpm/ostt-cuda-*.rpm
+            target/generate-rpm/ostt-cuda-*.rpm.sha256
 
   # Build Vulkan-accelerated Linux x86_64 binary and packages.
   # Produces ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz, ostt-vulkan .deb and .rpm.
@@ -402,37 +393,32 @@ jobs:
         run: cargo deb --no-build --variant vulkan
       - name: Build .rpm package (vulkan variant)
         run: cargo generate-rpm -s 'name = "ostt-vulkan"'
-      - name: Create stable-name copies and archive
+      - name: Create versioned archive and checksums
         run: |
-          # .deb
-          cp target/debian/ostt-vulkan_*.deb target/debian/ostt-vulkan_latest_amd64.deb
-          # .rpm
-          cp target/generate-rpm/ostt-vulkan-*.rpm target/generate-rpm/ostt-vulkan-latest.x86_64.rpm
-          # tar.gz archive (named with -vulkan suffix for the install script)
+          VERSION=${GITHUB_REF_NAME#v}
+          # tar.gz archive with version in name
           mkdir -p /tmp/ostt-vulkan-archive
           cp target/dist/ostt /tmp/ostt-vulkan-archive/ostt
-          tar -czf ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz \
+          tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz" \
             -C /tmp/ostt-vulkan-archive ostt
-      - name: Create checksums
-        run: |
+          sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz" \
+            > "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz.sha256"
+          # .deb and .rpm checksums (already versioned by cargo-deb / cargo-generate-rpm)
           cd target/debian
-          sha256sum ostt-vulkan_latest_amd64.deb > ostt-vulkan_latest_amd64.deb.sha256
+          sha256sum ostt-vulkan_*.deb > "$(ls ostt-vulkan_*.deb).sha256"
           cd ../generate-rpm
-          sha256sum ostt-vulkan-latest.x86_64.rpm > ostt-vulkan-latest.x86_64.rpm.sha256
-          cd ../..
-          sha256sum ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz \
-            > ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz.sha256
+          sha256sum ostt-vulkan-*.rpm > "$(ls ostt-vulkan-*.rpm).sha256"
       - name: Upload Vulkan artifacts
         uses: actions/upload-artifact@v4
         with:
           name: artifacts-build-linux-vulkan-amd64
           path: |
-            ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz
-            ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz.sha256
-            target/debian/ostt-vulkan_latest_amd64.deb
-            target/debian/ostt-vulkan_latest_amd64.deb.sha256
-            target/generate-rpm/ostt-vulkan-latest.x86_64.rpm
-            target/generate-rpm/ostt-vulkan-latest.x86_64.rpm.sha256
+            ostt-*-x86_64-unknown-linux-gnu-vulkan.tar.gz
+            ostt-*-x86_64-unknown-linux-gnu-vulkan.tar.gz.sha256
+            target/debian/ostt-vulkan_*.deb
+            target/debian/ostt-vulkan_*.deb.sha256
+            target/generate-rpm/ostt-vulkan-*.rpm
+            target/generate-rpm/ostt-vulkan-*.rpm.sha256
 
   # Determines if we should publish/announce
   host:

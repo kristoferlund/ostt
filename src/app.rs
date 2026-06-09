@@ -73,10 +73,17 @@ fn load_config() -> anyhow::Result<crate::config::OsttConfig> {
     })
 }
 
+#[cfg(feature = "whisper-vulkan")]
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-vulkan");
+#[cfg(feature = "whisper-cuda")]
+const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-cuda");
+#[cfg(not(any(feature = "whisper-vulkan", feature = "whisper-cuda")))]
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 /// A terminal-based speech-to-text recorder with real-time waveform visualization
 #[derive(Parser)]
 #[command(name = "ostt")]
-#[command(version)]
+#[command(version = VERSION)]
 #[command(about = "\n\n┏┓┏╋╋ \n┗┛┛┗┗")]
 #[command(
     long_about = "\n\n┏┓┏╋╋ \n┗┛┛┗┗\n\nA terminal-based speech-to-text recorder with real-time waveform visualization\nand automatic transcription support.\n\nDEFAULT COMMAND:\n    If no command is specified, 'record' is used by default.\n    Record options (-c, -o) can be used without explicitly saying 'record'.\n\nEXAMPLES:\n    # Record and pipe to other command (default stdout)\n    $ ostt | grep word\n    $ ostt record | grep word\n    \n    # Record and copy to clipboard\n    $ ostt -c\n    $ ostt record -c\n    $ ostt -m deepgram/nova-3 -c\n    \n    # Record and write to file\n    $ ostt -o output.txt\n    $ ostt record -o output.txt\n    \n    # Retry most recent recording and pipe output\n    $ ostt retry | wc -w\n    \n    # Retry recording #2 and copy to clipboard\n    $ ostt retry 2 -c\n    \n    # Transcribe a pre-recorded audio file\n    $ ostt transcribe recording.ogg\n    $ ostt transcribe recording.ogg -m openai/gpt-4o-transcribe\n    \n    # Transcribe and copy to clipboard\n    $ ostt transcribe voice-memo.mp3 -c\n    \n    # Set up authentication for cloud providers\n    $ ostt auth\n    \n    # Choose cloud or local transcription model\n    $ ostt model\n    \n    # View your transcription history\n    $ ostt history\n    \n    # Manage transcription keywords\n    $ ostt keyword\n\n    # Manage deterministic text replace rules\n    $ ostt replace\n    \n    # Edit configuration file\n    $ ostt config"
