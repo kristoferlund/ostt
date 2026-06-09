@@ -72,6 +72,10 @@ pub(super) async fn transcribe(
     let model_path = resolve_installed_model_path(&config.model_id)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
     whisper_rs::install_logging_hooks();
+    tracing::info!(
+        "local transcription: loading model with {}",
+        crate::transcription::local_inference_backend()
+    );
 
     let text = tokio::task::spawn_blocking(move || {
         let model_path = model_path.to_string_lossy().into_owned();
@@ -80,7 +84,7 @@ pub(super) async fn transcribe(
         let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
             .map_err(|err| ModelError::LoadFailed(err.to_string()))?;
         tracing::info!(
-            "local transcription backend: {}",
+            "local transcription: backend active: {}",
             crate::transcription::local_inference_backend_details()
         );
         let mut state = ctx
