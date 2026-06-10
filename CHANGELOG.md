@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.25 - 2026-06-10
+
 ### Changed
 
 - Audio capture now uses the system `default` input device by default instead of requiring a named device.

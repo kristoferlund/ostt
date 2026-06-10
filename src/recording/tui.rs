@@ -22,7 +22,9 @@ use crate::process::process_view::{handle_picker_event, render_process_view, Pic
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::is_cancel_key;
 
-use super::visualizations::{center_out_layout, resize_waveform, update_waveform, SpectrumAnalyzer};
+use super::visualizations::{
+    center_out_layout, resize_waveform, update_waveform, SpectrumAnalyzer,
+};
 
 const PENDING_AUDIO_SAMPLE_RATE: u32 = 48_000;
 
@@ -179,8 +181,7 @@ impl RecordingTui {
 
     /// Returns true if clipping was detected recently (auto mode indicator).
     fn is_clipping(&self) -> bool {
-        self.last_clip_time
-            .is_some_and(|t| t.elapsed() < CLIP_HOLD)
+        self.last_clip_time.is_some_and(|t| t.elapsed() < CLIP_HOLD)
     }
 
     /// Renders the visualization with current volume and recording duration.

@@ -1376,7 +1376,8 @@ mod tests {
         let missing: AudioConfig = toml::from_str("device = \"default\"").unwrap();
         assert_eq!(missing.reference_level_db, ReferenceLevel::Auto);
 
-        let invalid = toml::from_str::<AudioConfig>("device = \"default\"\nreference_level_db = \"loud\"");
+        let invalid =
+            toml::from_str::<AudioConfig>("device = \"default\"\nreference_level_db = \"loud\"");
         assert!(invalid.is_err());
     }
 
