@@ -399,7 +399,7 @@ fn run_recording_loop(
                     tracing::debug!("Recording: {:.1}s recorded", duration_secs);
                 }
 
-                tui.render_waveform(&audio_recorder.samples())
+                tui.render_waveform(&audio_recorder.samples(), audio_recorder.take_true_peak())
                     .map_err(|e| anyhow::anyhow!(e.to_string()))
                     .context("failed to render recording waveform")?;
             }
@@ -408,7 +408,7 @@ fn run_recording_loop(
             RecordingCommand::TogglePause => {
                 audio_recorder.toggle_pause();
                 tui.is_paused = audio_recorder.is_paused();
-                tui.render_waveform(&audio_recorder.samples())
+                tui.render_waveform(&audio_recorder.samples(), audio_recorder.take_true_peak())
                     .map_err(|e| anyhow::anyhow!(e.to_string()))
                     .context("failed to render recording waveform")?;
             }

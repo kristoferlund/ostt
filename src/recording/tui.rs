@@ -187,8 +187,12 @@ impl RecordingTui {
     ///
     /// # Errors
     /// - If terminal rendering fails
-    pub fn render_waveform(&mut self, samples: &[i16]) -> Result<(), Box<dyn Error>> {
-        let current_volume = self.calculate_volume(samples);
+    pub fn render_waveform(
+        &mut self,
+        samples: &[i16],
+        raw_true_peak: u16,
+    ) -> Result<(), Box<dyn Error>> {
+        let current_volume = self.calculate_volume(samples, raw_true_peak);
         let reference_db = self.effective_reference_db();
 
         if !self.is_paused && self.last_sample_time.elapsed() >= self.sample_interval {
@@ -411,7 +415,7 @@ impl RecordingTui {
     /// Converts RMS (Root Mean Square) audio samples to dBFS and normalizes to 0-100% scale
     /// based on the configured reference level. Also tracks the maximum volume seen in the
     /// last 3 seconds for the peak indicator.
-    fn calculate_volume(&mut self, samples: &[i16]) -> u8 {
+    fn calculate_volume(&mut self, samples: &[i16], raw_true_peak: u16) -> u8 {
         if samples.is_empty() {
             return 0;
         }
@@ -430,14 +434,11 @@ impl RecordingTui {
             -160.0
         };
 
-        // True peak of the window, for the absolute clip indicator
-        let peak_abs = recent_samples
-            .iter()
-            .map(|&x| i32::from(x).abs())
-            .max()
-            .unwrap_or(0);
-        if !self.is_paused && peak_abs > 0 {
-            let true_peak_db = 20.0 * (peak_abs as f32 / 32767.0).log10();
+        // Absolute clip indicator: use the raw, un-downmixed true peak supplied
+        // by the recorder. A mono mic on one channel of a multi-channel device
+        // would otherwise be attenuated by the mono averaging and never clip.
+        if !self.is_paused && raw_true_peak > 0 {
+            let true_peak_db = 20.0 * (f32::from(raw_true_peak) / 32767.0).log10();
             if true_peak_db >= CLIP_PEAK_DB {
                 self.last_clip_time = Some(std::time::Instant::now());
             }
