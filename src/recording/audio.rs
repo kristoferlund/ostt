@@ -12,6 +12,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "linux")]
@@ -32,6 +33,10 @@ pub struct AudioRecorder {
     sample_rate: u32,
     /// Recorded audio samples (i16 PCM mono)
     samples: Arc<Mutex<Vec<i16>>>,
+    /// Highest absolute raw sample seen across all channels since the last read.
+    /// Used for clipping detection on the un-downmixed signal, so a mono mic on
+    /// a single channel of a multi-channel device is still detected as clipping.
+    true_peak: Arc<AtomicU16>,
     /// Active audio input stream (kept alive during recording)
     stream: Option<cpal::Stream>,
     /// Number of channels in device's native format
@@ -49,6 +54,7 @@ impl AudioRecorder {
         Self {
             sample_rate: 0,
             samples: Arc::new(Mutex::new(Vec::new())),
+            true_peak: Arc::new(AtomicU16::new(0)),
             stream: None,
             device_channels: 1,
             is_paused: Arc::new(Mutex::new(false)),
@@ -100,6 +106,7 @@ impl AudioRecorder {
         // Set up audio callback with cloned Arc references
         let samples_arc = Arc::clone(&self.samples);
         let pause_arc = Arc::clone(&self.is_paused);
+        let true_peak_arc = Arc::clone(&self.true_peak);
         let callback_channels = num_channels;
 
         let stream = device
@@ -108,6 +115,10 @@ impl AudioRecorder {
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
                     let is_paused = *pause_arc.lock().unwrap();
                     if !is_paused {
+                        // Track the peak of the raw, un-downmixed samples so a
+                        // hot single channel still registers as clipping.
+                        let peak = data.iter().map(|&s| s.unsigned_abs()).max().unwrap_or(0);
+                        true_peak_arc.fetch_max(peak, Ordering::Relaxed);
                         Self::handle_audio_callback(data, &samples_arc, callback_channels);
                     }
                 },
@@ -320,6 +331,13 @@ impl AudioRecorder {
     /// Returns the number of recorded samples.
     pub fn sample_count(&self) -> usize {
         self.samples.lock().unwrap().len()
+    }
+
+    /// Returns the highest absolute raw sample seen across all channels since
+    /// the last call, resetting the running peak to zero. Drives the clipping
+    /// indicator from the un-downmixed signal.
+    pub fn take_true_peak(&self) -> u16 {
+        self.true_peak.swap(0, Ordering::Relaxed)
     }
 
     /// Returns the actual sample rate of the recording.

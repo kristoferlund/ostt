@@ -41,19 +41,27 @@ pub struct AudioConfig {
     /// - "default" for system default device
     /// - numeric index (0, 1, 2, etc.) from `ostt config list-devices`
     /// - device name from `ostt config list-devices`
+    #[serde(default = "default_device")]
     pub device: String,
-    /// Peak volume threshold for visual indicator (0-100, percentage of reference level)
+    /// Peak volume threshold for visual indicator (0-100, percentage of reference level).
+    /// Only used with a fixed reference level; in "auto" mode the red indicator
+    /// means actual clipping.
     #[serde(default = "default_peak_volume_threshold")]
     pub peak_volume_threshold: u8,
-    /// Reference level in dBFS for 100% meter display (typical: -20 to -6 dBFS)
+    /// Reference level for 100% meter display: "auto" (adapt to the observed
+    /// speech level, default) or a fixed dBFS value (typical: -20 to -6)
     #[serde(default = "default_reference_level_db")]
-    pub reference_level_db: i8,
+    pub reference_level_db: ReferenceLevel,
     /// Output audio format string: "codec [ffmpeg_options]" (e.g., "mp3 -ab 16k -ar 12000")
     #[serde(default = "default_output_format")]
     pub output_format: String,
     /// Visualization type: "spectrum" (frequency-based) or "waveform" (time-based amplitude)
     #[serde(default)]
     pub visualization: VisualizationType,
+}
+
+fn default_device() -> String {
+    "default".to_string()
 }
 
 fn default_output_format() -> String {
@@ -70,8 +78,56 @@ fn default_peak_volume_threshold() -> u8 {
     90
 }
 
-fn default_reference_level_db() -> i8 {
-    -20
+fn default_reference_level_db() -> ReferenceLevel {
+    ReferenceLevel::Auto
+}
+
+/// Reference level for the volume meter: adaptive or a fixed dBFS value.
+///
+/// Serialized as the string `"auto"` or a plain integer, so existing configs
+/// with `reference_level_db = -20` keep working.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceLevel {
+    /// Adapt the meter scale to the observed speech level (default)
+    Auto,
+    /// Fixed reference in dBFS
+    Db(i8),
+}
+
+impl Serialize for ReferenceLevel {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            ReferenceLevel::Auto => serializer.serialize_str("auto"),
+            ReferenceLevel::Db(v) => serializer.serialize_i8(*v),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ReferenceLevel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Raw {
+            Db(i8),
+            Text(String),
+        }
+        match Raw::deserialize(deserializer)? {
+            Raw::Db(v) => Ok(ReferenceLevel::Db(v)),
+            Raw::Text(s) if s.eq_ignore_ascii_case("auto") => Ok(ReferenceLevel::Auto),
+            Raw::Text(s) => Err(serde::de::Error::custom(format!(
+                "invalid reference_level_db '{s}': expected \"auto\" or a dBFS number"
+            ))),
+        }
+    }
+}
+
+impl std::fmt::Display for ReferenceLevel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReferenceLevel::Auto => write!(f, "auto"),
+            ReferenceLevel::Db(v) => write!(f, "{v} dBFS"),
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -1305,6 +1361,23 @@ mod tests {
 
     fn parse_input(toml_str: &str) -> Result<ActionInput, toml::de::Error> {
         toml::from_str(toml_str)
+    }
+
+    #[test]
+    fn reference_level_parses_auto_numeric_and_default() {
+        let auto: AudioConfig =
+            toml::from_str("device = \"default\"\nreference_level_db = \"auto\"").unwrap();
+        assert_eq!(auto.reference_level_db, ReferenceLevel::Auto);
+
+        let fixed: AudioConfig =
+            toml::from_str("device = \"default\"\nreference_level_db = -18").unwrap();
+        assert_eq!(fixed.reference_level_db, ReferenceLevel::Db(-18));
+
+        let missing: AudioConfig = toml::from_str("device = \"default\"").unwrap();
+        assert_eq!(missing.reference_level_db, ReferenceLevel::Auto);
+
+        let invalid = toml::from_str::<AudioConfig>("device = \"default\"\nreference_level_db = \"loud\"");
+        assert!(invalid.is_err());
     }
 
     #[test]

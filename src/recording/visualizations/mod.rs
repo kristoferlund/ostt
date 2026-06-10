@@ -6,5 +6,5 @@
 pub mod spectrum;
 pub mod waveform;
 
-pub use spectrum::SpectrumAnalyzer;
+pub use spectrum::{center_out_layout, SpectrumAnalyzer};
 pub use waveform::{resize_waveform, update_waveform};

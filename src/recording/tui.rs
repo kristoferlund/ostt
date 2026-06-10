@@ -16,15 +16,37 @@ use ratatui::{
 use std::error::Error;
 use std::io::{stdout, Stdout};
 
-use crate::config::VisualizationType;
 use crate::config::{file::ProcessAction, OsttConfig};
+use crate::config::{ReferenceLevel, VisualizationType};
 use crate::process::process_view::{handle_picker_event, render_process_view, PickerResult};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::is_cancel_key;
 
-use super::visualizations::{resize_waveform, update_waveform, SpectrumAnalyzer};
+use super::visualizations::{center_out_layout, resize_waveform, update_waveform, SpectrumAnalyzer};
 
 const PENDING_AUDIO_SAMPLE_RATE: u32 = 48_000;
+
+/// How fast peak caps sink, in display units (0-100) per rendered frame
+/// (~20 fps → full-scale fall in ~3.3 seconds).
+const CAP_FALL_PER_FRAME: f32 = 1.5;
+
+/// True-peak level treated as clipping for the red indicator (auto mode).
+/// Absolute, so it needs no per-machine calibration.
+const CLIP_PEAK_DB: f32 = -3.0;
+
+/// How long the clip indicator stays lit after a clip is detected.
+const CLIP_HOLD: std::time::Duration = std::time::Duration::from_millis(1500);
+
+/// Starting point for the adaptive reference level before any speech is heard.
+const ADAPTIVE_REF_INITIAL_DB: f32 = -24.0;
+
+/// Bounds for the adaptive reference level.
+const ADAPTIVE_REF_MIN_DB: f32 = -35.0;
+const ADAPTIVE_REF_MAX_DB: f32 = -6.0;
+
+/// Slow release rate per rendered frame (~0.5 dB/s at 20 fps), applied while
+/// signal is present but below the current reference.
+const ADAPTIVE_REF_RELEASE_PER_FRAME: f32 = 0.025;
 
 /// User input command during recording.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,14 +70,18 @@ pub struct RecordingTui {
     display_data: Vec<u64>,
     last_sample_time: std::time::Instant,
     sample_interval: std::time::Duration,
-    last_peak: u8,
     terminal_width: usize,
     sample_rate: u32,
     recording_start_time: std::time::Instant,
     peak_hold: u8,
     peak_hold_time: std::time::Instant,
     peak_volume_threshold: u8,
-    reference_level_db: i8,
+    /// Configured reference level: auto (adaptive) or fixed dBFS
+    reference_level: ReferenceLevel,
+    /// Current adaptive reference in dBFS (used in auto mode)
+    adaptive_ref_db: f32,
+    /// When clipping was last detected (drives the red indicator in auto mode)
+    last_clip_time: Option<std::time::Instant>,
     /// Whether recording is currently paused
     pub is_paused: bool,
     /// Total time paused (accumulated when paused)
@@ -66,6 +92,8 @@ pub struct RecordingTui {
     visualization_type: VisualizationType,
     /// Spectrum analyzer (used when visualization_type is Spectrum)
     spectrum_analyzer: Option<SpectrumAnalyzer>,
+    /// Per-column peak cap positions (spectrum mode), sinking slowly over time
+    peak_caps: Vec<f32>,
     cleaned_up: bool,
 }
 
@@ -103,19 +131,21 @@ impl RecordingTui {
             display_data,
             last_sample_time: now,
             sample_interval,
-            last_peak: 0,
             terminal_width,
             sample_rate,
             recording_start_time: now,
             peak_hold: 0,
             peak_hold_time: now,
             peak_volume_threshold: config.audio.peak_volume_threshold,
-            reference_level_db: config.audio.reference_level_db,
+            reference_level: config.audio.reference_level_db,
+            adaptive_ref_db: ADAPTIVE_REF_INITIAL_DB,
+            last_clip_time: None,
             is_paused: false,
             pause_duration: std::time::Duration::ZERO,
             pause_start_time: None,
             visualization_type: config.audio.visualization,
             spectrum_analyzer,
+            peak_caps: Vec::new(),
             cleaned_up: false,
         })
     }
@@ -135,20 +165,41 @@ impl RecordingTui {
         self.pause_duration = std::time::Duration::ZERO;
         self.pause_start_time = None;
         self.is_paused = false;
+        self.adaptive_ref_db = ADAPTIVE_REF_INITIAL_DB;
+        self.last_clip_time = None;
+    }
+
+    /// Returns the reference level (dBFS) currently used for meter scaling.
+    fn effective_reference_db(&self) -> f32 {
+        match self.reference_level {
+            ReferenceLevel::Db(v) => f32::from(v),
+            ReferenceLevel::Auto => self.adaptive_ref_db,
+        }
+    }
+
+    /// Returns true if clipping was detected recently (auto mode indicator).
+    fn is_clipping(&self) -> bool {
+        self.last_clip_time
+            .is_some_and(|t| t.elapsed() < CLIP_HOLD)
     }
 
     /// Renders the visualization with current volume and recording duration.
     ///
     /// # Errors
     /// - If terminal rendering fails
-    pub fn render_waveform(&mut self, samples: &[i16]) -> Result<(), Box<dyn Error>> {
-        let current_volume = self.calculate_volume(samples);
+    pub fn render_waveform(
+        &mut self,
+        samples: &[i16],
+        raw_true_peak: u16,
+    ) -> Result<(), Box<dyn Error>> {
+        let current_volume = self.calculate_volume(samples, raw_true_peak);
+        let reference_db = self.effective_reference_db();
 
         if !self.is_paused && self.last_sample_time.elapsed() >= self.sample_interval {
             match self.visualization_type {
                 VisualizationType::Spectrum => {
                     if let Some(analyzer) = &mut self.spectrum_analyzer {
-                        analyzer.update(samples, self.sample_rate, self.reference_level_db);
+                        analyzer.update(samples, self.sample_rate, reference_db);
                         self.display_data = analyzer.data().to_vec();
                     }
                 }
@@ -169,12 +220,7 @@ impl RecordingTui {
             match self.visualization_type {
                 VisualizationType::Spectrum => {
                     if let Some(analyzer) = &mut self.spectrum_analyzer {
-                        analyzer.resize(
-                            current_width,
-                            samples,
-                            self.sample_rate,
-                            self.reference_level_db,
-                        );
+                        analyzer.resize(current_width, samples, self.sample_rate, reference_db);
                         self.display_data = analyzer.data().to_vec();
                     }
                 }
@@ -187,9 +233,54 @@ impl RecordingTui {
         // Pre-calculate values to avoid borrow checker issues in closure
         let is_paused = self.is_paused;
         let peak_hold = self.peak_hold;
-        let last_peak = self.last_peak;
-        let peak_volume_threshold = self.peak_volume_threshold;
         let recording_duration = self.get_recording_duration();
+
+        // Auto mode: red means actual clipping (absolute, no calibration).
+        // Fixed mode: red means exceeding the configured threshold.
+        let peak_alert = !is_paused
+            && match self.reference_level {
+                ReferenceLevel::Auto => self.is_clipping(),
+                ReferenceLevel::Db(_) => peak_hold >= self.peak_volume_threshold,
+            };
+
+        // Spectrum mode renders center-out: low frequencies in the middle,
+        // highs mirrored toward both edges. Sized to the padded content width
+        // so the mirror axis lands on the visual center of the screen.
+        let content_width = current_width.saturating_sub(4);
+        let render_data: Vec<u64> = match self.visualization_type {
+            VisualizationType::Spectrum => center_out_layout(&self.display_data, content_width),
+            VisualizationType::Waveform => self.display_data.clone(),
+        };
+
+        // Peak caps: hold each column's recent maximum and let it sink slowly
+        let show_caps = self.visualization_type == VisualizationType::Spectrum;
+        if show_caps {
+            if self.peak_caps.len() != render_data.len() {
+                self.peak_caps = vec![0.0; render_data.len()];
+            }
+            if !is_paused {
+                for (cap, &v) in self.peak_caps.iter_mut().zip(render_data.iter()) {
+                    *cap = (*cap - CAP_FALL_PER_FRAME).max(v as f32);
+                }
+            }
+        }
+
+        // Dim the whole visualization while paused so the state is obvious
+        let (viz_fg, mirror_bg, footer_fg, cap_fg) = if is_paused {
+            (
+                Color::Rgb(98, 110, 113),
+                Color::Rgb(88, 99, 102),
+                Color::Rgb(98, 110, 113),
+                Color::Rgb(120, 127, 125),
+            )
+        } else {
+            (
+                Color::Rgb(206, 224, 220),
+                Color::Rgb(185, 207, 212),
+                Color::Rgb(185, 207, 212),
+                Color::Rgb(240, 250, 246),
+            )
+        };
 
         self.terminal.draw(|frame| {
             let area = frame.area();
@@ -226,15 +317,36 @@ impl RecordingTui {
             };
 
             let top_sparkline = Sparkline::default()
-                .data(&self.display_data)
+                .data(&render_data)
                 .max(100)
-                .style(
-                    Style::default()
-                        .bg(Color::Rgb(0, 0, 0))
-                        .fg(Color::Rgb(206, 224, 220)),
-                );
+                .style(Style::default().bg(Color::Rgb(0, 0, 0)).fg(viz_fg));
 
             frame.render_widget(top_sparkline, top_area);
+
+            // Peak caps: a thin marker resting just above each column's bar
+            if show_caps {
+                let max_rows = i32::from(top_area.height);
+                let buf = frame.buffer_mut();
+                for (i, &cap) in self.peak_caps.iter().enumerate() {
+                    if i >= top_area.width as usize {
+                        break;
+                    }
+                    let cap_row = ((cap / 100.0) * (max_rows * 8) as f32) as i32 / 8;
+                    let bar_row = render_data[i] as i32 * max_rows * 8 / 100 / 8;
+                    // Only draw while the cap floats above the bar's top cell,
+                    // so it never clobbers the bar's partial block glyph
+                    if cap_row > bar_row && cap_row < max_rows {
+                        let x = top_area.x + i as u16;
+                        let y = top_area.y + top_area.height - 1 - cap_row as u16;
+                        buf.set_string(
+                            x,
+                            y,
+                            "▁",
+                            Style::default().fg(cap_fg).bg(Color::Rgb(0, 0, 0)),
+                        );
+                    }
+                }
+            }
 
             let bottom_area = Rect {
                 x: content_area.x,
@@ -243,17 +355,15 @@ impl RecordingTui {
                 height: content_area.height.saturating_sub(top_area_height),
             };
 
-            let inverted_data: Vec<u64> = self
-                .display_data
+            let inverted_data: Vec<u64> = render_data
                 .iter()
                 .map(|&v| 100_u64.saturating_sub(v))
                 .collect();
 
-            let bottom_sparkline = Sparkline::default().data(&inverted_data).max(100).style(
-                Style::default()
-                    .bg(Color::Rgb(185, 207, 212))
-                    .fg(Color::Rgb(0, 0, 0)),
-            );
+            let bottom_sparkline = Sparkline::default()
+                .data(&inverted_data)
+                .max(100)
+                .style(Style::default().bg(mirror_bg).fg(Color::Rgb(0, 0, 0)));
 
             frame.render_widget(bottom_sparkline, bottom_area);
 
@@ -264,51 +374,35 @@ impl RecordingTui {
                 height: footer_height,
             };
 
-            // When paused, show zeros for meters
-            let (display_peak, display_volume) = if is_paused {
-                (0u8, 0u8)
-            } else {
-                (peak_hold, last_peak)
-            };
+            // When paused, show zero for the peak meter
+            let display_peak = if is_paused { 0u8 } else { peak_hold };
 
-            let peak_style = if display_peak >= peak_volume_threshold {
+            // The whole footer lights up red when the signal peaks
+            let footer_style = if peak_alert {
                 Style::default()
                     .bg(Color::Red)
                     .fg(Color::Rgb(255, 255, 255))
             } else {
-                Style::default()
+                Style::default().fg(footer_fg).bg(Color::Rgb(0, 0, 0))
             };
 
             let duration_secs = recording_duration.as_secs();
             let minutes = duration_secs / 60;
             let secs = duration_secs % 60;
-            let duration_span = ratatui::text::Span::raw(format!("{minutes}:{secs:02}"));
 
-            let peak_span = ratatui::text::Span::styled(format!("{display_peak}%"), peak_style);
+            let mut spans = Vec::new();
+            if is_paused {
+                spans.push(ratatui::text::Span::styled(
+                    "⏸ ",
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+            spans.push(ratatui::text::Span::raw(format!(
+                "{minutes}:{secs:02} / {display_peak}%"
+            )));
 
-            let vol_span = ratatui::text::Span::raw(format!("{display_volume}%"));
-
-            // Show pause symbol instead of red dot when paused
-            let indicator = if is_paused {
-                ratatui::text::Span::styled("⏸ ", Style::default().fg(Color::Yellow))
-            } else {
-                ratatui::text::Span::styled("● ", Style::default().fg(Color::Red))
-            };
-
-            let help_text = ratatui::text::Line::from(vec![
-                indicator,
-                duration_span,
-                ratatui::text::Span::raw(" / "),
-                vol_span,
-                ratatui::text::Span::raw(" / "),
-                peak_span,
-            ]);
-
-            let footer = ratatui::widgets::Paragraph::new(help_text).style(
-                Style::default()
-                    .fg(Color::Rgb(185, 207, 212))
-                    .bg(Color::Rgb(0, 0, 0)),
-            );
+            let footer = ratatui::widgets::Paragraph::new(ratatui::text::Line::from(spans))
+                .style(footer_style);
 
             frame.render_widget(footer, footer_area);
         })?;
@@ -321,7 +415,7 @@ impl RecordingTui {
     /// Converts RMS (Root Mean Square) audio samples to dBFS and normalizes to 0-100% scale
     /// based on the configured reference level. Also tracks the maximum volume seen in the
     /// last 3 seconds for the peak indicator.
-    fn calculate_volume(&mut self, samples: &[i16]) -> u8 {
+    fn calculate_volume(&mut self, samples: &[i16], raw_true_peak: u16) -> u8 {
         if samples.is_empty() {
             return 0;
         }
@@ -340,10 +434,32 @@ impl RecordingTui {
             -160.0
         };
 
-        let min_db = self.reference_level_db as f32 - 40.0;
-        let normalized = ((db_fs - min_db) / 40.0 * 100.0).clamp(4.0, 100.0) as u8;
+        // Absolute clip indicator: use the raw, un-downmixed true peak supplied
+        // by the recorder. A mono mic on one channel of a multi-channel device
+        // would otherwise be attenuated by the mono averaging and never clip.
+        if !self.is_paused && raw_true_peak > 0 {
+            let true_peak_db = 20.0 * (f32::from(raw_true_peak) / 32767.0).log10();
+            if true_peak_db >= CLIP_PEAK_DB {
+                self.last_clip_time = Some(std::time::Instant::now());
+            }
+        }
 
-        self.last_peak = normalized;
+        // Auto mode: adapt the reference toward the observed speech level —
+        // fast attack when the signal exceeds it, slow release while signal
+        // is present but quieter, hold during silence
+        if self.reference_level == ReferenceLevel::Auto && !self.is_paused {
+            if db_fs > self.adaptive_ref_db {
+                self.adaptive_ref_db += (db_fs - self.adaptive_ref_db) * 0.5;
+            } else if db_fs > self.adaptive_ref_db - 25.0 {
+                self.adaptive_ref_db -= ADAPTIVE_REF_RELEASE_PER_FRAME;
+            }
+            self.adaptive_ref_db = self
+                .adaptive_ref_db
+                .clamp(ADAPTIVE_REF_MIN_DB, ADAPTIVE_REF_MAX_DB);
+        }
+
+        let min_db = self.effective_reference_db() - 40.0;
+        let normalized = ((db_fs - min_db) / 40.0 * 100.0).clamp(4.0, 100.0) as u8;
 
         if normalized > self.peak_hold || self.peak_hold_time.elapsed().as_secs() >= 3 {
             self.peak_hold = normalized;
