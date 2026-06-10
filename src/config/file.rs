@@ -41,6 +41,7 @@ pub struct AudioConfig {
     /// - "default" for system default device
     /// - numeric index (0, 1, 2, etc.) from `ostt config list-devices`
     /// - device name from `ostt config list-devices`
+    #[serde(default = "default_device")]
     pub device: String,
     /// Peak volume threshold for visual indicator (0-100, percentage of reference level).
     /// Only used with a fixed reference level; in "auto" mode the red indicator
@@ -57,6 +58,10 @@ pub struct AudioConfig {
     /// Visualization type: "spectrum" (frequency-based) or "waveform" (time-based amplitude)
     #[serde(default)]
     pub visualization: VisualizationType,
+}
+
+fn default_device() -> String {
+    "default".to_string()
 }
 
 fn default_output_format() -> String {
