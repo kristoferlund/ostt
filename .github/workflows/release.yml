@@ -328,14 +328,17 @@ jobs:
         run: cargo generate-rpm -s 'name = "ostt-cuda"'
       - name: Create versioned archive and checksums
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          # tar.gz archive with version in name
-          mkdir -p /tmp/ostt-cuda-archive
-          cp target/dist/ostt /tmp/ostt-cuda-archive/ostt
-          tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
-            -C /tmp/ostt-cuda-archive ostt
-          sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
-            > "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256"
+          # Only create a versioned tar.gz on tag pushes (GITHUB_REF_NAME is a version,
+          # not a PR merge ref like "84/merge" which contains a slash).
+          if [[ "$GITHUB_REF_NAME" != */* ]]; then
+            VERSION=${GITHUB_REF_NAME#v}
+            mkdir -p /tmp/ostt-cuda-archive
+            cp target/dist/ostt /tmp/ostt-cuda-archive/ostt
+            tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
+              -C /tmp/ostt-cuda-archive ostt
+            sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
+              > "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256"
+          fi
           # .deb and .rpm checksums (already versioned by cargo-deb / cargo-generate-rpm)
           cd target/debian
           sha256sum ostt-cuda_*.deb > "$(ls ostt-cuda_*.deb).sha256"
@@ -395,14 +398,17 @@ jobs:
         run: cargo generate-rpm -s 'name = "ostt-vulkan"'
       - name: Create versioned archive and checksums
         run: |
-          VERSION=${GITHUB_REF_NAME#v}
-          # tar.gz archive with version in name
-          mkdir -p /tmp/ostt-vulkan-archive
-          cp target/dist/ostt /tmp/ostt-vulkan-archive/ostt
-          tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz" \
-            -C /tmp/ostt-vulkan-archive ostt
-          sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz" \
-            > "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz.sha256"
+          # Only create a versioned tar.gz on tag pushes (GITHUB_REF_NAME is a version,
+          # not a PR merge ref like "84/merge" which contains a slash).
+          if [[ "$GITHUB_REF_NAME" != */* ]]; then
+            VERSION=${GITHUB_REF_NAME#v}
+            mkdir -p /tmp/ostt-vulkan-archive
+            cp target/dist/ostt /tmp/ostt-vulkan-archive/ostt
+            tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz" \
+              -C /tmp/ostt-vulkan-archive ostt
+            sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz" \
+              > "ostt-${VERSION}-x86_64-unknown-linux-gnu-vulkan.tar.gz.sha256"
+          fi
           # .deb and .rpm checksums (already versioned by cargo-deb / cargo-generate-rpm)
           cd target/debian
           sha256sum ostt-vulkan_*.deb > "$(ls ostt-vulkan_*.deb).sha256"
