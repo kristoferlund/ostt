@@ -9,10 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Audio capture now uses the system `default` input device by default instead of requiring a named device.
 - The volume meter now calibrates itself by default (`reference_level_db = "auto"`). The meter scale adapts to the observed speech level — fast attack, slow release — so metering works out of the box regardless of OS input gain, on macOS and Linux alike. Setting a numeric `reference_level_db` keeps the previous fixed-reference behavior.
 - The red peak indicator now means actual clipping (signal within 3 dB of full scale) when using auto mode, instead of crossing an arbitrary configurable level. When the signal clips, the entire recording footer lights up red for 1.5 seconds. `peak_volume_threshold` now only applies with a fixed reference level.
 - Simplified the recording footer: removed the red recording dot and the rapidly flickering instantaneous volume value, leaving the duration and the peak-hold percentage.
 - Polished the spectrum visualization: bars now rise instantly and fall with gravity, per-column peak caps sink slowly after loud moments, the spectrum is mirrored center-out so voice fundamentals sit in the middle of the screen, and the whole display dims while recording is paused.
+
+### Fixed
+
+- Clipping detection now checks the raw multi-channel input before mono downmixing, so single-channel microphones on multi-channel interfaces no longer hide true peaks.
 
 ## 0.0.24 - 2026-06-09
 

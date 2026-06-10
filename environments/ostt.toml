@@ -12,6 +12,7 @@
 #
 # To see available devices, run: ostt list-devices
 device = "default"
+
 # Output audio format (uses ffmpeg for conversion)
 # Format: "codec [ffmpeg_options]"
 # All audio is saved mono with ffmpeg handling resampling/compression
