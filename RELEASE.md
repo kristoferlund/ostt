@@ -140,10 +140,11 @@ the website repository and does **not** update itself when a release is
 published. If this step is skipped, the installer keeps installing the previous
 version.
 
-> Note: the installer still constructs asset filenames itself and does not read
-> `latest.json` yet; that switch is tracked in issue #90. Do this step anyway —
-> it keeps the manifest correct so the switch is a one-line change rather than a
-> release-blocking scramble.
+The installer fails with an explicit error if the manifest is unreachable; it
+does not silently fall back to guessing filenames. It also compares the
+manifest version against the newest GitHub release and warns loudly when they
+disagree, so a skipped refresh shows up in user-visible output rather than
+quietly serving an old release.
 
 Run this only after step 5 has confirmed the release assets exist.
 
