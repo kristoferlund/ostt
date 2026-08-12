@@ -16,6 +16,7 @@ Every release must update or verify these targets:
 - GitHub Release: `https://github.com/kristoferlund/ostt/releases/tag/v<VERSION>`
 - Homebrew tap: `kristoferlund/homebrew-ostt`
 - Documentation changelog: `../ostt-web/guide/changelog.md`
+- Install manifest: `../ostt-web/public/latest.json`
 - AUR source package: `../aur-ostt`
 - AUR CPU binary package: `../aur-ostt-bin`
 - AUR CUDA binary package: `../aur-ostt-cuda-bin`
@@ -131,7 +132,67 @@ gh release view v<VERSION> --json url,name,tagName,isDraft,isPrerelease,publishe
 
 Do not update the binary AUR packages until the GitHub release assets exist.
 
-## 6. Collect AUR Checksums
+## 6. Refresh The Install Manifest
+
+The one-line installer at `https://ostt.ai/install` resolves download URLs and
+checksums from `https://ostt.ai/latest.json`. That file is a static artifact in
+the website repository and does **not** update itself when a release is
+published. If this step is skipped, the installer keeps installing the previous
+version.
+
+> Note: the installer still constructs asset filenames itself and does not read
+> `latest.json` yet; that switch is tracked in issue #90. Do this step anyway —
+> it keeps the manifest correct so the switch is a one-line change rather than a
+> release-blocking scramble.
+
+Run this only after step 5 has confirmed the release assets exist.
+
+```bash
+cd ../ostt-web
+node scripts/gen-manifest.mjs
+```
+
+The generator reads the latest GitHub release and derives every URL and SHA-256
+from the published assets, so it never requires a new release to run. It exits
+non-zero if the release is missing a target the installer knows how to request —
+that means the release itself is incomplete, so fix that before continuing.
+
+Set `GITHUB_TOKEN` if you hit the unauthenticated API rate limit:
+
+```bash
+GITHUB_TOKEN="$(gh auth token)" node scripts/gen-manifest.mjs
+```
+
+To regenerate for a specific tag instead of the latest release, pass it:
+
+```bash
+node scripts/gen-manifest.mjs v<VERSION>
+```
+
+Confirm the manifest points at the new version:
+
+```bash
+git diff -- public/latest.json
+grep '"version"' public/latest.json
+```
+
+Commit and push:
+
+```bash
+git add public/latest.json
+git commit -m "Update install manifest for <VERSION>"
+git push
+```
+
+Wait for ostt.ai to redeploy, then verify the live file:
+
+```bash
+curl -fsSL https://ostt.ai/latest.json | grep '"version"'
+```
+
+This must report `<VERSION>`. Do not continue until it does.
+
+## 7. Collect AUR Checksums
 
 Create a temporary checksum directory:
 
@@ -169,7 +230,7 @@ sha256sum ostt-x86_64-unknown-linux-gnu-cuda.tar.gz
 sha256sum ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz
 ```
 
-## 7. Update AUR Packages
+## 8. Update AUR Packages
 
 Update each sibling AUR repository.
 
@@ -200,7 +261,7 @@ Regenerate `.SRCINFO` in each AUR repository:
 makepkg --printsrcinfo > .SRCINFO
 ```
 
-## 8. Verify AUR Packages
+## 9. Verify AUR Packages
 
 Run source verification in each AUR repository, using the temporary source cache:
 
@@ -221,7 +282,7 @@ git status --short --branch
 git diff -- PKGBUILD .SRCINFO
 ```
 
-## 9. Commit And Push AUR Packages
+## 10. Commit And Push AUR Packages
 
 Commit in each AUR repository:
 
@@ -249,7 +310,7 @@ Do this for:
 - `../aur-ostt-cuda-bin`
 - `../aur-ostt-vulkan-bin`
 
-## 10. Confirm Final State
+## 11. Confirm Final State
 
 Confirm the main release:
 
@@ -259,11 +320,17 @@ git status --short --branch
 gh release view v<VERSION> --json url,name,tagName,publishedAt
 ```
 
-Confirm the website changelog repo is clean:
+Confirm the website repo is clean:
 
 ```bash
 cd ../ostt-web
 git status --short --branch
+```
+
+Confirm the live install manifest serves the new version:
+
+```bash
+curl -fsSL https://ostt.ai/latest.json | grep '"version"'
 ```
 
 Confirm every AUR repository is clean and pushed:
