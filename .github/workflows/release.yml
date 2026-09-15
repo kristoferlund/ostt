@@ -299,12 +299,19 @@ jobs:
           # symbols ggml uses are all CUDA 11-era and present throughout both
           # majors. What has to hold is the soname, which the verify step below
           # asserts.
+          # expect_sass / expect_ptx are ggml's CMAKE_CUDA_ARCHITECTURES for each
+          # toolkit with GGML_NATIVE off (ggml/src/ggml-cuda/CMakeLists.txt):
+          # "-real" entries become SASS, "-virtual" entries become PTX.
           - cuda_major: "12"
             cuda_apt_version: "12-8"
             variant: cuda
+            expect_sass: "86 89 120"
+            expect_ptx: "50 61 70 75 80"
           - cuda_major: "13"
             cuda_apt_version: "13-0"
             variant: cuda13
+            expect_sass: "86 89 120 121"
+            expect_ptx: "75 80"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CUDA_VERSION: ${{ matrix.cuda_apt_version }}
@@ -377,53 +384,81 @@ jobs:
         #
         #   1. The CUDA major linked has to match the name we publish under, or
         #      a libcublas.so.12 binary ships as cuda13.
-        #   2. The embedded GPU architectures have to be the list ggml selects,
-        #      not nvcc's single default. GGML_NATIVE=ON silently produced
+        #   2. The embedded GPU architectures have to be exactly the list ggml
+        #      selects -- SASS and PTX both. GGML_NATIVE=ON silently produced
         #      sm_52-only (CUDA 12) and sm_75-only (CUDA 13) binaries, so every
-        #      other GPU ran JIT-compiled PTX with no tuned kernels.
+        #      other GPU ran JIT-compiled PTX with no tuned kernels; and losing
+        #      compute_50 PTX from the CUDA 12 build would strand exactly the
+        #      Maxwell/Pascal GPUs it exists for. Only the .nv_fatbin section
+        #      is parsed: scanning the whole file for the magic could be
+        #      satisfied by a few bytes of embedded data.
         #   3. No AVX-512. -march=native bakes in the build host's ISA, which
         #      SIGILLs on any machine without it.
+        env:
+          EXPECT_SASS: ${{ matrix.expect_sass }}
+          EXPECT_PTX: ${{ matrix.expect_ptx }}
         run: |
           needed="$(readelf -d target/dist/ostt | grep -oE 'lib(cublas|cudart)\.so\.[0-9]+' | sort -u | tr '\n' ' ')"
           echo "needs: $needed"
           test "$needed" = "libcublas.so.${{ matrix.cuda_major }} libcudart.so.${{ matrix.cuda_major }} "
 
-          archs="$(python3 - <<'EOF'
-          import struct, collections
-          data = open("target/dist/ostt", "rb").read()
-          sms, off = collections.Counter(), 0
-          while True:
-              i = data.find(struct.pack("<I", 0xBA55ED50), off)
-              if i < 0:
+          python3 - <<'EOF'
+          import collections, os, struct, subprocess, sys
+
+          path = "target/dist/ostt"
+          off = size = None
+          for line in subprocess.check_output(["readelf", "-S", "-W", path], text=True).splitlines():
+              if ".nv_fatbin" in line:
+                  fields = line.split("]", 1)[1].split()   # name type addr off size ...
+                  off, size = int(fields[3], 16), int(fields[4], 16)
                   break
-              off = i + 4
-              _, _, hdrsz, fatsz = struct.unpack_from("<IHHQ", data, i)
-              if hdrsz != 16 or not 0 < fatsz <= len(data):
+          if off is None:
+              sys.exit("no .nv_fatbin section: this is not a CUDA build")
+
+          with open(path, "rb") as f:
+              f.seek(off)
+              data = f.read(size)
+
+          MAGIC = 0xBA55ED50
+          sass, ptx = collections.Counter(), collections.Counter()
+          p = 0
+          while p + 16 <= len(data):
+              magic, _, hdrsz, fatsz = struct.unpack_from("<IHHQ", data, p)
+              if magic != MAGIC:
+                  p += 4          # alignment padding between fatbins
                   continue
-              p, end = i + hdrsz, i + hdrsz + fatsz
-              while p < end - 16:
-                  kind, _, ehdr = struct.unpack_from("<HHI", data, p)
-                  if ehdr < 16 or p + ehdr > end:
-                      break
-                  padded, = struct.unpack_from("<Q", data, p + 8)
-                  sm, = struct.unpack_from("<I", data, p + 28)
-                  if kind == 2:          # 2 = SASS cubin, 1 = PTX
-                      sms[sm] += 1
-                  p += ehdr + padded
-          print(" ".join(str(s) for s in sorted(sms)))
+              end = p + hdrsz + fatsz
+              if hdrsz < 16 or end > len(data):
+                  sys.exit(f"corrupt fatbin header at {p}")
+              q = p + hdrsz
+              while q + 32 <= end:
+                  kind, _, ehdr = struct.unpack_from("<HHI", data, q)
+                  padded, = struct.unpack_from("<Q", data, q + 8)
+                  sm, = struct.unpack_from("<I", data, q + 28)
+                  if ehdr < 32 or q + ehdr + padded > end:
+                      sys.exit(f"corrupt fatbin entry at {q}")
+                  (sass if kind == 2 else ptx)[sm] += 1
+                  q += ehdr + padded
+              p = end
+
+          def show(name, c):
+              print(f"{name}: " + " ".join(f"sm_{k}x{v}" for k, v in sorted(c.items())))
+          show("SASS", sass)
+          show("PTX ", ptx)
+
+          ok = True
+          for name, got, want in (("SASS", sass, os.environ["EXPECT_SASS"]), ("PTX", ptx, os.environ["EXPECT_PTX"])):
+              want = {int(x) for x in want.split()}
+              if set(got) != want:
+                  print(f"{name} architectures {sorted(got)} != expected {sorted(want)}")
+                  ok = False
+          if not ok:
+              sys.exit(1)
           EOF
-          )"
-          echo "SASS architectures: $archs"
-          for want in 86 89; do
-            case " $archs " in
-            *" $want "*) ;;
-            *) echo "missing sm_${want}; CMAKE_CUDA_ARCHITECTURES did not reach nvcc"; exit 1 ;;
-            esac
-          done
 
           # zmm alone would miss AVX-512VL code on xmm/ymm and mask-register-only
-          # sequences, so match the EVEX-only mnemonics too.
-          if objdump -d target/dist/ostt | grep -Eq 'zmm|vpternlog|vmovdq[au]64|vmovdq[au](8|16|32)|kmov[bwdq]|vpbroadcast[bwdq]{1}.*%k'; then
+          # sequences, so match mask registers and the EVEX-only mnemonics too.
+          if objdump -d target/dist/ostt | grep -Eq 'zmm|%k[0-7]|vpternlog|vmovdq[au](8|16|32|64)'; then
             echo "binary contains AVX-512; the build was tuned for the runner"
             exit 1
           fi
@@ -525,6 +560,13 @@ jobs:
           ./target/dist/ostt completions bash > completions/ostt.bash
           ./target/dist/ostt completions zsh > completions/_ostt
           ./target/dist/ostt completions fish > completions/ostt.fish
+      - name: Verify the built binary
+        # Same ISA guard as the CUDA job: GGML_NATIVE=OFF must hold here too.
+        run: |
+          if objdump -d target/dist/ostt | grep -Eq 'zmm|%k[0-7]|vpternlog|vmovdq[au](8|16|32|64)'; then
+            echo "binary contains AVX-512; the build was tuned for the runner"
+            exit 1
+          fi
       - name: Build .deb package (vulkan variant)
         run: cargo deb --no-build --variant vulkan
       - name: Build .rpm package (vulkan variant)
