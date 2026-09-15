@@ -254,7 +254,10 @@ jobs:
       - name: Build .deb package
         run: cargo deb --no-build
       - name: Build .rpm package
-        run: cargo generate-rpm
+        # Declare the conflict with the GPU variants: all four own /usr/bin/ostt.
+        run: |
+          cargo generate-rpm \
+            -s 'conflicts = { "ostt-cuda" = "*", "ostt-cuda13" = "*", "ostt-vulkan" = "*" }'
       - name: Create package checksums
         run: |
           cd target/debian
@@ -278,7 +281,7 @@ jobs:
   # Both are required: the binaries link libcublas/libcudart by major soname
   # (libcublas.so.12 vs libcublas.so.13) and those are not interchangeable, while
   # CUDA 13 dropped offline compilation for Maxwell, Pascal, and Volta
-  # (compute 5.0-7.0), so CUDA 12 remains the only option for those GPUs.
+  # (compute 5.0-7.2), so CUDA 12 remains the only option for those GPUs.
   # Only runs on publishing events and PRs (same gate as build-linux-packages).
   build-linux-cuda:
     name: build-linux-cuda (x86_64, CUDA ${{ matrix.cuda_major }})
@@ -306,6 +309,9 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CUDA_VERSION: ${{ matrix.cuda_apt_version }}
       VARIANT: ${{ matrix.variant }}
+      # Read by build.rs: the two CUDA majors share one Cargo feature, so the
+      # `ostt --version` suffix (0.0.x-cuda13) has to come from here.
+      OSTT_BUILD_VARIANT: ${{ matrix.variant }}
       # ggml defaults GGML_NATIVE to ON, which tunes the build for whatever
       # machine happens to compile it. On a GitHub runner that is actively
       # wrong twice over: CMAKE_CUDA_ARCHITECTURES becomes "native", which
@@ -415,12 +421,28 @@ jobs:
             esac
           done
 
-          if objdump -d target/dist/ostt | grep -q 'zmm'; then
+          # zmm alone would miss AVX-512VL code on xmm/ymm and mask-register-only
+          # sequences, so match the EVEX-only mnemonics too.
+          if objdump -d target/dist/ostt | grep -Eq 'zmm|vpternlog|vmovdq[au]64|vmovdq[au](8|16|32)|kmov[bwdq]|vpbroadcast[bwdq]{1}.*%k'; then
             echo "binary contains AVX-512; the build was tuned for the runner"
             exit 1
           fi
       - name: Build .deb package (${{ matrix.variant }} variant)
         run: cargo deb --no-build --variant "$VARIANT"
+      - name: Verify package metadata
+        # `$auto` failing silently is how ostt-cuda once shipped with nothing but
+        # ffmpeg in Depends; the explicit list can regress just as quietly.
+        run: |
+          deb="$(ls target/debian/ostt-${VARIANT}_*.deb)"
+          depends="$(dpkg-deb -f "$deb" Depends)"
+          echo "Depends: $depends"
+          case "$depends" in
+          *libc6*) ;;
+          *) echo "Depends is missing libc6"; exit 1 ;;
+          esac
+          test "$(dpkg-deb -f "$deb" Conflicts)" != ""
+          echo "version reported: $(strings target/dist/ostt | grep -m1 -E "^[0-9]+\.[0-9]+\.[0-9]+-${VARIANT}$" || true)"
+          strings target/dist/ostt | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+-${VARIANT}$" || { echo "binary does not report -${VARIANT} in its version"; exit 1; }
       - name: Build .rpm package (${{ matrix.variant }} variant)
         # The generate-rpm metadata is shared, so the variant relationships have
         # to be supplied here. Without them the variants silently overlap on
@@ -506,7 +528,11 @@ jobs:
       - name: Build .deb package (vulkan variant)
         run: cargo deb --no-build --variant vulkan
       - name: Build .rpm package (vulkan variant)
-        run: cargo generate-rpm -s 'name = "ostt-vulkan"'
+        run: |
+          cargo generate-rpm \
+            -s 'name = "ostt-vulkan"' \
+            -s 'conflicts = { "ostt" = "*", "ostt-cuda" = "*", "ostt-cuda13" = "*" }' \
+            -s 'provides = { "ostt" = "*" }'
       - name: Create versioned archive and checksums
         run: |
           # Only create a versioned tar.gz on tag pushes (GITHUB_REF_NAME is a version,

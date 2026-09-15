@@ -129,20 +129,31 @@ assets = [
     ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
 ]
 
-# dpkg-shlibdeps cannot resolve the GPU libraries at package time: libcuda.so.1
-# is only present as a build stub, and the CUDA and Vulkan runtimes are not
-# dpkg-managed on the build runner. `$auto` does not degrade when that happens,
-# it gives up entirely -- which left the GPU packages declaring nothing but
-# ffmpeg, losing even libc and ALSA. So the base dependencies are spelled out.
+# The CUDA variants cannot use `$auto`: dpkg-shlibdeps finds no libcuda.so.1 on
+# the build runner (only the toolkit's stub) and no dpkg dependency information
+# for libcublas, and cargo-deb runs it without --ignore-missing-info in a
+# temporary directory where no shlibs.local can be supplied. `$auto` then gives
+# up entirely rather than degrading -- the ostt-cuda package shipped declaring
+# nothing but ffmpeg, having lost libc, libstdc++, ALSA and OpenSSL. So the base
+# dependencies are spelled out, with the pre- and post-time_t-transition package
+# names as alternatives (libasound2 became libasound2t64 in Ubuntu 24.04 and
+# Debian 13; a versioned dependency is not satisfied by a virtual package).
+# The versions come from the binary: built on ubuntu-22.04, it needs GLIBC 2.35
+# and GLIBCXX_3.4.30 (libstdc++6 12). CI asserts every package names libc6.
 #
-# The GPU runtime itself stays out of Depends deliberately: it legitimately
-# comes from outside dpkg (NVIDIA's .run installer, a Vulkan ICD from a driver
-# package), so a hard dependency would be wrong as often as it was right. The
-# installer script picks the variant that matches what is installed, and
-# `ostt --version` reports which build is running.
+# The CUDA runtime itself stays out of Depends: it legitimately comes from
+# outside dpkg (NVIDIA's .run installer), and NVIDIA's apt packages are named
+# per minor version. Note the RPMs differ here -- cargo-generate-rpm's ELF
+# auto-requires do declare libcublas.so.N and libcuda.so.1, so on Fedora and
+# openSUSE the package refuses to install without a dpkg-visible CUDA runtime,
+# and .run-installer users take the archive instead.
+#
+# The Vulkan variant is built on ubuntu-24.04, where libvulkan1 is dpkg-managed
+# and `$auto` resolves completely; it must stay `$auto`, since that binary needs
+# GLIBC 2.39 and libvulkan1 as hard dependencies.
 [package.metadata.deb.variants.cuda]
 name = "ostt-cuda"
-depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 11), libasound2 (>= 1.0.29), libssl3 (>= 3.0.0~~alpha1), ffmpeg"
+depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 12), libasound2t64 (>= 1.0.29) | libasound2 (>= 1.0.29), libssl3t64 (>= 3.0.0) | libssl3 (>= 3.0.0), ffmpeg"
 recommends = "wl-clipboard | xclip, libcublas12 | libcublas-12-0"
 conflicts = "ostt, ostt-cuda13, ostt-vulkan"
 replaces = "ostt, ostt-cuda13, ostt-vulkan"
@@ -158,7 +169,7 @@ assets = [
 
 [package.metadata.deb.variants.cuda13]
 name = "ostt-cuda13"
-depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 11), libasound2 (>= 1.0.29), libssl3 (>= 3.0.0~~alpha1), ffmpeg"
+depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 12), libasound2t64 (>= 1.0.29) | libasound2 (>= 1.0.29), libssl3t64 (>= 3.0.0) | libssl3 (>= 3.0.0), ffmpeg"
 recommends = "wl-clipboard | xclip, libcublas13 | libcublas-13-0"
 conflicts = "ostt, ostt-cuda, ostt-vulkan"
 replaces = "ostt, ostt-cuda, ostt-vulkan"
@@ -174,8 +185,8 @@ assets = [
 
 [package.metadata.deb.variants.vulkan]
 name = "ostt-vulkan"
-depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 11), libasound2 (>= 1.0.29), libssl3 (>= 3.0.0~~alpha1), ffmpeg"
-recommends = "wl-clipboard | xclip, libvulkan1"
+depends = "$auto, ffmpeg"
+recommends = "wl-clipboard | xclip"
 conflicts = "ostt, ostt-cuda, ostt-cuda13"
 replaces = "ostt, ostt-cuda, ostt-cuda13"
 provides = "ostt"
