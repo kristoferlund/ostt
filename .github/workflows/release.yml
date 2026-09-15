@@ -373,6 +373,7 @@ jobs:
           test -n "$stub" || { echo "libcuda.so stub not found under $CUDA_HOME"; exit 1; }
           stubs_dir="$(dirname "$stub")"
           sudo ln -sf "$stub" "${stubs_dir}/libcuda.so.1"
+          echo "STUBS_DIR=$stubs_dir" >> $GITHUB_ENV
           mkdir -p completions
           export LD_LIBRARY_PATH="${stubs_dir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           ./target/dist/ostt completions bash > completions/ostt.bash
@@ -476,8 +477,13 @@ jobs:
           *) echo "Depends is missing libc6"; exit 1 ;;
           esac
           test "$(dpkg-deb -f "$deb" Conflicts)" != ""
-          echo "version reported: $(strings target/dist/ostt | grep -m1 -E "^[0-9]+\.[0-9]+\.[0-9]+-${VARIANT}$" || true)"
-          strings target/dist/ostt | grep -qE "^[0-9]+\.[0-9]+\.[0-9]+-${VARIANT}$" || { echo "binary does not report -${VARIANT} in its version"; exit 1; }
+          # Ask the binary rather than grepping strings out of it: Rust string
+          # literals are not NUL-terminated, so `strings` glues the version to
+          # its neighbours. The stub dir lets the dynamic linker find libcuda.
+          reported="$(LD_LIBRARY_PATH="${STUBS_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ./target/dist/ostt --version)"
+          expected="ostt $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')-${VARIANT}"
+          echo "version reported: $reported"
+          test "$reported" = "$expected" || { echo "expected '$expected'"; exit 1; }
       - name: Build .rpm package (${{ matrix.variant }} variant)
         # The generate-rpm metadata is shared, so the variant relationships have
         # to be supplied here. Without them the variants silently overlap on
@@ -561,12 +567,17 @@ jobs:
           ./target/dist/ostt completions zsh > completions/_ostt
           ./target/dist/ostt completions fish > completions/ostt.fish
       - name: Verify the built binary
-        # Same ISA guard as the CUDA job: GGML_NATIVE=OFF must hold here too.
+        # Same ISA guard as the CUDA job: GGML_NATIVE=OFF must hold here too,
+        # and the binary must identify itself as the vulkan build.
         run: |
           if objdump -d target/dist/ostt | grep -Eq 'zmm|%k[0-7]|vpternlog|vmovdq[au](8|16|32|64)'; then
             echo "binary contains AVX-512; the build was tuned for the runner"
             exit 1
           fi
+          reported="$(./target/dist/ostt --version)"
+          expected="ostt $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')-vulkan"
+          echo "version reported: $reported"
+          test "$reported" = "$expected" || { echo "expected '$expected'"; exit 1; }
       - name: Build .deb package (vulkan variant)
         run: cargo deb --no-build --variant vulkan
       - name: Build .rpm package (vulkan variant)
