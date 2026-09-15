@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CUDA 13 builds. Releases now carry a `cuda13` archive, `.deb`, and `.rpm` alongside the existing CUDA 12 `cuda` artifacts. Both are needed: the sonames differ per CUDA major (`libcublas.so.12` vs `libcublas.so.13`) and are not interchangeable, while CUDA 13 dropped Maxwell, Pascal, and Volta support, so CUDA 12 remains the only option for those GPUs.
+- The install script takes `--gpu MODE` (`auto`, `cpu`, `cuda`, `cuda13`, `vulkan`) to force a specific build instead of detecting one.
+
+### Fixed
+
+- The install script no longer misses an installed CUDA runtime and silently installs the CPU build. Two causes: `ldconfig -p | grep -q` failed under `set -o pipefail` whenever grep matched early enough to SIGPIPE `ldconfig`, and the directory fallback did not look in `/opt/cuda/lib64`, where Arch and its derivatives put the toolkit. Reported by @jdufner in [#91](https://github.com/kristoferlund/ostt/issues/91).
+- The install script now matches the CUDA build to the installed CUDA major version and to the GPU's compute capability, instead of assuming any `libcublas.so` means the CUDA 12 build will run.
+- When an NVIDIA GPU is present but no usable CUDA toolkit is, the install script now falls back to the Vulkan build rather than the CPU build. The NVIDIA driver ships a Vulkan ICD, so this is real GPU acceleration.
+
 ## 0.0.25 - 2026-06-10
 
 ### Changed

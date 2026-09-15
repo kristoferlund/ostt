@@ -118,7 +118,8 @@ gh run watch <RUN_ID> --exit-status
 The workflow must complete successfully. It is expected to:
 
 - Build CPU binaries for Linux and macOS
-- Build CUDA and Vulkan Linux binaries
+- Build CUDA Linux binaries, once per CUDA major version (`cuda` for CUDA 12, `cuda13` for CUDA 13)
+- Build Vulkan Linux binaries
 - Build `.deb` and `.rpm` packages
 - Upload release assets
 - Create the GitHub Release
@@ -214,12 +215,17 @@ curl -L -o ostt-x86_64-unknown-linux-gnu.tar.gz \
 curl -L -o ostt-aarch64-unknown-linux-gnu.tar.gz \
   "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-aarch64-unknown-linux-gnu.tar.gz"
 
-curl -L -o ostt-x86_64-unknown-linux-gnu-cuda.tar.gz \
-  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-x86_64-unknown-linux-gnu-cuda.tar.gz"
+curl -L -o ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda.tar.gz \
+  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda.tar.gz"
 
-curl -L -o ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz \
-  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz"
+curl -L -o ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda13.tar.gz \
+  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda13.tar.gz"
+
+curl -L -o ostt-<VERSION>-x86_64-unknown-linux-gnu-vulkan.tar.gz \
+  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-<VERSION>-x86_64-unknown-linux-gnu-vulkan.tar.gz"
 ```
+
+The GPU archives carry the version in the filename; the CPU archives do not.
 
 Compute checksums:
 
@@ -227,8 +233,9 @@ Compute checksums:
 sha256sum source-archive.tar.gz
 sha256sum ostt-x86_64-unknown-linux-gnu.tar.gz
 sha256sum ostt-aarch64-unknown-linux-gnu.tar.gz
-sha256sum ostt-x86_64-unknown-linux-gnu-cuda.tar.gz
-sha256sum ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz
+sha256sum ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda.tar.gz
+sha256sum ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda13.tar.gz
+sha256sum ostt-<VERSION>-x86_64-unknown-linux-gnu-vulkan.tar.gz
 ```
 
 ## 8. Update AUR Packages
@@ -249,7 +256,14 @@ For `../aur-ostt-bin`:
 For `../aur-ostt-cuda-bin`:
 
 - Set `pkgver=<VERSION>` in `PKGBUILD`
-- Set the first `sha256sums` entry to the CUDA archive checksum
+- Set the first `sha256sums` entry to the **cuda13** archive checksum
+
+  This package tracks the `cuda` package in the Arch official repositories,
+  which is CUDA 13. The `cuda` (CUDA 12) release artifact links
+  `libcublas.so.12` and cannot load against it, so `ostt-cuda-bin` ships the
+  `cuda13` artifact and declares `depends=(... 'cuda>=13' 'nvidia-utils')`.
+  Arch users on Maxwell, Pascal, or Volta GPUs are not served by this package;
+  they should use `ostt-vulkan-bin`.
 
 For `../aur-ostt-vulkan-bin`:
 
