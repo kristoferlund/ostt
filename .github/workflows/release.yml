@@ -290,8 +290,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Pin the oldest minor of each major: CUDA minor version compatibility
-          # means a 12.8-built binary runs on any 12.x runtime, 13.0 on any 13.x.
+          # cuda_apt_version selects the toolkit's apt package suffix. These are
+          # not the oldest minors of each major, and apt will happily resolve
+          # libcublas-13-0 to a 13.1 build -- neither matters, because the
+          # symbols ggml uses are all CUDA 11-era and present throughout both
+          # majors. What has to hold is the soname, which the verify step below
+          # asserts.
           - cuda_major: "12"
             cuda_apt_version: "12-8"
             variant: cuda
@@ -302,6 +306,14 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CUDA_VERSION: ${{ matrix.cuda_apt_version }}
       VARIANT: ${{ matrix.variant }}
+      # ggml defaults GGML_NATIVE to ON, which tunes the build for whatever
+      # machine happens to compile it. On a GitHub runner that is actively
+      # wrong twice over: CMAKE_CUDA_ARCHITECTURES becomes "native", which
+      # cannot resolve without a GPU and silently collapses to nvcc's single
+      # default architecture, and ggml-cpu picks up -march=native, so the CPU
+      # ISA baseline of a release depends on which host the job landed on.
+      # whisper-rs-sys forwards every GGML_* variable through to CMake.
+      GGML_NATIVE: "OFF"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -322,9 +334,12 @@ jobs:
             cuda-cudart-dev-${CUDA_VERSION} \
             libcublas-dev-${CUDA_VERSION} \
             libcublas-${CUDA_VERSION}
-          # Do not rely on the /usr/local/cuda symlink: it is created by the
-          # cuda-toolkit metapackage, which the component packages above do not
-          # pull in. Derive the versioned prefix instead (12-8 -> 12.8).
+          # /usr/local/cuda does exist here -- cuda-toolkit-<ver>-config-common
+          # comes in transitively and points it at the versioned prefix through
+          # update-alternatives -- and whisper-rs-sys hardcodes -L/usr/local/cuda/lib64,
+          # so the build depends on it. Pin the versioned prefix anyway, so that
+          # a second toolkit on the runner cannot silently redirect the symlink
+          # and build the other major under this leg's name (12-8 -> 12.8).
           CUDA_HOME="/usr/local/cuda-${CUDA_VERSION/-/.}"
           test -d "$CUDA_HOME" || { echo "CUDA toolkit not at $CUDA_HOME"; exit 1; }
           echo "CUDA_HOME=$CUDA_HOME" >> $GITHUB_ENV
@@ -336,8 +351,10 @@ jobs:
       - name: Generate shell completions
         # The CUDA stubs ship libcuda.so (unversioned); the binary needs libcuda.so.1.
         # Symlink the stub so the dynamic linker finds it without real NVIDIA drivers.
-        # The stub directory moved between CUDA majors, so locate it rather than
-        # hardcoding lib64/stubs. The completions subcommand invokes no CUDA API.
+        # Locate the stub rather than hardcoding lib64/stubs: both majors happen
+        # to use targets/x86_64-linux/lib/stubs today, but this step only needs
+        # the file, not a guess about layout. The completions subcommand invokes
+        # no CUDA API.
         run: |
           stub="$(find "$CUDA_HOME" -name libcuda.so -path '*/stubs/*' -print -quit)"
           test -n "$stub" || { echo "libcuda.so stub not found under $CUDA_HOME"; exit 1; }
@@ -348,18 +365,75 @@ jobs:
           ./target/dist/ostt completions bash > completions/ostt.bash
           ./target/dist/ostt completions zsh > completions/_ostt
           ./target/dist/ostt completions fish > completions/ostt.fish
-      - name: Verify CUDA soname matches the variant
-        # Guards against a silent toolkit mix-up producing, say, a libcublas.so.12
-        # binary published under the cuda13 name.
+      - name: Verify the built binary
+        # Three things that have silently gone wrong before and that nothing
+        # downstream would catch until a user filed an issue:
+        #
+        #   1. The CUDA major linked has to match the name we publish under, or
+        #      a libcublas.so.12 binary ships as cuda13.
+        #   2. The embedded GPU architectures have to be the list ggml selects,
+        #      not nvcc's single default. GGML_NATIVE=ON silently produced
+        #      sm_52-only (CUDA 12) and sm_75-only (CUDA 13) binaries, so every
+        #      other GPU ran JIT-compiled PTX with no tuned kernels.
+        #   3. No AVX-512. -march=native bakes in the build host's ISA, which
+        #      SIGILLs on any machine without it.
         run: |
-          needed="$(readelf -d target/dist/ostt | grep -oE 'libcublas\.so\.[0-9]+')"
-          needed="${needed%%$'\n'*}"
-          echo "binary needs: $needed"
-          test "$needed" = "libcublas.so.${{ matrix.cuda_major }}"
+          needed="$(readelf -d target/dist/ostt | grep -oE 'lib(cublas|cudart)\.so\.[0-9]+' | sort -u | tr '\n' ' ')"
+          echo "needs: $needed"
+          test "$needed" = "libcublas.so.${{ matrix.cuda_major }} libcudart.so.${{ matrix.cuda_major }} "
+
+          archs="$(python3 - <<'EOF'
+          import struct, collections
+          data = open("target/dist/ostt", "rb").read()
+          sms, off = collections.Counter(), 0
+          while True:
+              i = data.find(struct.pack("<I", 0xBA55ED50), off)
+              if i < 0:
+                  break
+              off = i + 4
+              _, _, hdrsz, fatsz = struct.unpack_from("<IHHQ", data, i)
+              if hdrsz != 16 or not 0 < fatsz <= len(data):
+                  continue
+              p, end = i + hdrsz, i + hdrsz + fatsz
+              while p < end - 16:
+                  kind, _, ehdr = struct.unpack_from("<HHI", data, p)
+                  if ehdr < 16 or p + ehdr > end:
+                      break
+                  padded, = struct.unpack_from("<Q", data, p + 8)
+                  sm, = struct.unpack_from("<I", data, p + 28)
+                  if kind == 2:          # 2 = SASS cubin, 1 = PTX
+                      sms[sm] += 1
+                  p += ehdr + padded
+          print(" ".join(str(s) for s in sorted(sms)))
+          EOF
+          )"
+          echo "SASS architectures: $archs"
+          for want in 86 89; do
+            case " $archs " in
+            *" $want "*) ;;
+            *) echo "missing sm_${want}; CMAKE_CUDA_ARCHITECTURES did not reach nvcc"; exit 1 ;;
+            esac
+          done
+
+          if objdump -d target/dist/ostt | grep -q 'zmm'; then
+            echo "binary contains AVX-512; the build was tuned for the runner"
+            exit 1
+          fi
       - name: Build .deb package (${{ matrix.variant }} variant)
         run: cargo deb --no-build --variant "$VARIANT"
       - name: Build .rpm package (${{ matrix.variant }} variant)
-        run: cargo generate-rpm -s "name = \"ostt-${VARIANT}\""
+        # The generate-rpm metadata is shared, so the variant relationships have
+        # to be supplied here. Without them the variants silently overlap on
+        # /usr/bin/ostt and switching between them leaves two binaries behind.
+        run: |
+          case "$VARIANT" in
+          cuda) others='"ostt" = "*", "ostt-cuda13" = "*", "ostt-vulkan" = "*"' ;;
+          cuda13) others='"ostt" = "*", "ostt-cuda" = "*", "ostt-vulkan" = "*"' ;;
+          esac
+          cargo generate-rpm \
+            -s "name = \"ostt-${VARIANT}\"" \
+            -s "conflicts = { ${others} }" \
+            -s "provides = { \"ostt\" = \"*\" }"
       - name: Create versioned archive and checksums
         run: |
           # Only create a versioned tar.gz on tag pushes (GITHUB_REF_NAME is a version,
@@ -402,6 +476,9 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # See the CUDA job: -march=native would otherwise bake the build runner's
+      # CPU ISA into the release.
+      GGML_NATIVE: "OFF"
     steps:
       - uses: actions/checkout@v4
         with:

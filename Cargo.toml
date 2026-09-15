@@ -116,6 +116,8 @@ waveform visualization and transcribe using your choice of AI provider.\
 """
 depends = "$auto, ffmpeg"
 recommends = "wl-clipboard | xclip"
+conflicts = "ostt-cuda, ostt-cuda13, ostt-vulkan"
+replaces = "ostt-cuda, ostt-cuda13, ostt-vulkan"
 section = "sound"
 priority = "optional"
 assets = [
@@ -127,10 +129,24 @@ assets = [
     ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
 ]
 
+# dpkg-shlibdeps cannot resolve the GPU libraries at package time: libcuda.so.1
+# is only present as a build stub, and the CUDA and Vulkan runtimes are not
+# dpkg-managed on the build runner. `$auto` does not degrade when that happens,
+# it gives up entirely -- which left the GPU packages declaring nothing but
+# ffmpeg, losing even libc and ALSA. So the base dependencies are spelled out.
+#
+# The GPU runtime itself stays out of Depends deliberately: it legitimately
+# comes from outside dpkg (NVIDIA's .run installer, a Vulkan ICD from a driver
+# package), so a hard dependency would be wrong as often as it was right. The
+# installer script picks the variant that matches what is installed, and
+# `ostt --version` reports which build is running.
 [package.metadata.deb.variants.cuda]
 name = "ostt-cuda"
-depends = "$auto, ffmpeg"
-recommends = "wl-clipboard | xclip"
+depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 11), libasound2 (>= 1.0.29), libssl3 (>= 3.0.0~~alpha1), ffmpeg"
+recommends = "wl-clipboard | xclip, libcublas12 | libcublas-12-0"
+conflicts = "ostt, ostt-cuda13, ostt-vulkan"
+replaces = "ostt, ostt-cuda13, ostt-vulkan"
+provides = "ostt"
 assets = [
     ["target/dist/ostt", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ostt-cuda/README.md", "644"],
@@ -142,8 +158,11 @@ assets = [
 
 [package.metadata.deb.variants.cuda13]
 name = "ostt-cuda13"
-depends = "$auto, ffmpeg"
-recommends = "wl-clipboard | xclip"
+depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 11), libasound2 (>= 1.0.29), libssl3 (>= 3.0.0~~alpha1), ffmpeg"
+recommends = "wl-clipboard | xclip, libcublas13 | libcublas-13-0"
+conflicts = "ostt, ostt-cuda, ostt-vulkan"
+replaces = "ostt, ostt-cuda, ostt-vulkan"
+provides = "ostt"
 assets = [
     ["target/dist/ostt", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ostt-cuda13/README.md", "644"],
@@ -155,8 +174,11 @@ assets = [
 
 [package.metadata.deb.variants.vulkan]
 name = "ostt-vulkan"
-depends = "$auto, ffmpeg"
-recommends = "wl-clipboard | xclip"
+depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 11), libasound2 (>= 1.0.29), libssl3 (>= 3.0.0~~alpha1), ffmpeg"
+recommends = "wl-clipboard | xclip, libvulkan1"
+conflicts = "ostt, ostt-cuda, ostt-cuda13"
+replaces = "ostt, ostt-cuda, ostt-cuda13"
+provides = "ostt"
 assets = [
     ["target/dist/ostt", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ostt-vulkan/README.md", "644"],
