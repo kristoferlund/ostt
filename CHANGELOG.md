@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Recording no longer hangs silently when the capture device opens but delivers no audio. ostt now fails after 5 seconds with an error naming the device and pointing at the audio stack, logs `First samples received from audio device` on the first buffer so its absence localises the fault, and surfaces audio stream errors that previously only reached the log. Silence is unaffected: a silent room still delivers buffers, only a dead capture stream delivers none. Reported by @ocewers in [#92](https://github.com/kristoferlund/ostt/issues/92).
+
 ## 0.0.25 - 2026-06-10
 
 ### Changed
