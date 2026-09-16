@@ -311,6 +311,12 @@ fn audio_startup_next_step(error_text: &str) -> Option<&'static str> {
         return Some("Select a working input device with 'ostt config list-devices', then retry.");
     }
 
+    if normalized.contains("no audio data received") {
+        return Some(
+            "The device opened but delivered nothing, which usually means the audio stack never linked the capture stream. On PipeWire/PulseAudio check 'pactl list source-outputs' (a Source of 4294967295 means unlinked), and test the device directly with 'arecord' or 'parecord'.",
+        );
+    }
+
     if normalized.contains("audio input stream") {
         return Some(
             "Check that your microphone is available and not blocked by another app, then retry.",
@@ -370,6 +376,12 @@ fn finish_recording_with_output(
     Ok(())
 }
 
+/// How long to wait for the first buffer from the capture device before giving
+/// up. A device can open successfully and never deliver a sample (a session
+/// manager that fails to link the stream, for example), which looks exactly
+/// like a silent room unless it is called out.
+const NO_SIGNAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
 fn run_recording_loop(
     tui: &mut RecordingTui,
     audio_recorder: &mut AudioRecorder,
@@ -381,7 +393,29 @@ fn run_recording_loop(
     );
 
     let mut frame_count = 0u64;
+    let stream_started = std::time::Instant::now();
+    let mut signal_seen = false;
     loop {
+        if let Some(err) = audio_recorder.take_stream_error() {
+            return Err(anyhow::anyhow!(
+                "audio input stream from device '{}' failed: {err}",
+                audio_recorder.device()
+            ));
+        }
+
+        if !signal_seen {
+            match audio_recorder.first_buffer_frames() {
+                Some(frames) => {
+                    tracing::info!("First samples received from audio device ({frames} frames)");
+                    signal_seen = true;
+                }
+                None if stream_started.elapsed() >= NO_SIGNAL_TIMEOUT => {
+                    return Err(no_signal_error(audio_recorder.device()));
+                }
+                None => {}
+            }
+        }
+
         if term.load(Ordering::Relaxed) {
             tracing::debug!("Received SIGUSR1: transcribing via external trigger");
             return Ok(true);
@@ -414,6 +448,14 @@ fn run_recording_loop(
             }
         }
     }
+}
+
+/// Builds the "device opened but delivers nothing" error.
+fn no_signal_error(device: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "no audio data received from device '{device}' after {}s - the device opened but is not delivering samples",
+        NO_SIGNAL_TIMEOUT.as_secs()
+    )
 }
 
 fn pick_action_id_with_recording_tui(
@@ -692,6 +734,32 @@ mod tests {
         assert!(message.contains("Primary error: failed to start audio recording"));
         assert!(message.contains("Caused by: No audio input device available"));
         assert!(message.contains("Next step: Connect or enable a microphone, then retry."));
+    }
+
+    #[test]
+    fn no_signal_error_points_below_ostt_at_the_audio_stack() {
+        // The reporter's device opened fine and delivered nothing for days;
+        // without naming the audio stack the obvious conclusion is "ostt is
+        // broken", which is what cost them a long debugging session.
+        let error = no_signal_error("default");
+
+        let message = format_recording_error(&error);
+
+        assert!(message.contains("no audio data received from device 'default'"));
+        assert!(message.contains(&format!("after {}s", NO_SIGNAL_TIMEOUT.as_secs())));
+        assert!(message.contains("pactl list source-outputs"));
+    }
+
+    #[test]
+    fn stream_failure_during_recording_gets_a_next_step() {
+        // A stream that dies mid-recording used to reach the log only, leaving
+        // the TUI sitting at a flat waveform.
+        let error =
+            anyhow::anyhow!("audio input stream from device 'default' failed: backend error");
+
+        let message = format_recording_error(&error);
+
+        assert!(message.contains("Check that your microphone is available"));
     }
 
     #[test]

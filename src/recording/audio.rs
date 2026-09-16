@@ -12,7 +12,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::WavWriter;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 #[cfg(target_os = "linux")]
@@ -45,6 +45,12 @@ pub struct AudioRecorder {
     is_paused: Arc<Mutex<bool>>,
     /// Device name or "default" to use the system default device
     device: String,
+    /// Frame count of the first buffer the device delivered, 0 until one arrives.
+    /// A device can open successfully and still never deliver anything, which is
+    /// otherwise indistinguishable from a silent room.
+    first_buffer_frames: Arc<AtomicUsize>,
+    /// First error the audio backend reported on the capture stream, if any.
+    stream_error: Arc<Mutex<Option<String>>>,
 }
 
 impl AudioRecorder {
@@ -59,6 +65,8 @@ impl AudioRecorder {
             device_channels: 1,
             is_paused: Arc::new(Mutex::new(false)),
             device: config.audio.device.clone(),
+            first_buffer_frames: Arc::new(AtomicUsize::new(0)),
+            stream_error: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -107,12 +115,18 @@ impl AudioRecorder {
         let samples_arc = Arc::clone(&self.samples);
         let pause_arc = Arc::clone(&self.is_paused);
         let true_peak_arc = Arc::clone(&self.true_peak);
+        let first_buffer_arc = Arc::clone(&self.first_buffer_frames);
+        let stream_error_arc = Arc::clone(&self.stream_error);
         let callback_channels = num_channels;
 
         let stream = device
             .build_input_stream(
                 &device_config.into(),
                 move |data: &[i16], _: &cpal::InputCallbackInfo| {
+                    // Before the pause check: a recording paused before the
+                    // first buffer arrives must not look like a dead device.
+                    note_device_delivery(&first_buffer_arc, data, callback_channels);
+
                     let is_paused = *pause_arc.lock().unwrap();
                     if !is_paused {
                         // Track the peak of the raw, un-downmixed samples so a
@@ -122,8 +136,14 @@ impl AudioRecorder {
                         Self::handle_audio_callback(data, &samples_arc, callback_channels);
                     }
                 },
-                |err| {
+                move |err| {
                     tracing::error!("Audio stream error: {}", err);
+                    // Keep the first error so the recording loop can surface it;
+                    // the log alone left the user staring at a dead waveform.
+                    let mut slot = stream_error_arc.lock().unwrap();
+                    if slot.is_none() {
+                        *slot = Some(err.to_string());
+                    }
                 },
                 None,
             )
@@ -345,6 +365,26 @@ impl AudioRecorder {
         self.sample_rate
     }
 
+    /// Returns the frame count of the first buffer the device delivered, or
+    /// `None` if it has not delivered anything yet. Silence still delivers
+    /// buffers, so `None` means the capture stream itself is dead.
+    pub fn first_buffer_frames(&self) -> Option<usize> {
+        match self.first_buffer_frames.load(Ordering::Relaxed) {
+            0 => None,
+            frames => Some(frames),
+        }
+    }
+
+    /// Takes the first error the audio backend reported on the capture stream.
+    pub fn take_stream_error(&self) -> Option<String> {
+        self.stream_error.lock().unwrap().take()
+    }
+
+    /// Returns the configured device name ("default" or a name/index).
+    pub fn device(&self) -> &str {
+        &self.device
+    }
+
     /// Pauses recording without stopping the audio stream or losing samples.
     pub fn pause(&self) {
         *self.is_paused.lock().unwrap() = true;
@@ -371,6 +411,20 @@ impl AudioRecorder {
         } else {
             tracing::debug!("Recording resumed");
         }
+    }
+}
+
+/// Records that the capture device delivered a buffer, keeping the frame count
+/// of the first one.
+///
+/// Called for every buffer, silent ones included: a silent room still delivers
+/// full buffers of zeros, so only the complete absence of buffers means the
+/// capture stream is dead.
+fn note_device_delivery(first_buffer_frames: &AtomicUsize, data: &[i16], channels: usize) {
+    let frames = data.len() / channels;
+    if frames > 0 {
+        let _ =
+            first_buffer_frames.compare_exchange(0, frames, Ordering::Relaxed, Ordering::Relaxed);
     }
 }
 
@@ -466,4 +520,42 @@ where
     F: FnOnce() -> Result<T>,
 {
     f()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn silence_still_counts_as_a_delivering_device() {
+        // A silent room delivers full buffers of zeros; only a dead capture
+        // stream delivers nothing at all. Treating the two alike is what left
+        // a broken audio stack looking like an ostt hang.
+        let first_buffer_frames = AtomicUsize::new(0);
+
+        note_device_delivery(&first_buffer_frames, &[0i16; 960], 2);
+
+        assert_eq!(first_buffer_frames.load(Ordering::Relaxed), 480);
+    }
+
+    #[test]
+    fn a_device_that_delivers_nothing_is_never_marked() {
+        let first_buffer_frames = AtomicUsize::new(0);
+
+        note_device_delivery(&first_buffer_frames, &[], 1);
+
+        assert_eq!(first_buffer_frames.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn later_buffers_do_not_overwrite_the_first_frame_count() {
+        // The logged count must describe the device's first read, so its
+        // absence from the log localises the fault to audio startup.
+        let first_buffer_frames = AtomicUsize::new(0);
+
+        note_device_delivery(&first_buffer_frames, &[0i16; 480], 1);
+        note_device_delivery(&first_buffer_frames, &[0i16; 960], 1);
+
+        assert_eq!(first_buffer_frames.load(Ordering::Relaxed), 480);
+    }
 }
