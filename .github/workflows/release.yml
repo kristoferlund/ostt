@@ -254,7 +254,10 @@ jobs:
       - name: Build .deb package
         run: cargo deb --no-build
       - name: Build .rpm package
-        run: cargo generate-rpm
+        # Declare the conflict with the GPU variants: all four own /usr/bin/ostt.
+        run: |
+          cargo generate-rpm \
+            -s 'conflicts = { "ostt-cuda" = "*", "ostt-cuda13" = "*", "ostt-vulkan" = "*" }'
       - name: Create package checksums
         run: |
           cd target/debian
@@ -271,18 +274,59 @@ jobs:
             target/generate-rpm/*.rpm
             target/generate-rpm/*.sha256
 
-  # Build CUDA-accelerated Linux x86_64 binary and packages.
-  # Produces ostt-x86_64-unknown-linux-gnu-cuda.tar.gz, ostt-cuda .deb and .rpm.
+  # Build CUDA-accelerated Linux x86_64 binaries and packages.
+  # Produces one set of artifacts per CUDA major version:
+  #   CUDA 12 -> ostt-<ver>-x86_64-unknown-linux-gnu-cuda.tar.gz,   ostt-cuda   .deb/.rpm
+  #   CUDA 13 -> ostt-<ver>-x86_64-unknown-linux-gnu-cuda13.tar.gz, ostt-cuda13 .deb/.rpm
+  # Both are required: the binaries link libcublas/libcudart by major soname
+  # (libcublas.so.12 vs libcublas.so.13) and those are not interchangeable, while
+  # CUDA 13 dropped offline compilation for Maxwell, Pascal, and Volta
+  # (compute 5.0-7.2), so CUDA 12 remains the only option for those GPUs.
   # Only runs on publishing events and PRs (same gate as build-linux-packages).
   build-linux-cuda:
-    name: build-linux-cuda (x86_64)
+    name: build-linux-cuda (x86_64, CUDA ${{ matrix.cuda_major }})
     needs:
       - plan
     if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' }}
     runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # cuda_apt_version selects the toolkit's apt package suffix. These are
+          # not the oldest minors of each major, and apt will happily resolve
+          # libcublas-13-0 to a 13.1 build -- neither matters, because the
+          # symbols ggml uses are all CUDA 11-era and present throughout both
+          # majors. What has to hold is the soname, which the verify step below
+          # asserts.
+          # expect_sass / expect_ptx are ggml's CMAKE_CUDA_ARCHITECTURES for each
+          # toolkit with GGML_NATIVE off (ggml/src/ggml-cuda/CMakeLists.txt):
+          # "-real" entries become SASS, "-virtual" entries become PTX.
+          - cuda_major: "12"
+            cuda_apt_version: "12-8"
+            variant: cuda
+            expect_sass: "86 89 120"
+            expect_ptx: "50 61 70 75 80"
+          - cuda_major: "13"
+            cuda_apt_version: "13-0"
+            variant: cuda13
+            expect_sass: "86 89 120 121"
+            expect_ptx: "75 80"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      CUDA_VERSION: "12-8"
+      CUDA_VERSION: ${{ matrix.cuda_apt_version }}
+      VARIANT: ${{ matrix.variant }}
+      # Read by build.rs: the two CUDA majors share one Cargo feature, so the
+      # `ostt --version` suffix (0.0.x-cuda13) has to come from here.
+      OSTT_BUILD_VARIANT: ${{ matrix.variant }}
+      # ggml defaults GGML_NATIVE to ON, which tunes the build for whatever
+      # machine happens to compile it. On a GitHub runner that is actively
+      # wrong twice over: CMAKE_CUDA_ARCHITECTURES becomes "native", which
+      # cannot resolve without a GPU and silently collapses to nvcc's single
+      # default architecture, and ggml-cpu picks up -march=native, so the CPU
+      # ISA baseline of a release depends on which host the job landed on.
+      # whisper-rs-sys forwards every GGML_* variable through to CMake.
+      GGML_NATIVE: "OFF"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -303,7 +347,16 @@ jobs:
             cuda-cudart-dev-${CUDA_VERSION} \
             libcublas-dev-${CUDA_VERSION} \
             libcublas-${CUDA_VERSION}
-          echo "/usr/local/cuda/bin" >> $GITHUB_PATH
+          # /usr/local/cuda does exist here -- cuda-toolkit-<ver>-config-common
+          # comes in transitively and points it at the versioned prefix through
+          # update-alternatives -- and whisper-rs-sys hardcodes -L/usr/local/cuda/lib64,
+          # so the build depends on it. Pin the versioned prefix anyway, so that
+          # a second toolkit on the runner cannot silently redirect the symlink
+          # and build the other major under this leg's name (12-8 -> 12.8).
+          CUDA_HOME="/usr/local/cuda-${CUDA_VERSION/-/.}"
+          test -d "$CUDA_HOME" || { echo "CUDA toolkit not at $CUDA_HOME"; exit 1; }
+          echo "CUDA_HOME=$CUDA_HOME" >> $GITHUB_ENV
+          echo "$CUDA_HOME/bin" >> $GITHUB_PATH
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install cargo-deb cargo-generate-rpm
       - name: Build CUDA release binary
@@ -311,21 +364,139 @@ jobs:
       - name: Generate shell completions
         # The CUDA stubs ship libcuda.so (unversioned); the binary needs libcuda.so.1.
         # Symlink the stub so the dynamic linker finds it without real NVIDIA drivers.
-        # The completions subcommand does not invoke any CUDA API.
+        # Locate the stub rather than hardcoding lib64/stubs: both majors happen
+        # to use targets/x86_64-linux/lib/stubs today, but this step only needs
+        # the file, not a guess about layout. The completions subcommand invokes
+        # no CUDA API.
         run: |
-          sudo ln -sf /usr/local/cuda/lib64/stubs/libcuda.so \
-            /usr/local/cuda/lib64/stubs/libcuda.so.1
+          stub="$(find "$CUDA_HOME" -name libcuda.so -path '*/stubs/*' -print -quit)"
+          test -n "$stub" || { echo "libcuda.so stub not found under $CUDA_HOME"; exit 1; }
+          stubs_dir="$(dirname "$stub")"
+          sudo ln -sf "$stub" "${stubs_dir}/libcuda.so.1"
+          echo "STUBS_DIR=$stubs_dir" >> $GITHUB_ENV
           mkdir -p completions
-          LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            ./target/dist/ostt completions bash > completions/ostt.bash
-          LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            ./target/dist/ostt completions zsh > completions/_ostt
-          LD_LIBRARY_PATH="/usr/local/cuda/lib64/stubs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
-            ./target/dist/ostt completions fish > completions/ostt.fish
-      - name: Build .deb package (cuda variant)
-        run: cargo deb --no-build --variant cuda
-      - name: Build .rpm package (cuda variant)
-        run: cargo generate-rpm -s 'name = "ostt-cuda"'
+          export LD_LIBRARY_PATH="${stubs_dir}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          ./target/dist/ostt completions bash > completions/ostt.bash
+          ./target/dist/ostt completions zsh > completions/_ostt
+          ./target/dist/ostt completions fish > completions/ostt.fish
+      - name: Verify the built binary
+        # Three things that have silently gone wrong before and that nothing
+        # downstream would catch until a user filed an issue:
+        #
+        #   1. The CUDA major linked has to match the name we publish under, or
+        #      a libcublas.so.12 binary ships as cuda13.
+        #   2. The embedded GPU architectures have to be exactly the list ggml
+        #      selects -- SASS and PTX both. GGML_NATIVE=ON silently produced
+        #      sm_52-only (CUDA 12) and sm_75-only (CUDA 13) binaries, so every
+        #      other GPU ran JIT-compiled PTX with no tuned kernels; and losing
+        #      compute_50 PTX from the CUDA 12 build would strand exactly the
+        #      Maxwell/Pascal GPUs it exists for. Only the .nv_fatbin section
+        #      is parsed: scanning the whole file for the magic could be
+        #      satisfied by a few bytes of embedded data.
+        #   3. No AVX-512. -march=native bakes in the build host's ISA, which
+        #      SIGILLs on any machine without it.
+        env:
+          EXPECT_SASS: ${{ matrix.expect_sass }}
+          EXPECT_PTX: ${{ matrix.expect_ptx }}
+        run: |
+          needed="$(readelf -d target/dist/ostt | grep -oE 'lib(cublas|cudart)\.so\.[0-9]+' | sort -u | tr '\n' ' ')"
+          echo "needs: $needed"
+          test "$needed" = "libcublas.so.${{ matrix.cuda_major }} libcudart.so.${{ matrix.cuda_major }} "
+
+          python3 - <<'EOF'
+          import collections, os, struct, subprocess, sys
+
+          path = "target/dist/ostt"
+          off = size = None
+          for line in subprocess.check_output(["readelf", "-S", "-W", path], text=True).splitlines():
+              if ".nv_fatbin" in line:
+                  fields = line.split("]", 1)[1].split()   # name type addr off size ...
+                  off, size = int(fields[3], 16), int(fields[4], 16)
+                  break
+          if off is None:
+              sys.exit("no .nv_fatbin section: this is not a CUDA build")
+
+          with open(path, "rb") as f:
+              f.seek(off)
+              data = f.read(size)
+
+          MAGIC = 0xBA55ED50
+          sass, ptx = collections.Counter(), collections.Counter()
+          p = 0
+          while p + 16 <= len(data):
+              magic, _, hdrsz, fatsz = struct.unpack_from("<IHHQ", data, p)
+              if magic != MAGIC:
+                  p += 4          # alignment padding between fatbins
+                  continue
+              end = p + hdrsz + fatsz
+              if hdrsz < 16 or end > len(data):
+                  sys.exit(f"corrupt fatbin header at {p}")
+              q = p + hdrsz
+              while q + 32 <= end:
+                  kind, _, ehdr = struct.unpack_from("<HHI", data, q)
+                  padded, = struct.unpack_from("<Q", data, q + 8)
+                  sm, = struct.unpack_from("<I", data, q + 28)
+                  if ehdr < 32 or q + ehdr + padded > end:
+                      sys.exit(f"corrupt fatbin entry at {q}")
+                  (sass if kind == 2 else ptx)[sm] += 1
+                  q += ehdr + padded
+              p = end
+
+          def show(name, c):
+              print(f"{name}: " + " ".join(f"sm_{k}x{v}" for k, v in sorted(c.items())))
+          show("SASS", sass)
+          show("PTX ", ptx)
+
+          ok = True
+          for name, got, want in (("SASS", sass, os.environ["EXPECT_SASS"]), ("PTX", ptx, os.environ["EXPECT_PTX"])):
+              want = {int(x) for x in want.split()}
+              if set(got) != want:
+                  print(f"{name} architectures {sorted(got)} != expected {sorted(want)}")
+                  ok = False
+          if not ok:
+              sys.exit(1)
+          EOF
+
+          # zmm alone would miss AVX-512VL code on xmm/ymm and mask-register-only
+          # sequences, so match mask registers and the EVEX-only mnemonics too.
+          if objdump -d target/dist/ostt | grep -Eq 'zmm|%k[0-7]|vpternlog|vmovdq[au](8|16|32|64)'; then
+            echo "binary contains AVX-512; the build was tuned for the runner"
+            exit 1
+          fi
+      - name: Build .deb package (${{ matrix.variant }} variant)
+        run: cargo deb --no-build --variant "$VARIANT"
+      - name: Verify package metadata
+        # `$auto` failing silently is how ostt-cuda once shipped with nothing but
+        # ffmpeg in Depends; the explicit list can regress just as quietly.
+        run: |
+          deb="$(ls target/debian/ostt-${VARIANT}_*.deb)"
+          depends="$(dpkg-deb -f "$deb" Depends)"
+          echo "Depends: $depends"
+          case "$depends" in
+          *libc6*) ;;
+          *) echo "Depends is missing libc6"; exit 1 ;;
+          esac
+          test "$(dpkg-deb -f "$deb" Conflicts)" != ""
+          # Ask the binary rather than grepping strings out of it: Rust string
+          # literals are not NUL-terminated, so `strings` glues the version to
+          # its neighbours. The stub dir lets the dynamic linker find libcuda.
+          reported="$(LD_LIBRARY_PATH="${STUBS_DIR}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ./target/dist/ostt --version)"
+          expected="ostt $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')-${VARIANT}"
+          echo "version reported: $reported"
+          test "$reported" = "$expected" || { echo "expected '$expected'"; exit 1; }
+      - name: Build .rpm package (${{ matrix.variant }} variant)
+        # The generate-rpm metadata is shared, so the variant relationships have
+        # to be supplied here. Without them the variants silently overlap on
+        # /usr/bin/ostt and switching between them leaves two binaries behind.
+        run: |
+          case "$VARIANT" in
+          cuda) others='"ostt" = "*", "ostt-cuda13" = "*", "ostt-vulkan" = "*"' ;;
+          cuda13) others='"ostt" = "*", "ostt-cuda" = "*", "ostt-vulkan" = "*"' ;;
+          esac
+          cargo generate-rpm \
+            -s "name = \"ostt-${VARIANT}\"" \
+            -s "conflicts = { ${others} }" \
+            -s "provides = { \"ostt\" = \"*\" }"
       - name: Create versioned archive and checksums
         run: |
           # Only create a versioned tar.gz on tag pushes (GITHUB_REF_NAME is a version,
@@ -334,27 +505,27 @@ jobs:
             VERSION=${GITHUB_REF_NAME#v}
             mkdir -p /tmp/ostt-cuda-archive
             cp target/dist/ostt /tmp/ostt-cuda-archive/ostt
-            tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
+            tar -czf "ostt-${VERSION}-x86_64-unknown-linux-gnu-${VARIANT}.tar.gz" \
               -C /tmp/ostt-cuda-archive ostt
-            sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz" \
-              > "ostt-${VERSION}-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256"
+            sha256sum "ostt-${VERSION}-x86_64-unknown-linux-gnu-${VARIANT}.tar.gz" \
+              > "ostt-${VERSION}-x86_64-unknown-linux-gnu-${VARIANT}.tar.gz.sha256"
           fi
           # .deb and .rpm checksums (already versioned by cargo-deb / cargo-generate-rpm)
           cd target/debian
-          sha256sum ostt-cuda_*.deb > "$(ls ostt-cuda_*.deb).sha256"
+          sha256sum ostt-${VARIANT}_*.deb > "$(ls ostt-${VARIANT}_*.deb).sha256"
           cd ../generate-rpm
-          sha256sum ostt-cuda-*.rpm > "$(ls ostt-cuda-*.rpm).sha256"
+          sha256sum ostt-${VARIANT}-*.rpm > "$(ls ostt-${VARIANT}-*.rpm).sha256"
       - name: Upload CUDA artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: artifacts-build-linux-cuda-amd64
+          name: artifacts-build-linux-${{ matrix.variant }}-amd64
           path: |
-            ostt-*-x86_64-unknown-linux-gnu-cuda.tar.gz
-            ostt-*-x86_64-unknown-linux-gnu-cuda.tar.gz.sha256
-            target/debian/ostt-cuda_*.deb
-            target/debian/ostt-cuda_*.deb.sha256
-            target/generate-rpm/ostt-cuda-*.rpm
-            target/generate-rpm/ostt-cuda-*.rpm.sha256
+            ostt-*-x86_64-unknown-linux-gnu-${{ matrix.variant }}.tar.gz
+            ostt-*-x86_64-unknown-linux-gnu-${{ matrix.variant }}.tar.gz.sha256
+            target/debian/ostt-${{ matrix.variant }}_*.deb
+            target/debian/ostt-${{ matrix.variant }}_*.deb.sha256
+            target/generate-rpm/ostt-${{ matrix.variant }}-*.rpm
+            target/generate-rpm/ostt-${{ matrix.variant }}-*.rpm.sha256
 
   # Build Vulkan-accelerated Linux x86_64 binary and packages.
   # Produces ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz, ostt-vulkan .deb and .rpm.
@@ -368,6 +539,9 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # See the CUDA job: -march=native would otherwise bake the build runner's
+      # CPU ISA into the release.
+      GGML_NATIVE: "OFF"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -392,10 +566,26 @@ jobs:
           ./target/dist/ostt completions bash > completions/ostt.bash
           ./target/dist/ostt completions zsh > completions/_ostt
           ./target/dist/ostt completions fish > completions/ostt.fish
+      - name: Verify the built binary
+        # Same ISA guard as the CUDA job: GGML_NATIVE=OFF must hold here too,
+        # and the binary must identify itself as the vulkan build.
+        run: |
+          if objdump -d target/dist/ostt | grep -Eq 'zmm|%k[0-7]|vpternlog|vmovdq[au](8|16|32|64)'; then
+            echo "binary contains AVX-512; the build was tuned for the runner"
+            exit 1
+          fi
+          reported="$(./target/dist/ostt --version)"
+          expected="ostt $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')-vulkan"
+          echo "version reported: $reported"
+          test "$reported" = "$expected" || { echo "expected '$expected'"; exit 1; }
       - name: Build .deb package (vulkan variant)
         run: cargo deb --no-build --variant vulkan
       - name: Build .rpm package (vulkan variant)
-        run: cargo generate-rpm -s 'name = "ostt-vulkan"'
+        run: |
+          cargo generate-rpm \
+            -s 'name = "ostt-vulkan"' \
+            -s 'conflicts = { "ostt" = "*", "ostt-cuda" = "*", "ostt-cuda13" = "*" }' \
+            -s 'provides = { "ostt" = "*" }'
       - name: Create versioned archive and checksums
         run: |
           # Only create a versioned tar.gz on tag pushes (GITHUB_REF_NAME is a version,

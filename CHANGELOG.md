@@ -7,8 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- CUDA 13 builds. Releases now ship a `cuda13` archive, `.deb`, and `.rpm` alongside the CUDA 12 `cuda` ones. CUDA 12 and CUDA 13 runtimes are not interchangeable, so there is one build for each; CUDA 13 does not support Maxwell, Pascal, or Volta GPUs, which keep working with the CUDA 12 build.
+- The install script accepts `--gpu MODE` (`auto`, `cpu`, `cuda`, `cuda13`, `vulkan`) to choose a build explicitly instead of relying on detection.
+
 ### Fixed
 
+- The install script could fail to notice an installed CUDA toolkit and silently install the CPU build, notably on Arch and CachyOS. Detection is now reliable, picks the CUDA build that matches the installed CUDA version and the GPU, and falls back to the Vulkan build (real GPU acceleration) rather than CPU when no matching CUDA runtime is present. Reported by @jdufner in [#91](https://github.com/kristoferlund/ostt/issues/91).
+- CUDA builds were slower than they should have been: they contained optimized kernels for a single GPU architecture, so most NVIDIA cards ran generic code. CUDA builds now include kernels for every supported architecture. Archives are larger as a result.
+- CUDA builds could crash at model load on CPUs without AVX-512, because they inherited the CPU features of the build machine. All GPU builds now target a fixed AVX2 baseline.
+- The CUDA `.deb` packages declared almost no dependencies, and the `ostt`, `ostt-cuda`, `ostt-cuda13`, and `ostt-vulkan` packages could not be swapped for one another without manual cleanup. Both fixed for `.deb` and `.rpm`.
+- `ostt --version` now reports `-cuda13` for the CUDA 13 build instead of `-cuda`.
 - Recording no longer hangs silently when the capture device opens but delivers no audio. ostt now fails after 5 seconds with an error naming the device and pointing at the audio stack, logs `First samples received from audio device` on the first buffer so its absence localises the fault, and surfaces audio stream errors that previously only reached the log. Silence is unaffected: a silent room still delivers buffers, only a dead capture stream delivers none. Reported by @ocewers in [#92](https://github.com/kristoferlund/ostt/issues/92).
 
 ## 0.0.25 - 2026-06-10

@@ -73,12 +73,9 @@ fn load_config() -> anyhow::Result<crate::config::OsttConfig> {
     })
 }
 
-#[cfg(feature = "whisper-vulkan")]
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-vulkan");
-#[cfg(feature = "whisper-cuda")]
-const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "-cuda");
-#[cfg(not(any(feature = "whisper-vulkan", feature = "whisper-cuda")))]
-const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Package version plus the build-variant suffix (`-cuda`, `-cuda13`,
+/// `-vulkan`), assembled by `build.rs`.
+const VERSION: &str = env!("OSTT_VERSION");
 
 /// A terminal-based speech-to-text recorder with real-time waveform visualization
 #[derive(Parser)]

@@ -115,10 +115,22 @@ gh run list --workflow Release --limit 5
 gh run watch <RUN_ID> --exit-status
 ```
 
-The workflow must complete successfully. It is expected to:
+The workflow must complete successfully — `host` requires every build job to
+succeed, so a single failed matrix leg (one CUDA major, say) blocks the release
+entirely and no GitHub Release is created, even though the tag is already
+pushed. That is deliberate: a release missing an artifact would fail the
+manifest refresh in step 6. To recover, fix the cause and rerun just the failed
+legs rather than re-tagging:
+
+```bash
+gh run rerun --failed <RUN_ID>
+```
+
+It is expected to:
 
 - Build CPU binaries for Linux and macOS
-- Build CUDA and Vulkan Linux binaries
+- Build CUDA Linux binaries, once per CUDA major version (`cuda` for CUDA 12, `cuda13` for CUDA 13)
+- Build Vulkan Linux binaries
 - Build `.deb` and `.rpm` packages
 - Upload release assets
 - Create the GitHub Release
@@ -214,12 +226,19 @@ curl -L -o ostt-x86_64-unknown-linux-gnu.tar.gz \
 curl -L -o ostt-aarch64-unknown-linux-gnu.tar.gz \
   "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-aarch64-unknown-linux-gnu.tar.gz"
 
-curl -L -o ostt-x86_64-unknown-linux-gnu-cuda.tar.gz \
-  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-x86_64-unknown-linux-gnu-cuda.tar.gz"
+curl -L -o ostt-<VERSION>-cuda.tar.gz \
+  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda.tar.gz"
 
-curl -L -o ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz \
-  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz"
+curl -L -o ostt-<VERSION>-cuda13.tar.gz \
+  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-<VERSION>-x86_64-unknown-linux-gnu-cuda13.tar.gz"
+
+curl -L -o ostt-<VERSION>-vulkan.tar.gz \
+  "https://github.com/kristoferlund/ostt/releases/download/v<VERSION>/ostt-<VERSION>-x86_64-unknown-linux-gnu-vulkan.tar.gz"
 ```
+
+The GPU archives carry the version in the filename; the CPU archives do not.
+The local names above match the `::` names in the AUR PKGBUILDs, so the
+`SRCDEST` cache in step 9 is reused instead of re-downloading.
 
 Compute checksums:
 
@@ -227,8 +246,9 @@ Compute checksums:
 sha256sum source-archive.tar.gz
 sha256sum ostt-x86_64-unknown-linux-gnu.tar.gz
 sha256sum ostt-aarch64-unknown-linux-gnu.tar.gz
-sha256sum ostt-x86_64-unknown-linux-gnu-cuda.tar.gz
-sha256sum ostt-x86_64-unknown-linux-gnu-vulkan.tar.gz
+sha256sum ostt-<VERSION>-cuda.tar.gz
+sha256sum ostt-<VERSION>-cuda13.tar.gz
+sha256sum ostt-<VERSION>-vulkan.tar.gz
 ```
 
 ## 8. Update AUR Packages
@@ -248,8 +268,26 @@ For `../aur-ostt-bin`:
 
 For `../aur-ostt-cuda-bin`:
 
+**One-time migration, required the first release after CUDA 13 support lands.**
+This package currently downloads the CUDA 12 archive and declares
+`depends=(... 'cuda' ...)`. Arch's `extra/cuda` is 13.x, so the binary it ships
+today cannot start on an up-to-date Arch system. Make these three edits once,
+then treat it as a normal per-release update:
+
+- Change the `source=()` entry from
+  `ostt-${pkgver}-cuda.tar.gz::${url}/releases/download/v${pkgver}/ostt-${pkgver}-x86_64-unknown-linux-gnu-cuda.tar.gz`
+  to
+  `ostt-${pkgver}-cuda13.tar.gz::${url}/releases/download/v${pkgver}/ostt-${pkgver}-x86_64-unknown-linux-gnu-cuda13.tar.gz`
+- Change `'cuda'` in `depends` to `'cuda>=13'`
+- Bump `pkgrel` if `pkgver` is unchanged
+
+Then, every release:
+
 - Set `pkgver=<VERSION>` in `PKGBUILD`
-- Set the first `sha256sums` entry to the CUDA archive checksum
+- Set the first `sha256sums` entry to the **cuda13** archive checksum
+
+Arch has no CUDA 12 in its official repositories, so Maxwell, Pascal, and Volta
+users are not served by this package; point them at `ostt-vulkan-bin`.
 
 For `../aur-ostt-vulkan-bin`:
 

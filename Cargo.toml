@@ -12,7 +12,9 @@ homepage = "https://github.com/kristoferlund/ostt"
 # Enable NVIDIA CUDA GPU acceleration for local transcription.
 # Requires CUDA toolkit at build time. The resulting binary dynamically links
 # libcuda (from the NVIDIA driver) and libcublas at runtime.
-# Used to produce the ostt-cuda release artifacts.
+# Built once per CUDA major version to produce the ostt-cuda (CUDA 12) and
+# ostt-cuda13 (CUDA 13) release artifacts. The sonames differ per major
+# (libcublas.so.12 vs libcublas.so.13) and are not interchangeable.
 whisper-cuda = ["whisper-rs/cuda"]
 # Enable Vulkan GPU acceleration for local transcription (AMD, Intel, NVIDIA).
 # Requires Vulkan SDK (libvulkan-dev, glslang-tools) at build time. The resulting
@@ -114,6 +116,8 @@ waveform visualization and transcribe using your choice of AI provider.\
 """
 depends = "$auto, ffmpeg"
 recommends = "wl-clipboard | xclip"
+conflicts = "ostt-cuda, ostt-cuda13, ostt-vulkan"
+replaces = "ostt-cuda, ostt-cuda13, ostt-vulkan"
 section = "sound"
 priority = "optional"
 assets = [
@@ -125,10 +129,38 @@ assets = [
     ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
 ]
 
+# The CUDA variants cannot use `$auto`: dpkg-shlibdeps finds no libcuda.so.1 on
+# the build runner (only the toolkit's stub) and no dpkg dependency information
+# for libcublas, and cargo-deb runs it without --ignore-missing-info in a
+# temporary directory where no shlibs.local can be supplied. `$auto` then gives
+# up entirely rather than degrading -- the ostt-cuda package shipped declaring
+# nothing but ffmpeg, having lost libc, libstdc++, ALSA and OpenSSL. So the base
+# dependencies are spelled out, with the pre- and post-time_t-transition package
+# names as alternatives (libasound2 became libasound2t64 in Ubuntu 24.04 and
+# Debian 13; a versioned dependency is not satisfied by a virtual package).
+# The versions come from the binary: built on ubuntu-22.04, it needs GLIBC 2.35
+# and GLIBCXX_3.4.30 (libstdc++6 12). CI asserts every package names libc6.
+#
+# The CUDA runtime itself stays out of Depends -- and out of Recommends. It
+# legitimately comes from outside dpkg (NVIDIA's .run installer), NVIDIA's apt
+# packages are named per minor version (libcublas-12-6, ...), and the distro
+# names (libcublas12) exist in Ubuntu 24.04 only. A Recommends naming any of
+# them would be wrong on most systems, and libcudart / libcuda.so.1 fail first
+# anyway. The installer script matches the variant to the installed runtime. Note the RPMs differ here -- cargo-generate-rpm's ELF
+# auto-requires do declare libcublas.so.N and libcuda.so.1, so on Fedora and
+# openSUSE the package refuses to install without a dpkg-visible CUDA runtime,
+# and .run-installer users take the archive instead.
+#
+# The Vulkan variant is built on ubuntu-24.04, where libvulkan1 is dpkg-managed
+# and `$auto` resolves completely; it must stay `$auto`, since that binary needs
+# GLIBC 2.39 and libvulkan1 as hard dependencies.
 [package.metadata.deb.variants.cuda]
 name = "ostt-cuda"
-depends = "$auto, ffmpeg"
+depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 12), libasound2t64 (>= 1.0.29) | libasound2 (>= 1.0.29), libssl3t64 (>= 3.0.0) | libssl3 (>= 3.0.0), ffmpeg"
 recommends = "wl-clipboard | xclip"
+conflicts = "ostt, ostt-cuda13, ostt-vulkan"
+replaces = "ostt, ostt-cuda13, ostt-vulkan"
+provides = "ostt"
 assets = [
     ["target/dist/ostt", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ostt-cuda/README.md", "644"],
@@ -138,10 +170,29 @@ assets = [
     ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
 ]
 
+[package.metadata.deb.variants.cuda13]
+name = "ostt-cuda13"
+depends = "libc6 (>= 2.35), libgcc-s1 (>= 3.0), libstdc++6 (>= 12), libasound2t64 (>= 1.0.29) | libasound2 (>= 1.0.29), libssl3t64 (>= 3.0.0) | libssl3 (>= 3.0.0), ffmpeg"
+recommends = "wl-clipboard | xclip"
+conflicts = "ostt, ostt-cuda, ostt-vulkan"
+replaces = "ostt, ostt-cuda, ostt-vulkan"
+provides = "ostt"
+assets = [
+    ["target/dist/ostt", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/ostt-cuda13/README.md", "644"],
+    ["LICENSE", "usr/share/doc/ostt-cuda13/LICENSE", "644"],
+    ["completions/ostt.bash", "usr/share/bash-completion/completions/ostt", "644"],
+    ["completions/_ostt", "usr/share/zsh/site-functions/_ostt", "644"],
+    ["completions/ostt.fish", "usr/share/fish/vendor_completions.d/ostt.fish", "644"],
+]
+
 [package.metadata.deb.variants.vulkan]
 name = "ostt-vulkan"
 depends = "$auto, ffmpeg"
 recommends = "wl-clipboard | xclip"
+conflicts = "ostt, ostt-cuda, ostt-cuda13"
+replaces = "ostt, ostt-cuda, ostt-cuda13"
+provides = "ostt"
 assets = [
     ["target/dist/ostt", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/ostt-vulkan/README.md", "644"],
