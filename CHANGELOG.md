@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.26 - 2026-09-20
+
 ### Added
 
 - CUDA 13 builds. Releases now ship a `cuda13` archive, `.deb`, and `.rpm` alongside the CUDA 12 `cuda` ones. CUDA 12 and CUDA 13 runtimes are not interchangeable, so there is one build for each; CUDA 13 does not support Maxwell, Pascal, or Volta GPUs, which keep working with the CUDA 12 build.
