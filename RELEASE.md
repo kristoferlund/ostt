@@ -197,13 +197,29 @@ git commit -m "Update install manifest for <VERSION>"
 git push
 ```
 
-Wait for ostt.ai to redeploy, then verify the live file:
+**ostt.ai does not deploy itself.** Pushing to `ostt-web` publishes nothing; the
+site is built on the Hetzner host from a checkout there. This is the step that
+was missed in the v0.0.26 release, which left the installer serving the previous
+version for a day. Deploy once, after both the docs changes (step 2) and this
+manifest commit are on `main`:
+
+```bash
+ssh <hetzner-host>
+cd <ostt-web checkout on the host>
+git pull
+pnpm install --frozen-lockfile
+pnpm docs:build
+```
+
+Then verify the live file from your own machine:
 
 ```bash
 curl -fsSL https://ostt.ai/latest.json | grep '"version"'
 ```
 
-This must report `<VERSION>`. Do not continue until it does.
+This must report `<VERSION>`. Do not continue until it does. A quick way to
+confirm the docs deployed alongside it is to check that a string from this
+release's changelog appears on `https://ostt.ai/guide/changelog`.
 
 ## 7. Collect AUR Checksums
 
