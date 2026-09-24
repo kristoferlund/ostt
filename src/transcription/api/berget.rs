@@ -13,6 +13,14 @@ use indexmap::IndexMap;
 pub(super) const MODELS: &[ModelSpec] = &[
     ModelSpec {
         provider_id: "berget",
+        model_id: "klang/pianissimo",
+        endpoint: "wss://api.berget.ai/v1/realtime?intent=transcription",
+        display_name: "Klang Pianissimo (Swedish optimized)",
+        description: "Klang AI's Swedish Parakeet-based speech recognition model (KlangAI/pianissimo-sv), hosted through Berget's realtime API. Keyword boosting and prompts are not supported.",
+        languages: &["Swedish"],
+    },
+    ModelSpec {
+        provider_id: "berget",
         model_id: "KBLab/kb-whisper-large",
         endpoint: "https://api.berget.ai/v1/audio/transcriptions",
         display_name: "KBLab KB Whisper Large (Swedish optimized)",
@@ -84,7 +92,10 @@ const OPTIONS: &[ModelOptionSpec] = &[
     },
 ];
 
-pub(super) fn option_schema(_model_id: &str) -> Option<ModelOptionSchema> {
+pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
+    if model_id == "klang/pianissimo" {
+        return Some(super::berget_realtime::option_schema());
+    }
     Some(ModelOptionSchema::new(OPTIONS))
 }
 
@@ -92,6 +103,14 @@ pub(super) fn validate_options(
     full_model_id: &str,
     options: &IndexMap<String, ModelOptionValue>,
 ) -> anyhow::Result<()> {
+    if full_model_id == "berget/klang/pianissimo" {
+        return super::validate_number_range(
+            full_model_id,
+            options,
+            "chunk_seconds",
+            f64::MIN_POSITIVE..=f64::MAX,
+        );
+    }
     super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
 
     if let Some(value) = options.get("response_format") {
@@ -135,6 +154,9 @@ pub(super) async fn transcribe(
     config: &TranscriptionConfig,
     audio_path: &Path,
 ) -> anyhow::Result<String> {
+    if config.model_id == "klang/pianissimo" {
+        return super::berget_realtime::transcribe(config, audio_path).await;
+    }
     let audio_data =
         std::fs::read(audio_path).map_err(|e| anyhow::anyhow!("Failed to read audio file: {e}"))?;
 
