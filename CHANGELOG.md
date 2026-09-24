@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Swedish transcription with Klang AI Pianissimo through Berget (`berget/klang/pianissimo`). OSTT sends the completed recording through Berget's realtime WebSocket API and returns the final transcript; text is not displayed during recording. Supports `language` (default `sv`) and positive `chunk_seconds` (default `3`). Keyword boosting, prompts, and temperature are not supported.
+
 ## 0.0.26 - 2026-09-20
 
 ### Added

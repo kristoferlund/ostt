@@ -6,6 +6,7 @@
 
 mod assemblyai;
 mod berget;
+mod berget_realtime;
 mod command;
 mod deepgram;
 mod deepinfra;
