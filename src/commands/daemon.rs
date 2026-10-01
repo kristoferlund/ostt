@@ -1,6 +1,6 @@
 //! Handlers for `ostt daemon <subcommand>`.
 //!
-//! The daemon keeps a local Whisper model loaded in memory between transcriptions,
+//! The daemon keeps a local model loaded in memory between transcriptions,
 //! eliminating the model-load cost on every call. It always serves the currently
 //! active local model (as configured by `ostt model`).
 //!
@@ -46,7 +46,7 @@ pub async fn handle_daemon_start(config: &OsttConfig) -> anyhow::Result<()> {
     let model_id = require_active_model(config)?;
 
     if let Some(info) = probe_daemon().await {
-        if info.model_id == model_id {
+        if info.matches_model(&model_id) {
             println!("Daemon is running (model: {model_id}).");
             return Ok(());
         }
@@ -98,7 +98,10 @@ pub async fn handle_daemon_status(config: &OsttConfig) -> anyhow::Result<()> {
                 println!("PID:     {p}");
             }
             println!("Socket:  {}", daemon_socket_path().display());
-            let mismatch = active.as_deref().is_some_and(|m| m != d.model_id);
+            if let Some(backend) = d.backend.as_deref() {
+                println!("Backend: {backend}");
+            }
+            let mismatch = active.as_deref().is_some_and(|m| !d.matches_model(m));
             if mismatch {
                 println!(
                     "Model:   {} (active: {})",
@@ -226,7 +229,7 @@ fn active_local_model() -> Option<String> {
     crate::config::get_selected_model_entry()
         .ok()
         .flatten()
-        .filter(|m| m.provider_id == "whisper")
+        .filter(|m| matches!(m.provider_id.as_str(), "whisper" | "parakeet"))
         .map(|m| m.model_id)
 }
 
@@ -235,7 +238,7 @@ fn active_local_model_from_config(config: &OsttConfig) -> Option<String> {
         config.transcription.provider.as_deref(),
         config.transcription.model.as_deref(),
     ) {
-        (Some("whisper") | Some("local"), Some(model_id)) => Some(model_id.to_string()),
+        (Some("whisper" | "local" | "parakeet"), Some(model_id)) => Some(model_id.to_string()),
         _ => None,
     }
 }

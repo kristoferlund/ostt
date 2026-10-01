@@ -17,7 +17,8 @@ static APPENDER_GUARD: OnceLock<tracing_appender::non_blocking::WorkerGuard> = O
 /// Initializes the logging system with file-based output.
 ///
 /// Sets up a non-blocking rolling file appender that rotates daily.
-/// Log level is controlled by the RUST_LOG environment variable (defaults to "info").
+/// Defaults to OSTT info logs and ONNX Runtime warnings/errors. RUST_LOG overrides
+/// the defaults, including when explicitly enabling runtime diagnostics.
 ///
 /// # Errors
 /// - If the log directory cannot be determined or created
@@ -38,8 +39,7 @@ pub fn init_logging() -> Result<(), anyhow::Error> {
         .set(guard)
         .map_err(|_| anyhow::anyhow!("Logging already initialized"))?;
 
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let env_filter = log_filter(std::env::var("RUST_LOG").ok().as_deref());
 
     tracing_subscriber::registry()
         .with(env_filter)
@@ -55,6 +55,12 @@ pub fn init_logging() -> Result<(), anyhow::Error> {
 
     tracing::debug!("Logging initialized. Log file: {}", log_dir.display());
     Ok(())
+}
+
+fn log_filter(value: Option<&str>) -> tracing_subscriber::EnvFilter {
+    value
+        .and_then(|value| tracing_subscriber::EnvFilter::try_new(value).ok())
+        .unwrap_or_else(|| tracing_subscriber::EnvFilter::new("info,ort=warn"))
 }
 
 /// Cleans up old log files, keeping only the 7 most recent days.
@@ -95,4 +101,50 @@ fn cleanup_old_logs(log_dir: &PathBuf) -> Result<(), anyhow::Error> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_filter(value: Option<&str>, runtime_info: bool, runtime_debug: bool) {
+        let subscriber = tracing_subscriber::registry().with(log_filter(value));
+        tracing::subscriber::with_default(subscriber, || {
+            assert!(
+                tracing::enabled!(target: "ostt::transcription::daemon", tracing::Level::INFO),
+                "keep useful lifecycle logs"
+            );
+            assert!(
+                tracing::enabled!(target: "ort::logging", tracing::Level::WARN),
+                "keep runtime warnings"
+            );
+            assert!(
+                tracing::enabled!(target: "ort::logging", tracing::Level::ERROR),
+                "keep runtime failures"
+            );
+            assert_eq!(
+                tracing::enabled!(target: "ort::logging", tracing::Level::INFO),
+                runtime_info
+            );
+            assert_eq!(
+                tracing::enabled!(target: "ort::logging", tracing::Level::DEBUG),
+                runtime_debug
+            );
+        });
+    }
+
+    #[test]
+    fn normal_logging_excludes_per_kernel_noise_but_preserves_diagnostics() {
+        check_filter(None, false, false);
+    }
+
+    #[test]
+    fn invalid_log_filter_falls_back_to_quiet_runtime_defaults() {
+        check_filter(Some("ort=not-a-level"), false, false);
+    }
+
+    #[test]
+    fn explicit_runtime_diagnostics_can_be_enabled() {
+        check_filter(Some("info,ort=debug"), true, true);
+    }
 }

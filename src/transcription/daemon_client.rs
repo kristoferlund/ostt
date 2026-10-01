@@ -38,6 +38,8 @@ struct Response {
     #[serde(default)]
     model_id: Option<String>,
     #[serde(default)]
+    backend: Option<String>,
+    #[serde(default)]
     text: Option<String>,
     #[serde(default)]
     error: Option<String>,
@@ -48,6 +50,23 @@ struct Response {
 /// Information returned by a successful daemon ping.
 pub struct DaemonInfo {
     pub model_id: String,
+    pub backend: Option<String>,
+}
+
+impl DaemonInfo {
+    pub fn matches_model(&self, model_id: &str) -> bool {
+        if self.model_id != model_id {
+            return false;
+        }
+        let Ok(expected) = super::local_models::model_backend(model_id) else {
+            return false;
+        };
+        backend_matches(self.backend.as_deref(), &expected)
+    }
+}
+
+fn backend_matches(actual: Option<&str>, expected: &str) -> bool {
+    actual == Some(expected) || (actual.is_none() && expected.starts_with("whisper/"))
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -60,6 +79,7 @@ pub async fn probe_daemon() -> Option<DaemonInfo> {
         .ok()??;
     resp.ok.then_some(DaemonInfo {
         model_id: resp.model_id.unwrap_or_default(),
+        backend: resp.backend,
     })
 }
 
@@ -73,7 +93,7 @@ pub async fn probe_daemon() -> Option<DaemonInfo> {
 /// to run the daemon until explicitly stopped (used by `daemon start` and services).
 pub async fn ensure_daemon(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Result<()> {
     if let Some(info) = probe_daemon().await {
-        if info.model_id == model_id {
+        if info.matches_model(model_id) {
             tracing::debug!("daemon already loaded for model '{model_id}'");
             return Ok(());
         }
@@ -166,7 +186,7 @@ async fn wait_for_daemon(model_id: &str, deadline: Duration) -> anyhow::Result<(
     let mut delay = Duration::from_millis(100);
     loop {
         if let Some(info) = probe_daemon().await {
-            if info.model_id == model_id {
+            if info.matches_model(model_id) {
                 tracing::debug!("daemon ready for model '{model_id}'");
                 return Ok(());
             }
@@ -176,6 +196,26 @@ async fn wait_for_daemon(model_id: &str, deadline: Duration) -> anyhow::Result<(
         }
         sleep(delay).await;
         delay = (delay * 2).min(Duration::from_secs(2));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cuda_requests_cannot_reuse_cpu_or_legacy_parakeet_daemons() {
+        assert!(!backend_matches(Some("parakeet/cpu"), "parakeet/cuda"));
+        assert!(!backend_matches(None, "parakeet/cuda"));
+        assert!(!backend_matches(Some("parakeet/cpu"), "parakeet/webgpu"));
+        assert!(!backend_matches(Some("parakeet/cuda"), "parakeet/webgpu"));
+        assert!(!backend_matches(None, "parakeet/webgpu"));
+        assert!(backend_matches(Some("parakeet/webgpu"), "parakeet/webgpu"));
+        assert!(backend_matches(Some("parakeet/cuda"), "parakeet/cuda"));
+        assert!(
+            backend_matches(None, "whisper/CPU"),
+            "preserve old Whisper daemons"
+        );
     }
 }
 

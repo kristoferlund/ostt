@@ -1180,7 +1180,7 @@ pub fn resolve_output_format(
         return output_format.to_string();
     }
 
-    if selected_model.provider_id == "whisper" {
+    if matches!(selected_model.provider_id.as_str(), "whisper" | "parakeet") {
         return LOCAL_TRANSCRIPTION_OUTPUT_FORMAT.to_string();
     }
 
@@ -1218,7 +1218,9 @@ pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()
         return Ok(());
     }
 
-    if provider_id != "whisper" && model::find_model(provider_id, model_id).is_none() {
+    if !matches!(provider_id, "whisper" | "parakeet")
+        && model::find_model(provider_id, model_id).is_none()
+    {
         anyhow::bail!(
             "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
             model_id,
@@ -1226,9 +1228,16 @@ pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()
         );
     }
 
-    if provider_id == "whisper" && !crate::transcription::local_models::is_safe_model_id(model_id) {
+    if matches!(provider_id, "whisper" | "parakeet")
+        && !crate::transcription::local_models::is_safe_model_id(model_id)
+    {
         anyhow::bail!(
-            "Whisper model id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
+            "{} model id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
+            if provider_id == "whisper" {
+                "Whisper"
+            } else {
+                "Parakeet"
+            },
             model_id
         );
     }

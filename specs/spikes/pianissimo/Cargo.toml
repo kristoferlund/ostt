@@ -1,0 +1,12 @@
+[package]
+name = "pianissimo-spike"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+anyhow = "1"
+hound = "3.5"
+parakeet-rs = { git = "https://github.com/altunenes/parakeet-rs", rev = "f6cd30159d47463cca6167d7d1dddb07b3c0d112" }

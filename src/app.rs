@@ -375,7 +375,7 @@ enum Commands {
 
     /// Manage the local model daemon
     ///
-    /// The daemon keeps a local Whisper model loaded in memory so transcriptions
+    /// The daemon keeps a local model loaded in memory so transcriptions
     /// start instantly instead of reloading the model on every call. It always
     /// serves the currently active model (configured with `ostt model`).
     ///

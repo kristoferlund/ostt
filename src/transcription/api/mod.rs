@@ -16,6 +16,7 @@ mod http;
 pub(crate) mod local;
 mod mistral;
 mod openai;
+pub(crate) mod parakeet;
 
 use serde::Deserialize;
 use std::path::Path;
@@ -183,6 +184,7 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
         TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
         TranscriptionProvider::Whisper => local::transcribe(config, audio_path).await,
+        TranscriptionProvider::Parakeet => parakeet::transcribe(config, audio_path).await,
         TranscriptionProvider::Mistral => mistral::transcribe(config, audio_path).await,
         TranscriptionProvider::Command => command::transcribe(config, audio_path).await,
         TranscriptionProvider::Http => http::transcribe(config, audio_path).await,

@@ -22,10 +22,10 @@ use tui_input::Input;
 use crate::config::{self, SelectedModel};
 use crate::model::UserQuit;
 use crate::transcription::local_models::{
-    delete_model, download_model_with_handle, fetch_registry, is_safe_model_id, load_state,
-    mark_downloaded_registry_model, model_destination, register_downloaded_custom_model,
-    resolve_custom_model, validate_custom_model_registration, validate_downloaded_model,
-    DownloadHandle, LocalModelState, RegistryEntry,
+    delete_model, download_entry_with_handle, fetch_registry, is_safe_model_id, load_state,
+    mark_downloaded_registry_model, model_destination, model_disk_usage, model_is_installed,
+    register_downloaded_custom_model, resolve_custom_model, validate_custom_model_registration,
+    validate_downloaded_model, DownloadHandle, LocalModelState, RegistryEntry,
 };
 use crate::transcription::{self, TranscriptionProvider};
 use crate::ui::{render_error_dialog, render_toast, DialogAction, Toast};
@@ -47,11 +47,14 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
     let ostt_config =
         config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let authorized_provider_ids = config::get_authorized_providers()?;
-    let registry = match fetch_registry().await {
-        Ok(registry) => registry,
+    let (registry, registry_error) = match fetch_registry().await {
+        Ok(registry) => (registry, None),
         Err(error) => {
             tracing::error!("Failed to fetch local model registry: {}", error);
-            Vec::new()
+            (
+                crate::transcription::local_models::load_registry_entries().unwrap_or_default(),
+                Some(error),
+            )
         }
     };
     let selected_model = crate::config::get_selected_model_entry()?;
@@ -78,10 +81,10 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
         registry.len(),
         local_state.custom_models.len()
     );
-    if registry.is_empty() {
+    if registry_error.is_some() {
         tracing::debug!("Local model registry unavailable; custom model entry remains enabled");
         tui.show_error_dialog(
-            "Could not load remote registry; custom URL entry is still available with [c]"
+            "Could not load remote registry; built-in models and custom URL entry [c] remain available"
                 .to_string(),
         );
     }
@@ -344,7 +347,7 @@ fn local_model_entry_from_registry_entry(
     selected_model: Option<&SelectedModel>,
     daemon_model_id: Option<&str>,
 ) -> LocalModelEntry {
-    let is_downloaded = model_destination(entry).exists();
+    let is_downloaded = model_is_installed(entry);
     let is_active = selected_model
         .map(|selected| selected.provider_id == entry.provider_id && selected.model_id == entry.id)
         .unwrap_or(false);
@@ -377,14 +380,9 @@ fn local_model_entry_from_registry_entry(
 fn downloaded_model_disk_usage_bytes(entries: &[LocalModelEntry]) -> u64 {
     entries
         .iter()
-        .filter(|entry| entry.provider_id == "whisper")
+        .filter(|entry| matches!(entry.provider_id.as_str(), "whisper" | "parakeet"))
         .filter(|entry| entry.is_downloaded)
-        .filter_map(|entry| {
-            model_destination(&registry_entry_from_model(entry))
-                .metadata()
-                .ok()
-        })
-        .map(|metadata| metadata.len())
+        .map(|entry| model_disk_usage(&registry_entry_from_model(entry)))
         .sum()
 }
 
@@ -533,7 +531,7 @@ async fn handle_selected_entry(
     };
     tracing::debug!("Selected local model '{}'", entry.id);
 
-    if entry.provider_id == "whisper" && !entry.is_downloaded {
+    if matches!(entry.provider_id.as_str(), "whisper" | "parakeet") && !entry.is_downloaded {
         if entry.is_available_in_registry {
             tracing::debug!("Confirming download for local model '{}'", entry.id);
             tui.mode = LocalModelsMode::ConfirmDownload {
@@ -561,7 +559,7 @@ async fn handle_selected_entry(
 }
 
 async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
-    if entry.provider_id != "whisper" {
+    if !matches!(entry.provider_id.as_str(), "whisper" | "parakeet") {
         config::save_selected_model(&entry.provider_id, &entry.id)?;
         return Ok(());
     }
@@ -586,7 +584,7 @@ async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    if info.model_id == model_id {
+    if info.matches_model(model_id) {
         tracing::info!("Local daemon already loaded with activated model '{model_id}'");
         return Ok(());
     }
@@ -618,11 +616,9 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
     let task_entry = entry.clone();
     tracing::debug!("Spawning local model download task for '{}'", entry.id);
     let task = tokio::spawn(async move {
-        let destination = model_destination(&task_entry);
         // Progress is shared with the TUI loop through a small mutex-protected snapshot.
-        if let Err(error) = download_model_with_handle(
-            &task_entry.url,
-            &destination,
+        if let Err(error) = download_entry_with_handle(
+            &task_entry,
             Some(Box::new(
                 move |downloaded_bytes, total_bytes, speed_mbps| {
                     if let Ok(mut state) = progress_state.lock() {

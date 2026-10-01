@@ -11,6 +11,15 @@ use std::env;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=OSTT_BUILD_VARIANT");
+    // ort copies Dawn beside the binary. Let direct CLI/daemon launches find it
+    // without requiring users to set LD_LIBRARY_PATH or DYLD_LIBRARY_PATH.
+    if env::var_os("CARGO_FEATURE_PARAKEET_WEBGPU").is_some() {
+        match env::var("CARGO_CFG_TARGET_OS").as_deref() {
+            Ok("macos") => println!("cargo:rustc-link-arg=-Wl,-rpath,@executable_path"),
+            Ok("linux") => println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN"),
+            _ => {}
+        }
+    }
 
     let variant = env::var("OSTT_BUILD_VARIANT")
         .ok()
