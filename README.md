@@ -182,9 +182,9 @@ Platform-specific setup notes are available in the docs:
 ```bash
 git clone https://github.com/kristoferlund/ostt.git
 cd ostt
-cargo build
-cargo test --all-targets --all-features
-cargo clippy --all-targets --all-features
+cargo fmt --check
+cargo test --locked
+cargo clippy --locked --all-targets -- -D warnings
 ```
 
 Release builds use the dist profile:
@@ -195,7 +195,20 @@ cargo build --profile dist --locked
 
 ### Contributing
 
-Contributions are welcome. Please open an issue or submit a pull request.
+Contributions are welcome, but **opening an issue before starting implementation
+and before submitting a pull request is required**, except for small, clearly
+scoped bug fixes and minor documentation corrections.
+
+For features, behavior changes, refactors, new providers or models, and build or
+packaging changes, open an issue—or join an existing one—and wait for a maintainer
+to agree on the scope and approach before coding. Opening an issue alone does
+not mean the proposed change is accepted.
+
+Pull requests must link the relevant issue, or explain why the small-change
+exception applies. Non-exempt pull requests that bypass this process may be
+closed without review.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and testing requirements.
 
 ## Contributors
 
