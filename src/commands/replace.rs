@@ -131,14 +131,14 @@ fn update(state: &mut State, msg: Msg) -> Result<bool> {
         Msg::Next => state.focus = FocusState::intent([FORM, "input-1"]),
         Msg::Add => {
             let source = state.source_input.value().trim();
-            let changed = !source.is_empty();
-            if changed {
-                let target = state.target_input.value().trim().to_string();
-                state.config.text.replace.insert(source.to_string(), target);
-                state.refresh_rules();
+            if source.is_empty() {
+                return Ok(false);
             }
+            let target = state.target_input.value().trim().to_string();
+            state.config.text.replace.insert(source.to_string(), target);
+            state.refresh_rules();
             state.close_form();
-            return Ok(changed);
+            return Ok(true);
         }
         Msg::Delete => {
             if let Some(index) = state.selected {
@@ -430,15 +430,17 @@ width = 90
         assert_eq!(state.target_input.value(), "");
     }
 
-    /// An empty Find adds nothing, so nothing is written to the config.
+    /// An empty Find adds nothing, so nothing is written to the config, and
+    /// the form stays open with the typed text so the user can finish it.
     #[test]
-    fn add_without_find_changes_nothing() {
+    fn add_without_find_changes_nothing_and_keeps_the_form() {
         let mut state = State::new(OsttConfig::default());
         update(&mut state, Msg::Open).unwrap();
         update(&mut state, Msg::Target(InputState::new("API"))).unwrap();
 
         assert!(!update(&mut state, Msg::Add).unwrap());
         assert!(state.config.text.replace.is_empty());
-        assert!(!state.modals.is_open(FORM));
+        assert!(state.modals.is_open(FORM));
+        assert_eq!(state.target_input.value(), "API");
     }
 }

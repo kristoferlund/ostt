@@ -65,10 +65,7 @@ pub fn run(entries: Vec<TranscriptionEntry>) -> Result<Option<String>> {
             Routed::Msg(Msg::Copy(index)) => {
                 state.selected = Some(index);
                 copied = Some(entries[index].text.clone());
-                state.toasts.push(
-                    Toast::success("Copied to clipboard!").duration(session::TOAST_DURATION),
-                    session::now(),
-                );
+                session::toast(&mut state.toasts, Toast::success("Copied to clipboard!"));
             }
             Routed::Ignored(event) if session::is_cancel(&event) => break,
             Routed::Quit => break,

@@ -132,8 +132,7 @@ impl State {
     }
 
     pub(crate) fn toast(&mut self, toast: Toast<'static>) {
-        self.toasts
-            .push(toast.duration(session::TOAST_DURATION), session::now());
+        session::toast(&mut self.toasts, toast);
     }
 
     /// Update cached daemon status and reflect it on each entry's `is_daemon_loaded`.

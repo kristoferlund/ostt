@@ -8,6 +8,7 @@
 use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::session;
+use ratcn::terminal::{Session, SessionOptions};
 
 /// Executes a processing action on the given transcription text.
 ///
@@ -147,7 +148,8 @@ pub async fn execute_action_with_animation(
     transcription: &str,
     keywords: &[String],
 ) -> anyhow::Result<Option<String>> {
-    let mut session = session::open()?;
+    // No mouse: motion reports would wake the loop and advance the animation.
+    let mut session = Session::open(SessionOptions::new().adaptive())?;
 
     let mut animation = TranscriptionAnimation::new(80);
     animation.set_status_label("Processing...");

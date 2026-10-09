@@ -9,10 +9,9 @@ pub struct AppLayout {
     pub title: Rect,
     pub body: Rect,
     pub footer: Rect,
-    pub full: Rect,
 }
 
-pub fn app_layout(area: Rect) -> AppLayout {
+fn app_layout(area: Rect) -> AppLayout {
     let inner = Block::default()
         .padding(Padding::new(0, 0, 1, 0))
         .inner(area);
@@ -28,7 +27,6 @@ pub fn app_layout(area: Rect) -> AppLayout {
         title,
         body,
         footer,
-        full: area,
     }
 }
 

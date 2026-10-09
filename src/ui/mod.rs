@@ -12,4 +12,4 @@ pub(crate) use components::title::render_themed_title;
 pub(crate) use keys::{cancel_requested, is_cancel_key};
 mod keys;
 
-pub use components::{render_app_layout, render_footer, render_title, AppLayout};
+pub use components::{render_app_layout, render_footer, render_title};

@@ -120,13 +120,13 @@ impl ModelsView {
                             if matches!(self.state.mode, Mode::Browse)
                                 && session::is_cancel(&event) =>
                         {
-                            return Ok(())
+                            return self.quit().await
                         }
                         Routed::Ignored(event) => match shortcut(&self.state.mode, &event) {
                             Some(msg) => msg,
                             None => continue,
                         },
-                        Routed::Quit => return Ok(()),
+                        Routed::Quit => return self.quit().await,
                         Routed::Redraw => continue,
                     }
                 }
@@ -135,19 +135,25 @@ impl ModelsView {
         }
     }
 
+    /// A running download is cancelled and awaited so it removes its partial file.
+    async fn quit(mut self) -> anyhow::Result<()> {
+        if let Some(running) = self.download.take() {
+            running.handle.cancel();
+            // The user is leaving, so the outcome (normally the cancellation
+            // error) is dropped; only a panicked task is reported.
+            let _ = running.task.await?;
+        }
+        Ok(())
+    }
+
     fn draw(&mut self) -> std::io::Result<()> {
-        let title = match &self.state.mode {
-            Mode::Info { entry } => Some(entry.name.clone()),
-            _ => None,
-        };
         let state = &self.state;
         let chrome = Chrome {
-            title: title.as_deref(),
-            footer: if title.is_some() {
-                "esc/q back"
-            } else {
-                "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back"
+            title: match &state.mode {
+                Mode::Info { entry } => Some(entry.name.as_str()),
+                _ => None,
             },
+            footer: footer(&state.mode),
             toasts: Some(&state.toasts),
         };
         session::draw(
@@ -186,9 +192,9 @@ impl ModelsView {
                 }
                 Mode::ConfirmDelete { entry } => self.delete(&entry)?,
                 Mode::Downloading(_) => self.cancel_download(),
-                Mode::Browse | Mode::Error { .. } | Mode::Info { .. } => {
-                    state.set_mode(Mode::Browse)
-                }
+                Mode::Error { .. } => state.set_mode(Mode::Browse),
+                // The loop draws before routing, so the dialogs on screen match the mode.
+                Mode::Browse | Mode::Info { .. } => unreachable!("only dialogs accept"),
             },
             Msg::Dismiss => match state.mode {
                 Mode::Downloading(_) => self.cancel_download(),
@@ -357,6 +363,18 @@ fn custom_model_error(entries: &[LocalModelEntry], id: &str, name: &str) -> Opti
     }
 }
 
+fn footer(mode: &Mode) -> &'static str {
+    match mode {
+        Mode::Browse => "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back",
+        Mode::Info { .. } => "esc/q back",
+        Mode::CustomUrl => "↵ next, esc cancel",
+        Mode::CustomDetails { .. } => "↵ download, tab switch, esc cancel",
+        Mode::ConfirmDownload { .. } | Mode::ConfirmDelete { .. } => "y/↵ confirm, n/esc cancel",
+        Mode::Downloading(_) => "esc cancel",
+        Mode::Error { .. } => "↵/esc close",
+    }
+}
+
 /// Confirmation keys answer the open dialog before its buttons see them.
 fn dialog_shortcut(mode: &Mode, event: &Event) -> Option<Msg> {
     let Event::Key(key) = event else {
@@ -369,7 +387,6 @@ fn dialog_shortcut(mode: &Mode, event: &Event) -> Option<Msg> {
         (Mode::ConfirmDownload { .. } | Mode::ConfirmDelete { .. }, KeyCode::Char('n' | 'N')) => {
             Some(Msg::Dismiss)
         }
-        (Mode::Downloading(_), KeyCode::Tab) => Some(Msg::Dismiss),
         _ => None,
     }
 }
@@ -394,7 +411,7 @@ async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
         return Ok(());
     }
     if !model_destination(&entry.registry_entry()).exists() {
-        anyhow::bail!("Download first with [d]");
+        anyhow::bail!("Model file not found");
     }
     config::save_selected_model(&entry.provider_id, &entry.id)?;
     reload_daemon_if_running(&entry.id).await
@@ -974,45 +991,144 @@ mod tests {
         })
     }
 
-    /// y/n answer both confirmation dialogs, as their footers promise.
-    #[test]
-    fn y_and_n_answer_confirmation_dialogs() {
-        for mode in [
-            Mode::ConfirmDownload { entry: entry("a") },
-            Mode::ConfirmDelete { entry: entry("a") },
-        ] {
-            assert!(matches!(
-                dialog_shortcut(&mode, &key(KeyCode::Char('y'))),
-                Some(Msg::Accept)
-            ));
-            assert!(matches!(
-                dialog_shortcut(&mode, &key(KeyCode::Char('n'))),
-                Some(Msg::Dismiss)
-            ));
+    /// What `run` makes of a key press, short of performing it.
+    enum Handled {
+        Msg(Msg),
+        Leave,
+        Nothing,
+    }
+
+    /// Route a key as `run` does: dialog keys, then components, then shortcuts.
+    fn press(state: &State, code: KeyCode) -> Handled {
+        let event = key(code);
+        if let Some(msg) = dialog_shortcut(&state.mode, &event) {
+            return Handled::Msg(msg);
+        }
+        let mut ratcn = runtime();
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| {
+                session::render(
+                    frame,
+                    &mut ratcn,
+                    state,
+                    &ratcn::Theme::default_dark(),
+                    Chrome {
+                        title: None,
+                        footer: "",
+                        toasts: None,
+                    },
+                    |ctx, body| declare(ctx, body, state),
+                )
+            })
+            .unwrap();
+        match ratcn.handle_event(event.clone(), state) {
+            ratcn::runtime::EventResult::Emit(msg) => Handled::Msg(msg),
+            ratcn::runtime::EventResult::Consumed => Handled::Nothing,
+            ratcn::runtime::EventResult::Ignored
+                if matches!(state.mode, Mode::Browse) && session::is_cancel(&event) =>
+            {
+                Handled::Leave
+            }
+            ratcn::runtime::EventResult::Ignored => {
+                shortcut(&state.mode, &event).map_or(Handled::Nothing, Handled::Msg)
+            }
         }
     }
 
-    /// The list's shortcuts open the matching flows, and Info closes like a dialog.
+    /// Every key a footer advertises does what it says, and every footer item
+    /// is covered here, so the footer and the handlers cannot drift apart.
     #[test]
-    fn browse_shortcuts_and_info_dismissal() {
-        for code in [KeyCode::Char('x'), KeyCode::Char('d'), KeyCode::Delete] {
-            assert!(matches!(
-                shortcut(&Mode::Browse, &key(code)),
-                Some(Msg::Delete)
-            ));
+    fn footer_keys_are_handled_in_every_mode() {
+        use KeyCode::{Char, Delete, Down, Enter, Esc, Tab, Up};
+        type Case = (&'static str, &'static [KeyCode], fn(&Handled) -> bool);
+        let accept: fn(&Handled) -> bool = |h| matches!(h, Handled::Msg(Msg::Accept));
+        let dismiss: fn(&Handled) -> bool = |h| matches!(h, Handled::Msg(Msg::Dismiss));
+        let modes: Vec<(Mode, Vec<Case>)> = vec![
+            (
+                Mode::Browse,
+                vec![
+                    ("↑↓", &[Up, Down], |h| {
+                        matches!(h, Handled::Msg(Msg::Select(_)))
+                    }),
+                    ("↵", &[Enter], |h| {
+                        matches!(h, Handled::Msg(Msg::Activate(_)))
+                    }),
+                    ("x/del", &[Char('x'), Delete], |h| {
+                        matches!(h, Handled::Msg(Msg::Delete))
+                    }),
+                    ("i", &[Char('i')], |h| matches!(h, Handled::Msg(Msg::Info))),
+                    ("c", &[Char('c')], |h| {
+                        matches!(h, Handled::Msg(Msg::Custom))
+                    }),
+                    ("esc/q", &[Esc, Char('q')], |h| matches!(h, Handled::Leave)),
+                ],
+            ),
+            (
+                Mode::Info { entry: entry("b") },
+                vec![("esc/q", &[Esc, Char('q')], dismiss)],
+            ),
+            (
+                Mode::CustomUrl,
+                vec![("↵", &[Enter], accept), ("esc", &[Esc], dismiss)],
+            ),
+            (
+                Mode::CustomDetails {
+                    resolved_entry: entry("b").registry_entry(),
+                },
+                vec![
+                    ("↵", &[Enter], accept),
+                    ("tab", &[Tab], |h| matches!(h, Handled::Msg(Msg::Focus(_)))),
+                    ("esc", &[Esc], dismiss),
+                ],
+            ),
+            (
+                Mode::ConfirmDownload { entry: entry("b") },
+                vec![
+                    ("y/↵", &[Char('y'), Enter], accept),
+                    ("n/esc", &[Char('n'), Esc], dismiss),
+                ],
+            ),
+            (
+                Mode::ConfirmDelete { entry: entry("b") },
+                vec![
+                    ("y/↵", &[Char('y'), Enter], accept),
+                    ("n/esc", &[Char('n'), Esc], dismiss),
+                ],
+            ),
+            (downloading(), vec![("esc", &[Esc], dismiss)]),
+            (
+                Mode::Error {
+                    message: "failed".to_string(),
+                },
+                vec![("↵/esc", &[Enter, Esc], accept_or_dismiss)],
+            ),
+        ];
+        for (mode, cases) in modes {
+            let advertised: Vec<_> = footer(&mode)
+                .split(", ")
+                .map(|item| item.split(' ').next().unwrap())
+                .collect();
+            let tested: Vec<_> = cases.iter().map(|(label, _, _)| *label).collect();
+            assert_eq!(advertised, tested, "footer of {mode:?}");
+
+            let mut state = State::new(vec![entry("a"), entry("b"), entry("c")]);
+            state.selected = Some(1);
+            state.set_mode(mode.clone());
+            for (label, codes, expected) in cases {
+                for code in codes {
+                    assert!(
+                        expected(&press(&state, *code)),
+                        "{label} ({code:?}) in {mode:?}"
+                    );
+                }
+            }
         }
-        assert!(matches!(
-            shortcut(&Mode::Browse, &key(KeyCode::Char('i'))),
-            Some(Msg::Info)
-        ));
-        assert!(matches!(
-            shortcut(&Mode::Browse, &key(KeyCode::Char('c'))),
-            Some(Msg::Custom)
-        ));
-        let info = Mode::Info { entry: entry("a") };
-        for code in [KeyCode::Esc, KeyCode::Char('q')] {
-            assert!(matches!(shortcut(&info, &key(code)), Some(Msg::Dismiss)));
-        }
+    }
+
+    fn accept_or_dismiss(handled: &Handled) -> bool {
+        matches!(handled, Handled::Msg(Msg::Accept | Msg::Dismiss))
     }
 
     /// A failed delete must show its error in place of the confirmation, at

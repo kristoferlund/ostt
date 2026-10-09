@@ -1,13 +1,12 @@
 //! Native host for the management screens, after ratcn's demo host: it opens the
 //! adaptive terminal session, paints the shared chrome, and routes input.
 
-use crate::ui::components::app_layout::app_layout;
 use crate::ui::{render_app_layout, render_themed_footer, render_themed_title};
 use ratatui::{layout::Rect, style::Style, Frame};
 use ratcn::{
     runtime::{DeclareCtx, Event, EventResult, KeyCode, Ratcn},
     terminal::{Session, SessionEvent, SessionOptions},
-    Theme, ToasterState, ToasterWidget,
+    Theme, Toast, ToasterState, ToasterWidget,
 };
 use std::{
     io,
@@ -25,6 +24,12 @@ pub(crate) fn open() -> io::Result<Session> {
 pub(crate) fn now() -> Duration {
     static START: OnceLock<Instant> = OnceLock::new();
     START.get_or_init(Instant::now).elapsed()
+}
+
+/// Show `toast` in place of any toast still on screen, one at a time as on main.
+pub(crate) fn toast(toasts: &mut ToasterState<'static>, toast: Toast<'static>) {
+    *toasts = ToasterState::new();
+    toasts.push(toast.duration(TOAST_DURATION), now());
 }
 
 /// What a screen shows around the body it declares.
@@ -67,21 +72,15 @@ pub(crate) fn render<S, M>(
     if let Some(title) = chrome.title {
         render_themed_title(frame, layout.title, title, theme);
     }
-    let body = body_area(area, chrome.title.is_some());
+    let body = if chrome.title.is_some() {
+        layout.body
+    } else {
+        layout.title.union(layout.body)
+    };
     ratcn.render(frame, area, state, theme, |ctx| declare(ctx, body));
     render_themed_footer(frame, layout.footer, chrome.footer, theme);
     if let Some(toasts) = chrome.toasts {
         frame.render_widget(ToasterWidget::new(toasts, now()).themed(theme), area);
-    }
-}
-
-/// The area a screen declares its body in.
-fn body_area(area: Rect, titled: bool) -> Rect {
-    let layout = app_layout(area);
-    if titled {
-        layout.body
-    } else {
-        layout.title.union(layout.body)
     }
 }
 
@@ -185,6 +184,21 @@ mod tests {
             classify(key(KeyCode::Char('x')), EventResult::<()>::Ignored, false),
             Routed::Ignored(Event::Key(k)) if k.code == KeyCode::Char('x')
         ));
+    }
+
+    /// A stack of stale toasts would bury the latest one.
+    #[test]
+    fn a_new_toast_replaces_the_previous_one() {
+        let mut toasts = ToasterState::new();
+        toast(&mut toasts, Toast::error("first"));
+        toast(&mut toasts, Toast::error("second"));
+
+        let titles: Vec<_> = toasts
+            .entries()
+            .iter()
+            .map(|entry| entry.toast().title())
+            .collect();
+        assert_eq!(titles, ["second"]);
     }
 
     /// Esc and q leave every management screen; other letters stay shortcuts.
