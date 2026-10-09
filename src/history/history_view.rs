@@ -54,14 +54,19 @@ pub fn run(entries: Vec<TranscriptionEntry>) -> Result<Option<String>> {
             toasts: Some(&state.toasts),
         };
         session::draw(&mut session, &mut ratcn, &state, chrome, |ctx, body| {
-            // The date is muted so the transcription text stands out.
+            // Lists draw ordinary rows muted; the transcription keeps full
+            // contrast on every row so the date always reads as secondary.
             let date = Style::default().fg(ctx.theme.muted_foreground);
+            let transcription = Style::default().fg(ctx.theme.foreground);
             let list = selection_list(&rows, 2, |s: &State| s.selected, Msg::Select, Msg::Copy)
                 .paint_item(move |_, row| {
                     let (created_at, text) = row.label.split_once('\n').unwrap_or((row.label, ""));
                     Text::from(vec![
                         Line::styled(format!(" {created_at}"), date),
-                        Line::from(format!(" {}", text.lines().next().unwrap_or_default())),
+                        Line::styled(
+                            format!(" {}", text.lines().next().unwrap_or_default()),
+                            transcription,
+                        ),
                     ])
                 });
             ctx.component("list", list, body);
