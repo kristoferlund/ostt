@@ -23,8 +23,8 @@ pub(crate) fn render_themed_footer(
         area,
         text,
         Style::default()
-            .fg(theme.muted_foreground)
-            .bg(theme.surface),
+            .fg(theme.secondary_foreground)
+            .bg(theme.secondary),
     );
 }
 
