@@ -9,10 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- Migrated management screens to ratcn: grouped model lists, model information, history, keywords, replace rules, and the standalone process-action picker. The model list retains its grouping and status pills; other lists use native ratcn presentation and interaction.
-- Model confirmations, custom-model forms, errors, download progress, keyword entry, and replace-rule entry now use native movable ratcn dialogs with clickable actions. Inputs support mouse interaction and bracketed paste; notifications use ratcn's native presentation and two-second lifetime.
-- Updated Ratatui and Crossterm for ratcn compatibility and replaced tui-input with ratcn input state. Recording/transcription popups and their embedded process picker remain plain Ratatui.
-- Management commands now use termina-backed adaptive terminal sessions and one ratcn runtime per command UI. Lists and dialogs share app-owned state, focus, and modal routing; terminal theme changes redraw controls, chrome, notifications, and standalone processing feedback. Model grouping and status pills are retained, with theme-aware text and selection colors. Terminals that cannot report their colors use ratcn's fallback palette.
+- The `model`, `history`, `keyword` and `replace` screens and the process-action picker now use ratcn: movable dialogs with clickable buttons, mouse and paste support in lists and inputs, and colors that follow the terminal theme. Recording popups are unchanged.
+- Ctrl+C during a model download now cancels the download before quitting, so no partial model file is left behind.
 
 ## 0.0.27 - 2026-09-24
 
