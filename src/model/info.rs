@@ -3,10 +3,10 @@
 use ratatui::text::Line;
 use ratatui::widgets::{Paragraph, Wrap};
 
-use super::types::LocalModelEntry;
+use super::types::ModelEntry;
 use crate::transcription::local_models::{full_model_id, model_destination};
 
-pub(super) fn paragraph(entry: &LocalModelEntry) -> Paragraph<'static> {
+pub(super) fn paragraph(entry: &ModelEntry) -> Paragraph<'static> {
     let path = model_destination(&entry.registry_entry())
         .display()
         .to_string();

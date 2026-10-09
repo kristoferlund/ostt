@@ -6,7 +6,7 @@ use ratcn::{InputState, Toast, ToasterState};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct LocalModelEntry {
+pub(crate) struct ModelEntry {
     pub id: String,
     pub provider_id: String,
     pub name: String,
@@ -25,7 +25,7 @@ pub(crate) struct LocalModelEntry {
     pub group_id: Option<String>,
 }
 
-impl LocalModelEntry {
+impl ModelEntry {
     pub(crate) fn registry_entry(&self) -> RegistryEntry {
         RegistryEntry {
             id: self.id.clone(),
@@ -60,12 +60,12 @@ pub(crate) struct DownloadState {
 #[derive(Clone, Debug)]
 pub(crate) enum Mode {
     Browse,
-    Info { entry: LocalModelEntry },
+    Info { entry: ModelEntry },
     CustomUrl,
     CustomDetails { resolved_entry: RegistryEntry },
-    ConfirmDownload { entry: LocalModelEntry },
+    ConfirmDownload { entry: ModelEntry },
     Downloading(DownloadState),
-    ConfirmDelete { entry: LocalModelEntry },
+    ConfirmDelete { entry: ModelEntry },
     Error { message: String },
 }
 
@@ -88,7 +88,7 @@ pub(crate) struct State {
     pub modals: ModalState,
     pub dialog_offset: CellOffset,
     pub mode: Mode,
-    pub entries: Vec<LocalModelEntry>,
+    pub entries: Vec<ModelEntry>,
     pub selected: Option<usize>,
     pub url_input: InputState,
     pub id_input: InputState,
@@ -99,7 +99,7 @@ pub(crate) struct State {
 }
 
 impl State {
-    pub(crate) fn new(entries: Vec<LocalModelEntry>) -> Self {
+    pub(crate) fn new(entries: Vec<ModelEntry>) -> Self {
         let mut selected = entries.iter().position(|entry| entry.is_active);
         clamp_selection(&mut selected, entries.len());
         Self {
@@ -143,7 +143,7 @@ impl State {
         }
     }
 
-    pub(crate) fn selected_entry(&self) -> Option<&LocalModelEntry> {
+    pub(crate) fn selected_entry(&self) -> Option<&ModelEntry> {
         self.entries.get(self.selected?)
     }
 

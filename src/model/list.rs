@@ -10,7 +10,7 @@ use ratcn::{List, ListItem};
 use crate::ui::components::list::list_style;
 
 use super::format_bytes;
-use super::types::{LocalModelEntry, State};
+use super::types::{ModelEntry, State};
 use super::Msg;
 
 /// Every row is keyed by its position, since list values must be unique and
@@ -26,7 +26,7 @@ enum Row {
 
 /// Each entry, preceded by headers wherever its section or group changes.
 /// Only model rows are enabled, so the cursor skips the headers.
-fn rows(entries: &[LocalModelEntry]) -> Vec<ListItem<Row>> {
+fn rows(entries: &[ModelEntry]) -> Vec<ListItem<Row>> {
     fn header(rows: &mut Vec<ListItem<Row>>, row: fn(usize) -> Row, label: &str) {
         rows.push(ListItem::new(row(rows.len()), label).disabled(true));
     }
@@ -95,7 +95,7 @@ fn header(label: &str, background: Color) -> Text<'static> {
 }
 
 /// Text without a style of its own takes the list's row colors.
-fn model_row(entry: &LocalModelEntry, is_selected: bool) -> Text<'static> {
+fn model_row(entry: &ModelEntry, is_selected: bool) -> Text<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
     let description = entry.description.trim();
 
@@ -154,7 +154,7 @@ fn model_row(entry: &LocalModelEntry, is_selected: bool) -> Text<'static> {
     Text::from(Line::from(spans))
 }
 
-fn section_label(entry: &LocalModelEntry) -> &'static str {
+fn section_label(entry: &ModelEntry) -> &'static str {
     if entry.group_id.as_deref() == Some("Custom models") {
         "Custom models"
     } else if entry.provider_id == "whisper" {
@@ -164,7 +164,7 @@ fn section_label(entry: &LocalModelEntry) -> &'static str {
     }
 }
 
-fn group_label(entry: &LocalModelEntry) -> &str {
+fn group_label(entry: &ModelEntry) -> &str {
     entry
         .group_id
         .as_deref()
@@ -175,8 +175,8 @@ fn group_label(entry: &LocalModelEntry) -> &str {
 mod tests {
     use super::*;
 
-    fn entry(provider_id: &str, id: &str, group_id: Option<&str>) -> LocalModelEntry {
-        LocalModelEntry {
+    fn entry(provider_id: &str, id: &str, group_id: Option<&str>) -> ModelEntry {
+        ModelEntry {
             id: id.to_string(),
             provider_id: provider_id.to_string(),
             name: id.to_string(),

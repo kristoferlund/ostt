@@ -6,7 +6,7 @@ use ratatui::{
 };
 use ratcn::{Button, Dialog, Input, ProgressWidget};
 
-use super::types::{DownloadState, LocalModelEntry, Mode, State};
+use super::types::{DownloadState, Mode, ModelEntry, State};
 use super::{format_bytes, Msg};
 use crate::transcription::local_models::full_model_id;
 use crate::ui::components::modal::form_dialog;
@@ -62,7 +62,7 @@ fn base(title: &str, action: &'static str) -> Dialog<State, Msg> {
         .action("accept", Button::new(action).on_press(|| Msg::Accept))
 }
 
-fn entry_size(entry: &LocalModelEntry) -> String {
+fn entry_size(entry: &ModelEntry) -> String {
     format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
 }
 
