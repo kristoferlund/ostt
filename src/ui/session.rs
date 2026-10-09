@@ -1,7 +1,8 @@
 //! Native host for the management screens, after ratcn's demo host: it opens the
 //! adaptive terminal session, paints the shared chrome, and routes input.
 
-use crate::ui::{render_app_layout, render_themed_footer, render_themed_title};
+use crate::ui::components::{footer::render_footer, title::render_title};
+use crate::ui::render_app_layout;
 use ratatui::{layout::Rect, style::Style, Frame};
 use ratcn::{
     runtime::{DeclareCtx, Event, EventResult, KeyCode, Ratcn},
@@ -70,7 +71,7 @@ pub(crate) fn render<S, M>(
     );
     let layout = render_app_layout(frame, area);
     if let Some(title) = chrome.title {
-        render_themed_title(frame, layout.title, title, theme);
+        render_title(frame, layout.title, title, theme);
     }
     let body = if chrome.title.is_some() {
         layout.body
@@ -78,7 +79,7 @@ pub(crate) fn render<S, M>(
         layout.title.union(layout.body)
     };
     ratcn.render(frame, area, state, theme, |ctx| declare(ctx, body));
-    render_themed_footer(frame, layout.footer, chrome.footer, theme);
+    render_footer(frame, layout.footer, chrome.footer, theme);
     if let Some(toasts) = chrome.toasts {
         frame.render_widget(ToasterWidget::new(toasts, now()).themed(theme), area);
     }

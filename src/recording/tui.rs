@@ -11,14 +11,13 @@ use crossterm::{
 use ratatui::{
     prelude::*,
     style::{Color, Style},
-    widgets::{ListState, Paragraph, Sparkline, Wrap},
+    widgets::{Paragraph, Sparkline, Wrap},
 };
 use std::error::Error;
 use std::io::{stdout, Stdout};
 
-use crate::config::{file::ProcessAction, OsttConfig};
+use crate::config::OsttConfig;
 use crate::config::{ReferenceLevel, VisualizationType};
-use crate::process::process_view::{handle_picker_event, render_popup_process_view, PickerResult};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::is_cancel_key;
 
@@ -553,29 +552,26 @@ impl RecordingTui {
         Ok(())
     }
 
-    /// Renders one frame of the action picker and polls for input.
-    ///
-    /// Returns `Ok(Some(PickerResult))` if the user made a selection or cancelled,
-    /// `Ok(None)` if the event loop should continue (no actionable input).
-    ///
-    /// # Errors
-    /// - If terminal rendering fails
-    /// - If event polling fails
-    pub fn render_action_picker(
-        &mut self,
-        actions: &[ProcessAction],
-        list_state: &mut ListState,
-    ) -> Result<Option<PickerResult>, Box<dyn Error>> {
-        self.terminal.draw(|frame| {
-            let area = frame.area();
-            render_popup_process_view(frame, area, actions, list_state);
-        })?;
+    /// Give the terminal to another screen (the shared action picker), which
+    /// opens its own session.
+    pub fn suspend(&mut self) -> Result<(), Box<dyn Error>> {
+        disable_raw_mode()?;
+        execute!(
+            self.terminal.backend_mut(),
+            crossterm::terminal::LeaveAlternateScreen
+        )?;
+        Ok(())
+    }
 
-        if event::poll(std::time::Duration::from_millis(50))? {
-            return Ok(handle_picker_event(event::read()?, actions, list_state));
-        }
-
-        Ok(None)
+    /// Take the terminal back after [`suspend`](Self::suspend).
+    pub fn resume(&mut self) -> Result<(), Box<dyn Error>> {
+        enable_raw_mode()?;
+        execute!(
+            self.terminal.backend_mut(),
+            crossterm::terminal::EnterAlternateScreen
+        )?;
+        self.terminal.clear()?;
+        Ok(())
     }
 
     /// Displays an error in the active recording UI until the user presses a key.

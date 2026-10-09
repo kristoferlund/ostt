@@ -1,79 +1,15 @@
-//! Processing-action pickers: native ratcn management UI and a plain-Ratatui recording popup.
+//! The processing-action picker, shared by `ostt process` and the recording flow.
 
 use crate::config::file::ProcessAction;
 use crate::ui::components::list::{clamp_selection, selection_list};
 use crate::ui::session::{self, Chrome, Routed};
-use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title, scroll};
 use anyhow::Result;
-use crossterm::event::{Event, KeyCode, MouseEventKind};
-use ratatui::{
-    prelude::*,
-    widgets::{List, ListItem, ListState},
-};
 use ratcn::runtime::{FocusState, Ratcn};
-
-/// Keep the recording popup independent of ratcn's components and interaction runtime.
-pub(crate) fn render_popup_process_view(
-    frame: &mut Frame,
-    area: Rect,
-    actions: &[ProcessAction],
-    state: &mut ListState,
-) {
-    let layout = render_app_layout(frame, area);
-    render_title(frame, layout.title, "Process action");
-    scroll::keep_selected_in_view(state, layout.body.height as usize, actions.len());
-    frame.render_stateful_widget(
-        List::new(
-            actions
-                .iter()
-                .map(|action| ListItem::new(action.name.clone())),
-        )
-        .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-        layout.body,
-        state,
-    );
-    render_footer(frame, layout.footer, "↑/↓ select, ↵ confirm, esc/q cancel");
-}
 
 /// Result of the action picker interaction.
 pub enum PickerResult {
     Selected(String),
     Cancelled,
-}
-
-/// The recording popup retains its existing plain-Ratatui keyboard and wheel handling.
-pub(crate) fn handle_picker_event(
-    event: Event,
-    actions: &[ProcessAction],
-    state: &mut ListState,
-) -> Option<PickerResult> {
-    match event {
-        Event::Key(key) => match key.code {
-            _ if is_cancel_key(&key) => Some(PickerResult::Cancelled),
-            KeyCode::Up | KeyCode::Char('k') => {
-                state.select_previous();
-                None
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                state.select_next();
-                None
-            }
-            KeyCode::Enter => state
-                .selected()
-                .and_then(|index| actions.get(index))
-                .map(|action| PickerResult::Selected(action.id.clone())),
-            _ => None,
-        },
-        Event::Mouse(mouse) => {
-            match mouse.kind {
-                MouseEventKind::ScrollUp => state.select_previous(),
-                MouseEventKind::ScrollDown => state.select_next(),
-                _ => {}
-            }
-            None
-        }
-        _ => None,
-    }
 }
 
 #[derive(Default)]
@@ -130,36 +66,5 @@ pub fn show_action_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
         ),
         [action] => Ok(PickerResult::Selected(action.id.clone())),
         _ => run_picker(actions),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::file::ActionDetails;
-
-    /// The recording popup picks actions with plain keys: arrows move, Enter
-    /// runs the highlighted action, and Esc backs out without running any.
-    #[test]
-    fn recording_popup_selects_with_arrows_and_enter_and_cancels_with_esc() {
-        let actions: Vec<_> = (0..10)
-            .map(|index| ProcessAction {
-                id: format!("action-{index}"),
-                name: format!("Action {index}"),
-                details: ActionDetails::Bash {
-                    command: "cat".to_string(),
-                },
-            })
-            .collect();
-        let mut state = ListState::default().with_selected(Some(0));
-        handle_picker_event(Event::Key(KeyCode::Down.into()), &actions, &mut state);
-        assert!(matches!(
-            handle_picker_event(Event::Key(KeyCode::Enter.into()), &actions, &mut state),
-            Some(PickerResult::Selected(id)) if id == "action-1"
-        ));
-        assert!(matches!(
-            handle_picker_event(Event::Key(KeyCode::Esc.into()), &actions, &mut state),
-            Some(PickerResult::Cancelled)
-        ));
     }
 }
