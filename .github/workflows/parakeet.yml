@@ -1,0 +1,31 @@
+name: Local Parakeet checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev cmake pkg-config
+      - run: cargo test --locked
+      - run: cargo test --locked --features parakeet
+      - run: cargo clippy --locked --features parakeet --lib --bins -- -D warnings
+      # Compile-time check only; this runner cannot validate GPU node placement.
+      - run: cargo check --locked --features parakeet-cuda
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: brew install cmake pkg-config openssl@3 ffmpeg
+      - run: cargo test --locked --features parakeet-webgpu
+      - run: cargo clippy --locked --features parakeet-webgpu --lib --bins -- -D warnings
+      - run: cargo build --locked --release --features parakeet-webgpu

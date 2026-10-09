@@ -118,7 +118,7 @@ fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem
 
     let mut spans = vec![Span::styled(format!("{active_marker} "), row_style)];
 
-    if entry.is_downloaded && entry.provider_id == "whisper" {
+    if entry.is_downloaded && matches!(entry.provider_id.as_str(), "whisper" | "parakeet") {
         let (pill_fg, pill_bg) = if is_selected {
             (Color::Black, Color::LightGreen)
         } else {
@@ -144,7 +144,7 @@ fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem
         spans.push(Span::styled(" ", row_style));
     }
 
-    let details = if entry.provider_id == "whisper" {
+    let details = if matches!(entry.provider_id.as_str(), "whisper" | "parakeet") {
         let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
         if description.is_empty() {
             format!(
@@ -220,7 +220,7 @@ fn model_key(entry: &LocalModelEntry) -> String {
 fn section_label(entry: &LocalModelEntry) -> &'static str {
     if entry.group_id.as_deref() == Some("Custom models") {
         "Custom models"
-    } else if entry.provider_id == "whisper" {
+    } else if matches!(entry.provider_id.as_str(), "whisper" | "parakeet") {
         "Local models"
     } else {
         "Cloud models"

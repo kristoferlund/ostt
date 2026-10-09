@@ -76,9 +76,17 @@ pub async fn handle_model_list(
         }
     }
 
-    if provider.as_deref().is_none_or(|id| id == "whisper") {
+    if provider
+        .as_deref()
+        .is_none_or(|id| matches!(id, "whisper" | "parakeet"))
+    {
         let state = local_models::load_state();
-        let registry = local_models::fetch_registry().await.unwrap_or_default();
+        let registry = local_models::fetch_registry()
+            .await
+            .unwrap_or_else(|error| {
+                eprintln!("Warning: remote registry unavailable: {error}");
+                local_models::load_registry_entries().unwrap_or_default()
+            });
         for entry in registry.iter().chain(state.custom_models.iter()) {
             if provider
                 .as_deref()
@@ -86,7 +94,7 @@ pub async fn handle_model_list(
             {
                 continue;
             }
-            let is_installed = local_models::model_destination(entry).exists();
+            let is_installed = local_models::model_is_installed(entry);
             if installed && !is_installed {
                 continue;
             }
@@ -185,7 +193,7 @@ pub fn handle_model_params(model: Option<String>, json: bool) -> anyhow::Result<
 
 pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
     let selected = crate::config::parse_provider_model(&model)?;
-    if selected.provider_id == "whisper" {
+    if matches!(selected.provider_id.as_str(), "whisper" | "parakeet") {
         let activated =
             local_models::activate_model_for_provider(&selected.provider_id, &selected.model_id)?;
         reload_daemon_if_running(&selected.model_id).await?;
@@ -237,20 +245,19 @@ pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
 pub async fn handle_model_local_download(model_id: String) -> anyhow::Result<()> {
     let requested = parse_local_model_arg(&model_id)?;
     let entry = find_local_model_entry(&requested).await?;
-    let destination = local_models::model_destination(&entry);
     let full_model_id = format!("{}/{}", entry.provider_id, entry.id);
-    if destination.exists() {
+    if local_models::model_is_installed(&entry) {
         println!("Local model already downloaded: {full_model_id}");
         return Ok(());
     }
 
     eprintln!("Downloading local model: {full_model_id}");
-    local_models::download_model(
-        &entry.url,
-        &destination,
+    local_models::download_entry_with_handle(
+        &entry,
         Some(Box::new(|downloaded_bytes, total_bytes, speed_mbps| {
             print_download_progress(downloaded_bytes, total_bytes, speed_mbps);
         })),
+        None,
     )
     .await?;
     eprintln!();
@@ -295,6 +302,11 @@ fn parse_local_model_arg(value: &str) -> anyhow::Result<LocalModelArg> {
         .then(|| crate::config::parse_provider_model(value))
         .transpose()?
     {
+        if !TranscriptionProvider::from_id(&selected.provider_id)
+            .is_some_and(|provider| provider.is_local())
+        {
+            anyhow::bail!("Expected a local provider: whisper or parakeet");
+        }
         return Ok(LocalModelArg {
             provider_id: selected.provider_id,
             model_id: selected.model_id,
@@ -310,6 +322,12 @@ fn parse_local_model_arg(value: &str) -> anyhow::Result<LocalModelArg> {
 async fn find_local_model_entry(
     requested: &LocalModelArg,
 ) -> anyhow::Result<local_models::RegistryEntry> {
+    if let Some(entry) = local_models::load_registry_entries()?
+        .into_iter()
+        .find(|entry| entry.provider_id == requested.provider_id && entry.id == requested.model_id)
+    {
+        return Ok(entry);
+    }
     let state = local_models::load_state();
     if let Some(entry) = state
         .custom_models
@@ -337,7 +355,7 @@ async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
     let Some(info) = crate::transcription::daemon_client::probe_daemon().await else {
         return Ok(());
     };
-    if info.model_id != model_id {
+    if !info.matches_model(model_id) {
         crate::transcription::daemon_client::ensure_daemon(model_id, None).await?;
     }
     Ok(())

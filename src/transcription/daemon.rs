@@ -1,6 +1,6 @@
 //! Local model daemon server.
 //!
-//! Loads a `WhisperContext` once and serves transcription requests over a Unix
+//! Loads a local model once and serves transcription requests over a Unix
 //! domain socket until the idle timeout expires. Each message is framed with a
 //! 4-byte little-endian length prefix followed by UTF-8 JSON.
 //!
@@ -31,6 +31,12 @@ use crate::transcription::local_models::{
 };
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
+enum LoadedModel {
+    Whisper(WhisperContext),
+    #[cfg(feature = "parakeet")]
+    Parakeet(Box<std::sync::Mutex<parakeet_rs::ParakeetTDT>>),
+}
+
 // ── Protocol types ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -50,6 +56,8 @@ struct Response {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backend: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,27 +98,32 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
 
     // Load the model (expensive — this is the whole point of the daemon).
     whisper_rs::install_logging_hooks();
-    tracing::info!(
-        "daemon: loading model '{}' with {}",
-        model_id,
-        crate::transcription::local_inference_backend()
-    );
+    tracing::info!("daemon: loading model '{}'", model_id);
     let model_path = resolve_installed_model_path(model_id)?;
+    let is_parakeet = model_path.is_dir();
+    let backend = crate::transcription::local_models::model_backend(model_id)?;
     let model_path_str = model_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("model path is not valid UTF-8"))?
         .to_string();
 
     let ctx = tokio::task::spawn_blocking(move || {
+        if is_parakeet {
+            #[cfg(feature = "parakeet")]
+            return crate::transcription::api::parakeet::load_model(&model_path)
+                .map(|model| LoadedModel::Parakeet(Box::new(std::sync::Mutex::new(model))));
+            #[cfg(not(feature = "parakeet"))]
+            anyhow::bail!(
+                "Parakeet support is not enabled in this build. Build with --features parakeet."
+            );
+        }
         WhisperContext::new_with_params(&model_path_str, WhisperContextParameters::default())
+            .map(LoadedModel::Whisper)
             .map_err(|e| anyhow::anyhow!("Failed to load model: {e}"))
     })
     .await??;
 
-    tracing::info!(
-        "daemon: backend active: {}",
-        crate::transcription::local_inference_backend_details()
-    );
+    tracing::info!("daemon: model loaded: {}", model_id);
 
     let ctx = Arc::new(ctx);
 
@@ -154,7 +167,7 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
             Ok(Ok((stream, _addr))) => {
                 let model_id_owned = model_id.to_string();
                 let ctx_clone = Arc::clone(&ctx);
-                match handle_connection(stream, &model_id_owned, ctx_clone).await {
+                match handle_connection(stream, &model_id_owned, &backend, ctx_clone).await {
                     Ok(true) => {
                         tracing::info!("daemon: shutdown requested");
                         break;
@@ -177,7 +190,8 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
 async fn handle_connection(
     mut stream: UnixStream,
     model_id: &str,
-    ctx: Arc<WhisperContext>,
+    backend: &str,
+    ctx: Arc<LoadedModel>,
 ) -> anyhow::Result<bool> {
     let raw = read_framed(&mut stream).await?;
     let request: Request = serde_json::from_slice(&raw)?;
@@ -189,6 +203,7 @@ async fn handle_connection(
                 &Response {
                     ok: true,
                     model_id: Some(model_id.to_string()),
+                    backend: Some(backend.to_string()),
                     text: None,
                     error: None,
                 },
@@ -202,6 +217,7 @@ async fn handle_connection(
                 &Response {
                     ok: true,
                     model_id: Some(model_id.to_string()),
+                    backend: Some(backend.to_string()),
                     text: None,
                     error: None,
                 },
@@ -220,6 +236,7 @@ async fn handle_connection(
                     Response {
                         ok: true,
                         model_id: Some(model_id.to_string()),
+                        backend: Some(backend.to_string()),
                         text: Some(text),
                         error: None,
                     }
@@ -229,6 +246,7 @@ async fn handle_connection(
                     Response {
                         ok: false,
                         model_id: None,
+                        backend: None,
                         text: None,
                         error: Some(e.to_string()),
                     }
@@ -244,13 +262,32 @@ async fn handle_connection(
 
 async fn run_inference(
     audio_path: &std::path::Path,
-    ctx: Arc<WhisperContext>,
+    ctx: Arc<LoadedModel>,
     local_config: LocalTranscriptionConfig,
 ) -> anyhow::Result<String> {
+    #[cfg(feature = "parakeet")]
+    if matches!(ctx.as_ref(), LoadedModel::Parakeet(_)) {
+        let samples = crate::transcription::api::parakeet::load_audio(audio_path)?;
+        return tokio::task::spawn_blocking(move || {
+            let LoadedModel::Parakeet(model) = ctx.as_ref() else {
+                unreachable!()
+            };
+            let mut model = model
+                .lock()
+                .map_err(|_| anyhow::anyhow!("Parakeet model lock poisoned"))?;
+            crate::transcription::api::parakeet::infer(&mut model, &samples)
+        })
+        .await?;
+    }
     validate_local_audio_format(audio_path)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
 
     let raw = tokio::task::spawn_blocking(move || {
+        let ctx = match ctx.as_ref() {
+            LoadedModel::Whisper(ctx) => ctx,
+            #[cfg(feature = "parakeet")]
+            LoadedModel::Parakeet(_) => anyhow::bail!("expected a Whisper model"),
+        };
         let mut state = ctx
             .create_state()
             .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {e}"))?;

@@ -143,7 +143,9 @@ impl LocalModelsTui {
     pub(crate) fn confirm_delete(&mut self) {
         if let Some(entry) = self
             .selected_entry()
-            .filter(|entry| entry.provider_id == "whisper" && entry.is_downloaded)
+            .filter(|entry| {
+                matches!(entry.provider_id.as_str(), "whisper" | "parakeet") && entry.is_downloaded
+            })
             .cloned()
         {
             self.mode = LocalModelsMode::ConfirmDelete {

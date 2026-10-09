@@ -107,9 +107,7 @@ pub fn model_files_dir() -> PathBuf {
 /// Error type for local model-related failures.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
-    #[error(
-        "Local model 'whisper/{0}' was not found in the local model registry or custom models."
-    )]
+    #[error("Local model '{0}' was not found in the local model registry or custom models.")]
     NotFound(String),
     #[error("Local model 'whisper/{0}' is not downloaded. Run `ostt model` to download it.")]
     NotDownloaded(String),
@@ -146,7 +144,7 @@ impl DownloadHandle {
         self.cancel_flag.store(true, Ordering::SeqCst);
     }
 
-    fn is_cancelled(&self) -> bool {
+    pub(crate) fn is_cancelled(&self) -> bool {
         self.cancel_flag.load(Ordering::SeqCst)
     }
 }
@@ -164,12 +162,58 @@ pub fn model_filename(id: &str, url: &str) -> String {
 }
 
 pub fn model_destination(entry: &RegistryEntry) -> PathBuf {
+    if entry.provider_id == "parakeet" {
+        return model_files_dir().join(format!("{}.onnx-bundle", entry.id));
+    }
     model_files_dir().join(model_filename(&entry.id, &entry.url))
+}
+
+pub fn model_is_installed(entry: &RegistryEntry) -> bool {
+    let path = model_destination(entry);
+    if entry.provider_id == "parakeet" {
+        super::model_bundle::is_installed(&path)
+    } else {
+        path.is_file()
+    }
+}
+
+pub fn model_disk_usage(entry: &RegistryEntry) -> u64 {
+    let path = model_destination(entry);
+    if entry.provider_id == "parakeet" {
+        super::model_bundle::disk_usage(&path)
+    } else {
+        fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    }
+}
+
+pub(crate) fn model_backend(model_id: &str) -> Result<String, ModelError> {
+    let path = resolve_installed_model_path(model_id)?;
+    if path.is_dir() {
+        Ok(super::api::parakeet::backend_for_model(&path)
+            .id()
+            .to_string())
+    } else {
+        Ok(format!("whisper/{}", super::local_inference_backend()))
+    }
+}
+
+pub async fn download_entry_with_handle(
+    entry: &RegistryEntry,
+    progress: Option<DownloadProgressCallback>,
+    handle: Option<DownloadHandle>,
+) -> anyhow::Result<()> {
+    validate_custom_model_id(entry)?;
+    let path = model_destination(entry);
+    if entry.provider_id == "parakeet" {
+        super::model_bundle::download(entry, &path, progress, handle).await
+    } else {
+        download_model_with_handle(&entry.url, &path, progress, handle).await
+    }
 }
 
 pub fn mark_downloaded_registry_model(entry: &RegistryEntry) -> anyhow::Result<()> {
     let path = model_destination(entry);
-    if !path.exists() {
+    if !model_is_installed(entry) {
         anyhow::bail!(
             "download completed but model file is missing at {}",
             path.display()
@@ -208,6 +252,9 @@ pub fn validate_custom_model_registration(entry: &RegistryEntry) -> anyhow::Resu
 
 pub fn validate_downloaded_model(entry: &RegistryEntry) -> anyhow::Result<()> {
     let path = model_destination(entry);
+    if entry.provider_id == "parakeet" {
+        return super::model_bundle::validate(&path);
+    }
     fs::metadata(&path).map_err(|error| {
         anyhow::anyhow!(
             "download completed but model file is missing at {}: {error}",
@@ -251,13 +298,16 @@ pub fn installed_models(
         .iter()
         .chain(state.custom_models.iter())
         .filter_map(|entry| {
-            let path = model_files_dir().join(model_filename(&entry.id, &entry.url));
+            if !model_is_installed(entry) {
+                return None;
+            }
+            let path = model_destination(entry);
             let metadata = fs::metadata(&path).ok()?;
 
             Some(InstalledModelView {
                 entry: entry.clone(),
                 path,
-                size_bytes: metadata.len(),
+                size_bytes: model_disk_usage(entry),
                 modified_at: metadata.modified().ok(),
                 is_active: selected_model
                     .map(|selected| {
@@ -270,11 +320,20 @@ pub fn installed_models(
 }
 
 pub fn load_registry_entries() -> Result<Vec<RegistryEntry>, ModelError> {
-    Err(ModelError::RegistryUnavailable)
+    Ok(super::model_bundle::catalog())
 }
 
 pub async fn fetch_registry() -> anyhow::Result<Vec<RegistryEntry>> {
-    fetch_remote_registry().await
+    let mut entries = fetch_remote_registry().await?;
+    for entry in super::model_bundle::catalog() {
+        if !entries
+            .iter()
+            .any(|e| e.provider_id == entry.provider_id && e.id == entry.id)
+        {
+            entries.push(entry);
+        }
+    }
+    Ok(entries)
 }
 
 async fn fetch_remote_registry() -> anyhow::Result<Vec<RegistryEntry>> {
@@ -387,6 +446,10 @@ pub async fn download_model_with_handle(
 
 pub async fn resolve_custom_model(input: &str) -> anyhow::Result<RegistryEntry> {
     let url = Url::parse(input).map_err(|_| anyhow::anyhow!("custom models require a URL"))?;
+
+    if url.path().ends_with("/manifest.json") && url.fragment().is_some() {
+        return super::model_bundle::resolve_custom(&normalize_hugging_face_file_url(url)?).await;
+    }
 
     if is_direct_model_file_url(&url) {
         return resolve_direct_model_file_url(normalize_hugging_face_file_url(url)?).await;
@@ -582,9 +645,9 @@ fn validate_custom_model_id(entry: &RegistryEntry) -> anyhow::Result<()> {
 }
 
 fn validate_model_provider(entry: &RegistryEntry) -> anyhow::Result<()> {
-    if entry.provider_id != "whisper" {
+    if !matches!(entry.provider_id.as_str(), "whisper" | "parakeet") {
         anyhow::bail!(
-            "local model '{}' uses unsupported provider_id '{}'. Supported local providers: whisper.",
+            "local model '{}' uses unsupported provider_id '{}'. Supported local providers: whisper, parakeet.",
             entry.id,
             entry.provider_id
         );
@@ -595,8 +658,7 @@ fn validate_model_provider(entry: &RegistryEntry) -> anyhow::Result<()> {
 /// Checks for filename collision with an *existing unrelated* installed model.
 /// Only called before registering a new custom model, not during URL resolution.
 fn check_filename_collision(entry: &RegistryEntry, state: &LocalModelState) -> anyhow::Result<()> {
-    let filename = model_filename(&entry.id, &entry.url);
-    let path = model_files_dir().join(&filename);
+    let path = model_destination(entry);
     if !path.exists() {
         return Ok(());
     }
@@ -604,7 +666,10 @@ fn check_filename_collision(entry: &RegistryEntry, state: &LocalModelState) -> a
     // that is a replacement, not a conflict.
     let already_registered = state.custom_models.iter().any(|m| m.id == entry.id);
     if !already_registered {
-        anyhow::bail!("custom model filename collision detected for {filename}");
+        anyhow::bail!(
+            "custom model filename collision detected for {}",
+            path.display()
+        );
     }
     Ok(())
 }
@@ -695,9 +760,9 @@ pub fn resolve_installed_model_path(model_id: &str) -> Result<PathBuf, ModelErro
         Err(ModelError::NotFound(_)) => return find_installed_file_by_id(model_id),
         Err(error) => return Err(error),
     };
-    let path = model_files_dir().join(model_filename(&entry.id, &entry.url));
+    let path = model_destination(&entry);
 
-    if path.exists() {
+    if model_is_installed(&entry) {
         Ok(path)
     } else {
         Err(ModelError::NotDownloaded(model_id.to_string()))
@@ -752,7 +817,11 @@ pub fn delete_model(model_id: &str) -> anyhow::Result<()> {
         .map(|entry| entry.provider_id);
     let file_path = resolve_installed_model_path(model_id)?;
 
-    fs::remove_file(&file_path)?;
+    if provider_id.as_deref() == Some("parakeet") {
+        super::model_bundle::remove(&file_path)?;
+    } else {
+        fs::remove_file(&file_path)?;
+    }
 
     let mut state = load_state();
     let custom_count = state.custom_models.len();
@@ -1276,7 +1345,7 @@ mod tests {
     #[tokio::test]
     async fn fetch_registry_from_url_rejects_unsupported_provider_id() {
         let mut entry = registry_entry("small");
-        entry.provider_id = "parakeet".to_string();
+        entry.provider_id = "unsupported".to_string();
         let body = serde_json::to_vec(&serde_json::json!({
             "version": 1,
             "models": [entry]

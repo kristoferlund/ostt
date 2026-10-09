@@ -17,6 +17,7 @@ pub mod daemon;
 pub mod daemon_client;
 pub mod local_models;
 pub mod model;
+pub(crate) mod model_bundle;
 pub mod provider;
 
 pub use animation::TranscriptionAnimation;
@@ -40,12 +41,17 @@ pub fn config_for_selected_model(
             )
         })?;
 
-    if provider == TranscriptionProvider::Whisper {
-        return Ok(TranscriptionConfig::new_local(
-            selected_model.model_id.clone(),
-            keywords,
-            params,
-        ));
+    if provider.is_local() {
+        #[cfg(not(feature = "parakeet"))]
+        if provider == TranscriptionProvider::Parakeet {
+            anyhow::bail!(
+                "Parakeet support is not enabled in this build. Build with --features parakeet."
+            );
+        }
+        let mut config =
+            TranscriptionConfig::new_local(selected_model.model_id.clone(), keywords, params);
+        config.provider = provider;
+        return Ok(config);
     }
 
     if provider == TranscriptionProvider::Command {

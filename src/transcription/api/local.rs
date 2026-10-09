@@ -161,7 +161,7 @@ async fn try_daemon_transcription(
         );
         return None;
     };
-    if info.model_id != model_id {
+    if !info.matches_model(model_id) {
         tracing::info!(
             "local transcription mode: in-process (daemon loaded model '{}', selected model '{}')",
             info.model_id,

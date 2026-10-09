@@ -193,13 +193,17 @@ where
 {
     let preflight_context =
         crate::transcription::build_preflight_context(config, model_override, param_overrides)?;
-    if preflight_context.selected_model.provider_id == "whisper" {
+    if matches!(
+        preflight_context.selected_model.provider_id.as_str(),
+        "whisper" | "parakeet"
+    ) {
         crate::transcription::local_models::resolve_installed_model_path(
             &preflight_context.selected_model.model_id,
         )
         .map_err(|err| {
             anyhow::anyhow!(
-                "local model 'whisper/{}' is unavailable: {err}",
+                "local model '{}/{}' is unavailable: {err}",
+                preflight_context.selected_model.provider_id,
                 preflight_context.selected_model.model_id
             )
         })?;

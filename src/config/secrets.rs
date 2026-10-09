@@ -39,7 +39,9 @@ pub fn parse_provider_model(value: &str) -> anyhow::Result<SelectedModel> {
         );
     }
 
-    if provider != Some(TranscriptionProvider::Whisper)
+    if !provider
+        .as_ref()
+        .is_some_and(TranscriptionProvider::is_local)
         && provider != Some(TranscriptionProvider::Command)
         && provider != Some(TranscriptionProvider::Http)
         && find_model(provider_id, model_id).is_none()

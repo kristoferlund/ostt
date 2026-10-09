@@ -111,10 +111,9 @@ mod tests {
 
     #[test]
     fn applies_phrases_before_punctuation() {
-        let result =
-            apply_replace("Vox type.", &replace_rules(&[("vox type", "Voxtype")])).unwrap();
+        let result = apply_replace("Open ai.", &replace_rules(&[("open ai", "OpenAI")])).unwrap();
 
-        assert_eq!(result, "Voxtype.");
+        assert_eq!(result, "OpenAI.");
     }
 
     #[test]
