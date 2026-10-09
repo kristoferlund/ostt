@@ -26,10 +26,10 @@ pub(super) enum Msg {
     Url(InputState),
     Id(InputState),
     Name(InputState),
+    Select(usize),
+    Activate(usize),
     Accept,
     Dismiss,
-    Previous,
-    Next,
     Info,
     Custom,
     Delete,
@@ -140,9 +140,6 @@ impl ModelsView {
             Mode::Info { entry } => Some(entry.name.clone()),
             _ => None,
         };
-        let size = self.session.terminal_mut().size()?;
-        let body = session::body_area(size.into(), title.is_some());
-        list::scroll_to_selection(&mut self.state, body.height);
         let state = &self.state;
         let chrome = Chrome {
             title: title.as_deref(),
@@ -170,13 +167,15 @@ impl ModelsView {
             Msg::Url(input) => state.url_input = input,
             Msg::Id(input) => state.id_input = input,
             Msg::Name(input) => state.name_input = input,
-            Msg::Previous => state.move_selection_up(),
-            Msg::Next => state.move_selection_down(),
+            Msg::Select(index) => state.selected = Some(index),
+            Msg::Activate(index) => {
+                state.selected = Some(index);
+                self.activate_selected().await?;
+            }
             Msg::Info => state.show_info(),
             Msg::Custom => state.show_custom_url(),
             Msg::Delete => state.confirm_delete(),
             Msg::Accept => match state.mode.clone() {
-                Mode::Browse => self.activate_selected().await?,
                 Mode::CustomUrl => self.resolve_custom_url().await,
                 Mode::CustomDetails { resolved_entry } => {
                     self.start_custom_download(resolved_entry)
@@ -187,7 +186,9 @@ impl ModelsView {
                 }
                 Mode::ConfirmDelete { entry } => self.delete(&entry)?,
                 Mode::Downloading(_) => self.cancel_download(),
-                Mode::Error { .. } | Mode::Info { .. } => state.set_mode(Mode::Browse),
+                Mode::Browse | Mode::Error { .. } | Mode::Info { .. } => {
+                    state.set_mode(Mode::Browse)
+                }
             },
             Msg::Dismiss => match state.mode {
                 Mode::Downloading(_) => self.cancel_download(),
@@ -372,9 +373,6 @@ fn shortcut(mode: &Mode, event: &Event) -> Option<Msg> {
         return None;
     };
     match (mode, key.code) {
-        (Mode::Browse, KeyCode::Down) => Some(Msg::Next),
-        (Mode::Browse, KeyCode::Up) => Some(Msg::Previous),
-        (Mode::Browse, KeyCode::Enter) => Some(Msg::Accept),
         (Mode::Browse, KeyCode::Char('i')) => Some(Msg::Info),
         (Mode::Browse, KeyCode::Char('c')) => Some(Msg::Custom),
         (Mode::Browse, KeyCode::Char('x' | 'd') | KeyCode::Delete) => Some(Msg::Delete),

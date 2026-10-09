@@ -1,29 +1,33 @@
-//! The grouped model list. Section and group headers are rows of their own but
-//! never selectable, which ratcn's `List` cannot express, so this paints a
-//! `ListWidget` and the screen moves the selection itself.
+//! The grouped model list. Section and group headers are rows of their own,
+//! disabled so the cursor skips them and the selection only lands on models.
 
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratcn::runtime::{DeclareCtx, ScopeOptions};
-use ratcn::{ListWidget, Theme};
-
-use crate::ui::scroll::{update_scroll_offset, DEFAULT_SCROLL_MARGIN};
+use ratcn::runtime::DeclareCtx;
+use ratcn::{List, ListItem, ListStyle};
 
 use super::format_bytes;
 use super::types::{LocalModelEntry, State};
 use super::Msg;
 
-enum Row<'a> {
-    Blank,
-    Section(&'a str),
-    Group(&'a str),
+/// Every row is keyed by its position, since list values must be unique and
+/// a group name can head more than one run. Header text rides in the label.
+#[derive(Clone, PartialEq)]
+enum Row {
+    Blank(usize),
+    Section(usize),
+    Group(usize),
     /// Index into the entries.
     Model(usize),
 }
 
 /// Each entry, preceded by headers wherever its section or group changes.
-fn rows(entries: &[LocalModelEntry]) -> Vec<Row<'_>> {
+/// Only model rows are enabled, so the cursor skips the headers.
+fn rows(entries: &[LocalModelEntry]) -> Vec<ListItem<Row>> {
+    fn header(rows: &mut Vec<ListItem<Row>>, row: fn(usize) -> Row, label: &str) {
+        rows.push(ListItem::new(row(rows.len()), label).disabled(true));
+    }
     let mut rows = Vec::new();
     let mut current_section = None;
     let mut current_group = None;
@@ -32,65 +36,63 @@ fn rows(entries: &[LocalModelEntry]) -> Vec<Row<'_>> {
         let group = group_label(entry);
         if current_section != Some(section) {
             if current_section.is_some() {
-                rows.push(Row::Blank);
+                header(&mut rows, Row::Blank, "");
             }
-            rows.extend([Row::Section(section), Row::Blank]);
+            header(&mut rows, Row::Section, section);
+            header(&mut rows, Row::Blank, "");
             current_section = Some(section);
             current_group = None;
         }
         if current_group != Some(group) {
             if current_group.is_some() {
-                rows.push(Row::Blank);
+                header(&mut rows, Row::Blank, "");
             }
             if group != section {
-                rows.extend([Row::Group(group), Row::Blank]);
+                header(&mut rows, Row::Group, group);
+                header(&mut rows, Row::Blank, "");
             }
             current_group = Some(group);
         }
-        rows.push(Row::Model(index));
+        rows.push(ListItem::new(Row::Model(index), ""));
     }
     rows
 }
 
-/// Scroll so the selected model stays in view of `height` rows.
-pub(super) fn scroll_to_selection(state: &mut State, height: u16) {
-    let rows = rows(&state.entries);
-    let selected = rows
-        .iter()
-        .position(|row| matches!(row, Row::Model(index) if *index == state.selected));
-    update_scroll_offset(
-        &mut state.scroll_offset,
-        selected,
-        height as usize,
-        rows.len(),
-        DEFAULT_SCROLL_MARGIN,
-    );
+fn entry_index(row: Row) -> usize {
+    match row {
+        Row::Model(index) => index,
+        _ => unreachable!("header rows are disabled"),
+    }
 }
 
 pub(super) fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect) {
-    ctx.scope(
-        "models",
-        body,
-        ScopeOptions::default().focusable(true),
-        |ctx| {
-            ctx.paint(move |paint| {
-                let state = paint.state();
-                let items: Vec<Text<'static>> = rows(&state.entries)
-                    .into_iter()
-                    .skip(state.scroll_offset)
-                    .map(|row| match row {
-                        Row::Blank => Text::from(Line::default()),
-                        Row::Section(label) => header(label, Color::Green),
-                        Row::Group(label) => header(label, Color::Magenta),
-                        Row::Model(index) => {
-                            model_row(&state.entries[index], index == state.selected, paint.theme)
-                        }
-                    })
-                    .collect();
-                paint.widget(ListWidget::new(&items).themed(paint.theme), body);
-            });
-        },
-    );
+    let list = List::new(rows(&ctx.state().entries))
+        .item_focus(
+            |state: &State| state.selected.map(Row::Model),
+            |row, _| Msg::Select(entry_index(row)),
+        )
+        .selection(
+            |state: &State| state.selected.map(Row::Model),
+            |row| Msg::Activate(entry_index(row)),
+        )
+        // Headers are disabled only so the cursor skips them; they keep the
+        // list's backdrop instead of the dimmed disabled fill. That fill is
+        // fixed, so hovering must not shift the backdrop either.
+        .style(|theme| {
+            let style = ListStyle::from_theme(theme);
+            ListStyle {
+                hovered_background: style.focused_background,
+                disabled_background: style.focused_background,
+                ..style
+            }
+        })
+        .paint_item(|state: &State, row| match row.value {
+            Row::Blank(_) => Text::default(),
+            Row::Section(_) => header(row.label, Color::Green),
+            Row::Group(_) => header(row.label, Color::Magenta),
+            Row::Model(index) => model_row(&state.entries[*index], row.selected),
+        });
+    ctx.component("models", list, body);
 }
 
 fn header(label: &str, background: Color) -> Text<'static> {
@@ -100,19 +102,12 @@ fn header(label: &str, background: Color) -> Text<'static> {
     ))
 }
 
-fn model_row(entry: &LocalModelEntry, is_selected: bool, theme: &Theme) -> Text<'static> {
+/// Text without a style of its own takes the list's row colors.
+fn model_row(entry: &LocalModelEntry, is_selected: bool) -> Text<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
     let description = entry.description.trim();
 
-    let row_style = if is_selected {
-        Style::default()
-            .fg(theme.primary_foreground)
-            .bg(theme.primary)
-    } else {
-        Style::default().fg(theme.foreground).bg(theme.field)
-    };
-
-    let mut spans = vec![Span::styled(format!("{active_marker} "), row_style)];
+    let mut spans = vec![Span::raw(format!("{active_marker} "))];
 
     if entry.is_downloaded && entry.provider_id == "whisper" {
         let (pill_fg, pill_bg) = if is_selected {
@@ -124,7 +119,7 @@ fn model_row(entry: &LocalModelEntry, is_selected: bool, theme: &Theme) -> Text<
             " dl ",
             Style::default().fg(pill_fg).bg(pill_bg),
         ));
-        spans.push(Span::styled(" ", row_style));
+        spans.push(Span::raw(" "));
     }
 
     if entry.is_daemon_loaded {
@@ -137,7 +132,7 @@ fn model_row(entry: &LocalModelEntry, is_selected: bool, theme: &Theme) -> Text<
             " run ",
             Style::default().fg(pill_fg).bg(pill_bg),
         ));
-        spans.push(Span::styled(" ", row_style));
+        spans.push(Span::raw(" "));
     }
 
     let details = if entry.provider_id == "whisper" {
@@ -162,7 +157,7 @@ fn model_row(entry: &LocalModelEntry, is_selected: bool, theme: &Theme) -> Text<
         )
     };
 
-    spans.push(Span::styled(details, row_style));
+    spans.push(Span::raw(details));
 
     Text::from(Line::from(spans))
 }
@@ -208,10 +203,11 @@ mod tests {
         }
     }
 
-    /// Headers separate sections and provider groups, but only model rows map
-    /// back to entries, so the selection can never land on a header.
+    /// Headers separate sections and provider groups, but only model rows are
+    /// enabled, so the cursor skips headers and the selection can never land
+    /// on one.
     #[test]
-    fn headers_separate_sections_and_groups_without_taking_entry_indices() {
+    fn headers_separate_sections_and_groups_and_only_models_are_selectable() {
         let entries = [
             entry("http", "custom", Some("Custom models")),
             entry("openai", "cloud", Some("OpenAI")),
@@ -219,11 +215,18 @@ mod tests {
         ];
         let layout: Vec<String> = rows(&entries)
             .into_iter()
-            .map(|row| match row {
-                Row::Blank => String::new(),
-                Row::Section(label) => format!("section {label}"),
-                Row::Group(label) => format!("group {label}"),
-                Row::Model(index) => format!("model {}", entries[index].id),
+            .map(|item| {
+                let row = match item.value() {
+                    Row::Blank(_) => String::new(),
+                    Row::Section(_) => format!("section {}", item.label()),
+                    Row::Group(_) => format!("group {}", item.label()),
+                    Row::Model(index) => format!("model {}", entries[*index].id),
+                };
+                if item.is_disabled() {
+                    row
+                } else {
+                    format!("{row} (selectable)")
+                }
             })
             .collect();
         assert_eq!(
@@ -231,18 +234,35 @@ mod tests {
             [
                 "section Custom models",
                 "",
-                "model custom",
+                "model custom (selectable)",
                 "",
                 "section Cloud models",
                 "",
                 "group OpenAI",
                 "",
-                "model cloud",
+                "model cloud (selectable)",
                 "",
                 "section Local models",
                 "",
-                "model local",
+                "model local (selectable)",
             ]
         );
+    }
+
+    /// The list identifies rows by value, so a group heading two separate runs
+    /// must not produce two rows that answer to the same identity.
+    #[test]
+    fn a_group_heading_two_runs_still_gives_every_row_its_own_value() {
+        let entries = [
+            entry("openai", "a1", Some("A")),
+            entry("openai", "b1", Some("B")),
+            entry("openai", "a2", Some("A")),
+        ];
+        let rows = rows(&entries);
+        for (i, first) in rows.iter().enumerate() {
+            for second in &rows[i + 1..] {
+                assert!(first.value() != second.value());
+            }
+        }
     }
 }

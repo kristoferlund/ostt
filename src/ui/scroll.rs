@@ -1,6 +1,6 @@
 use ratatui::widgets::ListState;
 
-pub(crate) const DEFAULT_SCROLL_MARGIN: usize = 3;
+const DEFAULT_SCROLL_MARGIN: usize = 3;
 
 pub(crate) fn keep_selected_in_view(
     list_state: &mut ListState,
@@ -17,7 +17,7 @@ pub(crate) fn keep_selected_in_view(
     );
 }
 
-pub(crate) fn update_scroll_offset(
+fn update_scroll_offset(
     offset: &mut usize,
     selected_index: Option<usize>,
     viewport_item_count: usize,

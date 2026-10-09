@@ -1,4 +1,5 @@
 use crate::transcription::local_models::{DownloadHandle, LocalModelState, RegistryEntry};
+use crate::ui::components::list::clamp_selection;
 use crate::ui::session;
 use ratcn::runtime::{CellOffset, FocusState, ModalState};
 use ratcn::{InputState, Toast, ToasterState};
@@ -88,8 +89,7 @@ pub(crate) struct State {
     pub dialog_offset: CellOffset,
     pub mode: Mode,
     pub entries: Vec<LocalModelEntry>,
-    pub selected: usize,
-    pub scroll_offset: usize,
+    pub selected: Option<usize>,
     pub url_input: InputState,
     pub id_input: InputState,
     pub name_input: InputState,
@@ -100,10 +100,8 @@ pub(crate) struct State {
 
 impl State {
     pub(crate) fn new(entries: Vec<LocalModelEntry>) -> Self {
-        let selected = entries
-            .iter()
-            .position(|entry| entry.is_active)
-            .unwrap_or(0);
+        let mut selected = entries.iter().position(|entry| entry.is_active);
+        clamp_selection(&mut selected, entries.len());
         Self {
             focus: FocusState::default(),
             modals: ModalState::default(),
@@ -111,7 +109,6 @@ impl State {
             mode: Mode::Browse,
             entries,
             selected,
-            scroll_offset: 0,
             url_input: InputState::default(),
             id_input: InputState::default(),
             name_input: InputState::default(),
@@ -148,17 +145,7 @@ impl State {
     }
 
     pub(crate) fn selected_entry(&self) -> Option<&LocalModelEntry> {
-        self.entries.get(self.selected)
-    }
-
-    pub(crate) fn move_selection_down(&mut self) {
-        if self.selected + 1 < self.entries.len() {
-            self.selected += 1;
-        }
-    }
-
-    pub(crate) fn move_selection_up(&mut self) {
-        self.selected = self.selected.saturating_sub(1);
+        self.entries.get(self.selected?)
     }
 
     pub(crate) fn show_info(&mut self) {
@@ -199,7 +186,7 @@ impl State {
             selected_model.as_ref(),
             self.daemon_model_id.as_deref(),
         );
-        self.selected = self.selected.min(self.entries.len().saturating_sub(1));
+        clamp_selection(&mut self.selected, self.entries.len());
         Ok(())
     }
 }

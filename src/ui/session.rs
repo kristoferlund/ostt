@@ -76,7 +76,7 @@ pub(crate) fn render<S, M>(
 }
 
 /// The area a screen declares its body in.
-pub(crate) fn body_area(area: Rect, titled: bool) -> Rect {
+fn body_area(area: Rect, titled: bool) -> Rect {
     let layout = app_layout(area);
     if titled {
         layout.body
