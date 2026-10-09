@@ -13,7 +13,7 @@ pub async fn handle_keywords() -> Result<()> {
 
     let mut manager = KeywordsManager::new(&config_dir)?;
 
-    let mut view = KeywordsView::new(manager.load_keywords()?)?;
+    let view = KeywordsView::new(manager.load_keywords()?)?;
     view.run(&mut manager)?;
 
     Ok(())

@@ -1,50 +1,93 @@
-//! Native ratcn list interaction shared by management screens.
+//! List declarations. The calling command owns state, messages, and the runtime.
 
-use crossterm::event::Event;
-use ratatui::{layout::Rect, text::Text, Frame};
-use ratcn::runtime::{EventResult, FocusState, Ratcn};
-use ratcn::{List, ListItem, Theme};
+use ratatui::text::Text;
+use ratcn::{List, ListItem};
 
-#[derive(Default)]
-struct ListState {
-    focus: FocusState,
-    item: Option<usize>,
-}
-
-enum Message {
-    Focus(FocusState),
-    Move(usize),
-    Select(usize),
-}
-
-pub(crate) struct ListView {
-    state: ListState,
-    runtime: Ratcn<ListState, Message>,
-    theme: Theme,
-}
-
-impl Default for ListView {
-    fn default() -> Self {
-        Self {
-            state: ListState::default(),
-            runtime: Ratcn::new().focus(|state: &ListState| &state.focus, Message::Focus),
-            theme: Theme::default_dark(),
-        }
+pub(crate) fn selection_list<S: 'static, M: 'static>(
+    items: &[String],
+    row_height: u16,
+    selected: fn(&S) -> Option<usize>,
+    on_focus: fn(usize) -> M,
+    on_select: fn(usize) -> M,
+) -> List<usize, S, M> {
+    let mut list = List::new(
+        items
+            .iter()
+            .enumerate()
+            .map(|(index, label)| ListItem::new(index, label.clone())),
+    )
+    .item_focus(selected, move |index, _| on_focus(index))
+    .selection(selected, on_select)
+    .row_height(row_height);
+    if row_height > 1 {
+        list = list.paint_item(|_, row| Text::from(row.label.to_string()));
     }
+    list
 }
 
-impl ListView {
-    pub(crate) fn selected(&self) -> Option<usize> {
-        self.state.item
+pub(crate) fn clamp_selection(selected: &mut Option<usize>, len: usize) {
+    *selected = (len > 0).then(|| selected.unwrap_or(0).min(len - 1));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+    use ratcn::{
+        runtime::{
+            Event, EventResult, FocusState, KeyCode, Modifiers, MouseButton, MouseEvent,
+            MouseKind as MouseEventKind, Ratcn,
+        },
+        Theme,
+    };
+
+    #[derive(Default)]
+    struct State {
+        focus: FocusState,
+        selected: Option<usize>,
+    }
+    enum Msg {
+        Focus(FocusState),
+        Select(usize),
+        Commit(usize),
     }
 
-    /// Return a committed row; focus, navigation, scrolling and hit-testing stay in ratcn.
-    pub(crate) fn handle_event(&mut self, event: Event) -> Option<usize> {
-        match self.runtime.handle_event(event, &self.state) {
-            EventResult::Emit(Message::Focus(focus)) => self.state.focus = focus,
-            EventResult::Emit(Message::Move(index)) => self.state.item = Some(index),
-            EventResult::Emit(Message::Select(index)) => {
-                self.state.item = Some(index);
+    fn paint(
+        state: &mut State,
+        runtime: &mut Ratcn<State, Msg>,
+        terminal: &mut Terminal<TestBackend>,
+        items: &[String],
+        height: u16,
+    ) {
+        clamp_selection(&mut state.selected, items.len());
+        terminal
+            .draw(|frame| {
+                runtime.render(frame, frame.area(), state, &Theme::default_dark(), |ctx| {
+                    ctx.component(
+                        "list",
+                        selection_list(
+                            items,
+                            height,
+                            |s: &State| s.selected,
+                            Msg::Select,
+                            Msg::Commit,
+                        ),
+                        ctx.area(),
+                    );
+                });
+            })
+            .unwrap();
+    }
+
+    fn runtime() -> Ratcn<State, Msg> {
+        Ratcn::new().focus(|s: &State| &s.focus, Msg::Focus)
+    }
+    fn apply(state: &mut State, result: EventResult<Msg>) -> Option<usize> {
+        match result {
+            EventResult::Emit(Msg::Focus(focus)) => state.focus = focus,
+            EventResult::Emit(Msg::Select(index)) => state.selected = Some(index),
+            EventResult::Emit(Msg::Commit(index)) => {
+                state.selected = Some(index);
                 return Some(index);
             }
             _ => {}
@@ -52,63 +95,16 @@ impl ListView {
         None
     }
 
-    pub(crate) fn render(
-        &mut self,
-        frame: &mut Frame<'_>,
-        area: Rect,
-        items: &[String],
-        row_height: u16,
-    ) {
-        self.state.item =
-            (!items.is_empty()).then(|| self.state.item.unwrap_or(0).min(items.len() - 1));
-        self.runtime
-            .render(frame, area, &self.state, &self.theme, |ctx| {
-                let mut list = List::new(
-                    items
-                        .iter()
-                        .enumerate()
-                        .map(|(index, label)| ListItem::new(index, label.clone())),
-                )
-                .item_focus(
-                    |state: &ListState| state.item,
-                    |index, _| Message::Move(index),
-                )
-                .selection(|state| state.item, Message::Select)
-                .row_height(row_height);
-                if row_height > 1 {
-                    list = list.paint_item(|_, row| Text::from(row.label.to_string()));
-                }
-                ctx.component("list", list, area);
-            });
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-    use ratatui::{backend::TestBackend, Terminal};
-
-    fn paint(
-        view: &mut ListView,
-        terminal: &mut Terminal<TestBackend>,
-        items: &[String],
-        height: u16,
-    ) {
-        terminal
-            .draw(|frame| view.render(frame, frame.area(), items, height))
-            .unwrap();
-    }
-
     #[test]
-    fn navigation_keeps_long_list_selection_visible_and_enter_commits_it() {
+    fn long_list_keeps_the_row_visible_before_enter_commits_it() {
         let items: Vec<_> = (0..40).map(|index| format!("Row {index}")).collect();
-        let mut view = ListView::default();
+        let mut state = State::default();
+        let mut runtime = runtime();
         let mut terminal = Terminal::new(TestBackend::new(30, 5)).unwrap();
-        paint(&mut view, &mut terminal, &items, 1);
-        view.handle_event(Event::Key(KeyCode::End.into()));
-        paint(&mut view, &mut terminal, &items, 1);
-        assert_eq!(view.selected(), Some(39));
+        paint(&mut state, &mut runtime, &mut terminal, &items, 1);
+        let result = runtime.handle_event(KeyCode::End, &state);
+        apply(&mut state, result);
+        paint(&mut state, &mut runtime, &mut terminal, &items, 1);
         let screen: String = terminal
             .backend()
             .buffer()
@@ -116,86 +112,89 @@ mod tests {
             .iter()
             .map(|cell| cell.symbol())
             .collect();
-        assert!(
-            screen.contains("Row 39"),
-            "the committed row must be visible before activation"
-        );
-        assert_eq!(
-            view.handle_event(Event::Key(KeyCode::Enter.into())),
-            Some(39)
-        );
+        assert!(screen.contains("Row 39"));
+        let result = runtime.handle_event(KeyCode::Enter, &state);
+        assert_eq!(apply(&mut state, result), Some(39));
     }
 
     #[test]
-    fn clicking_history_text_commits_the_same_entry_as_its_timestamp() {
+    fn history_text_click_and_subsequent_key_navigation_target_the_correct_entry() {
         let items = vec![
             "first date\nfirst text".into(),
             "second date\nsecond text".into(),
         ];
-        let mut view = ListView::default();
+        let mut state = State::default();
+        let mut runtime = runtime();
         let mut terminal = Terminal::new(TestBackend::new(40, 8)).unwrap();
-        paint(&mut view, &mut terminal, &items, 2);
+        paint(&mut state, &mut runtime, &mut terminal, &items, 2);
         let mouse = |kind| {
             Event::Mouse(MouseEvent {
                 kind,
                 column: 8,
                 row: 3,
-                modifiers: KeyModifiers::NONE,
+                modifiers: Modifiers::NONE,
             })
         };
-        view.handle_event(mouse(MouseEventKind::Down(MouseButton::Left)));
-        assert_eq!(
-            view.handle_event(mouse(MouseEventKind::Up(MouseButton::Left))),
-            Some(1)
-        );
-        paint(&mut view, &mut terminal, &items, 2);
-        view.handle_event(Event::Key(KeyCode::Up.into()));
-        assert_eq!(
-            view.handle_event(Event::Key(KeyCode::Enter.into())),
-            Some(0)
-        );
+        let result = runtime.handle_event(mouse(MouseEventKind::Down(MouseButton::Left)), &state);
+        apply(&mut state, result);
+        let result = runtime.handle_event(mouse(MouseEventKind::Up(MouseButton::Left)), &state);
+        assert_eq!(apply(&mut state, result), Some(1));
+        paint(&mut state, &mut runtime, &mut terminal, &items, 2);
+        let result = runtime.handle_event(KeyCode::Up, &state);
+        apply(&mut state, result);
+        let result = runtime.handle_event(KeyCode::Enter, &state);
+        assert_eq!(apply(&mut state, result), Some(0));
     }
 
     #[test]
-    fn native_wheel_scroll_survives_redraw_without_moving_the_cursor() {
-        let items: Vec<_> = (0..20).map(|index| format!("Row {index}")).collect();
-        let mut view = ListView::default();
-        let mut terminal = Terminal::new(TestBackend::new(30, 5)).unwrap();
-        paint(&mut view, &mut terminal, &items, 1);
-        view.handle_event(Event::Mouse(MouseEvent {
-            kind: MouseEventKind::ScrollDown,
-            column: 8,
-            row: 2,
-            modifiers: KeyModifiers::NONE,
-        }));
-        paint(&mut view, &mut terminal, &items, 1);
-        let scrolled = terminal.backend().buffer().clone();
-        paint(&mut view, &mut terminal, &items, 1);
-        assert_eq!(&scrolled, terminal.backend().buffer());
-        assert_eq!(
-            view.selected(),
-            Some(0),
-            "wheel scrolling must not silently change the item a delete action targets"
-        );
-        let screen: String = scrolled.content.iter().map(|cell| cell.symbol()).collect();
-        assert!(
-            !screen.contains("Row 0"),
-            "native scrolling must not snap back to the cursor on redraw"
-        );
-    }
-
-    #[test]
-    fn deleting_selected_rows_never_leaves_an_invalid_or_phantom_selection() {
-        let mut view = ListView::default();
+    fn deletion_and_empty_to_nonempty_transitions_leave_no_phantom_selection() {
+        let mut state = State::default();
+        let mut runtime = runtime();
         for (width, height) in [(1, 1), (30, 6)] {
             let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
-            paint(&mut view, &mut terminal, &["one".into(), "two".into()], 1);
-            view.handle_event(Event::Key(KeyCode::End.into()));
-            paint(&mut view, &mut terminal, &["one".into()], 1);
-            assert_eq!(view.selected(), Some(0));
-            paint(&mut view, &mut terminal, &[], 1);
-            assert_eq!(view.selected(), None);
-            assert_eq!(view.handle_event(Event::Key(KeyCode::Enter.into())), None);
+            paint(
+                &mut state,
+                &mut runtime,
+                &mut terminal,
+                &["one".into(), "two".into()],
+                1,
+            );
+            let result = runtime.handle_event(KeyCode::End, &state);
+            apply(&mut state, result);
+            paint(&mut state, &mut runtime, &mut terminal, &["one".into()], 1);
+            assert_eq!(state.selected, Some(0));
+            paint(&mut state, &mut runtime, &mut terminal, &[], 1);
+            assert_eq!(state.selected, None);
+            assert!(!matches!(
+                runtime.handle_event(KeyCode::Enter, &state),
+                EventResult::Emit(Msg::Commit(_))
+            ));
         }
+    }
+
+    #[test]
+    fn wheel_scroll_persists_across_redraws_without_changing_the_delete_target() {
+        let items: Vec<_> = (0..20).map(|index| format!("Row {index}")).collect();
+        let mut state = State::default();
+        let mut runtime = runtime();
+        let mut terminal = Terminal::new(TestBackend::new(30, 5)).unwrap();
+        paint(&mut state, &mut runtime, &mut terminal, &items, 1);
+        let result = runtime.handle_event(
+            Event::Mouse(MouseEvent {
+                kind: MouseEventKind::Scroll(ratcn::runtime::ScrollDirection::Down),
+                column: 8,
+                row: 2,
+                modifiers: Modifiers::NONE,
+            }),
+            &state,
+        );
+        apply(&mut state, result);
+        paint(&mut state, &mut runtime, &mut terminal, &items, 1);
+        let scrolled = terminal.backend().buffer().clone();
+        paint(&mut state, &mut runtime, &mut terminal, &items, 1);
+        assert_eq!(&scrolled, terminal.backend().buffer());
+        assert_eq!(state.selected, Some(0));
+        let screen: String = scrolled.content.iter().map(|cell| cell.symbol()).collect();
+        assert!(!screen.contains("Row 0"));
     }
 }

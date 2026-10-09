@@ -2,21 +2,18 @@ use ratatui::{
     layout::{Constraint, Layout},
     widgets::Paragraph,
 };
-use ratcn::{runtime::CellOffset, Dialog, ProgressStyle, ProgressWidget};
+use ratcn::{runtime::CellOffset, Dialog, ProgressWidget};
 
+use super::{model_dialog, Msg};
 use crate::transcription::local_models::full_model_id;
-use crate::ui::components::modal::{dialog, ModalMessage, ModalViewState};
 
 use super::local_model_view_helpers::format_bytes;
-use super::types::DownloadState;
+use super::types::{DownloadState, LocalModelsTui};
 
 pub(super) struct LocalModelDownloadProgressDialog;
 
 impl LocalModelDownloadProgressDialog {
-    pub(super) fn dialog(
-        state: &DownloadState,
-        offset: CellOffset,
-    ) -> Dialog<ModalViewState, ModalMessage> {
+    pub(super) fn dialog(state: &DownloadState, offset: CellOffset) -> Dialog<LocalModelsTui, Msg> {
         let eta = if state.speed_mbps > 0.0 && state.total_bytes > state.downloaded_bytes {
             let remaining_mb =
                 (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
@@ -41,7 +38,7 @@ impl LocalModelDownloadProgressDialog {
             eta
         );
         let progress = state.progress;
-        dialog(
+        model_dialog(
             if state.is_custom {
                 "Download Custom Whisper Model 3/3"
             } else {
@@ -59,17 +56,14 @@ impl LocalModelDownloadProgressDialog {
             ])
             .areas(ctx.area());
             ctx.paint_widget(Paragraph::new(model), heading);
-            ctx.paint_widget(
-                ProgressWidget::new(progress)
-                    .show_value(true)
-                    .style(ProgressStyle {
-                        fill: ratatui::style::Color::White,
-                        track: ratatui::style::Color::DarkGray,
-                        label: ratatui::style::Color::White,
-                        value: ratatui::style::Color::White,
-                    }),
-                bar,
-            );
+            ctx.paint(move |paint| {
+                paint.widget(
+                    ProgressWidget::new(progress)
+                        .show_value(true)
+                        .themed(paint.theme),
+                    bar,
+                )
+            });
             ctx.paint_widget(Paragraph::new(stats), stats_area);
         })
     }

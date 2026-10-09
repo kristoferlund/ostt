@@ -1,51 +1,57 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::Frame;
-use ratcn::ListWidget;
+use ratcn::runtime::{DeclareCtx, ScopeOptions};
+use ratcn::{ListWidget, Theme};
 
 use crate::ui::scroll::update_scroll_offset;
-use crate::ui::{render_app_layout, render_footer};
 
 use super::local_model_view_helpers::format_bytes;
 use super::types::{LocalModelEntry, LocalModelsTui};
+use super::Msg;
 
 pub(super) struct LocalModelListView;
 
 impl LocalModelListView {
-    pub(super) fn render(frame: &mut Frame<'_>, tui: &mut LocalModelsTui) {
-        let layout = render_app_layout(frame, frame.area());
-        let body = Rect {
-            x: layout.title.x,
-            y: layout.title.y,
-            width: layout.title.width,
-            height: layout.title.height.saturating_add(layout.body.height),
-        };
-
-        let selected_id = tui.selected_entry().map(model_key);
-        let mut items = Vec::new();
-        push_grouped_model_items(
-            &mut items,
-            tui.entries.iter().collect(),
-            selected_id.as_deref(),
-        );
-
+    pub(super) fn prepare(tui: &mut LocalModelsTui, height: u16) {
+        let item_count = tui
+            .entries
+            .last()
+            .and_then(|entry| {
+                grouped_display_index(tui.entries.iter().collect(), &model_key(entry), 0)
+            })
+            .map_or(0, |index| index + 1);
         let selected_display_index = display_index_for_selected_model(tui);
         update_scroll_offset(
             &mut tui.scroll_offset,
             selected_display_index,
-            body.height as usize,
-            items.len(),
+            height as usize,
+            item_count,
             crate::ui::scroll::DEFAULT_SCROLL_MARGIN,
         );
-        // Keep selection styling per-span so downloaded/running pills retain their colors.
-        // Headers and separators remain display rows, not navigable model entries.
-        frame.render_widget(ListWidget::new(&items[tui.scroll_offset..]), body);
+    }
 
-        render_footer(
-            frame,
-            layout.footer,
-            "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back",
+    pub(super) fn declare(ctx: &mut DeclareCtx<'_, LocalModelsTui, Msg>, body: Rect) {
+        ctx.scope(
+            "models",
+            body,
+            ScopeOptions::default().focusable(true),
+            |ctx| {
+                ctx.paint(move |paint| {
+                    let tui = paint.state();
+                    let selected_id = tui.selected_entry().map(model_key);
+                    let mut items = Vec::new();
+                    push_grouped_model_items(
+                        &mut items,
+                        tui.entries.iter().collect(),
+                        selected_id.as_deref(),
+                        paint.theme,
+                    );
+                    let offset = tui.scroll_offset;
+                    // Keep per-span pills and grouping; headers are not selectable entries.
+                    paint.widget(ListWidget::new(&items[offset..]).themed(paint.theme), body);
+                });
+            },
         );
     }
 }
@@ -68,6 +74,7 @@ fn push_grouped_model_items(
     items: &mut Vec<Text<'static>>,
     entries: Vec<&LocalModelEntry>,
     selected_id: Option<&str>,
+    theme: &Theme,
 ) {
     let mut current_section: Option<&str> = None;
     let mut current_group: Option<&str> = None;
@@ -94,20 +101,25 @@ fn push_grouped_model_items(
             current_group = Some(group);
         }
         let is_selected = selected_id == Some(model_key(entry).as_str());
-        items.push(local_model_list_item(entry, is_selected));
+        items.push(local_model_list_item(entry, is_selected, theme));
     }
 }
 
-fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> Text<'static> {
+fn local_model_list_item(
+    entry: &LocalModelEntry,
+    is_selected: bool,
+    theme: &Theme,
+) -> Text<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
     let description = entry.description.trim();
 
-    let row_bg = if is_selected {
-        Color::DarkGray
+    let row_style = if is_selected {
+        Style::default()
+            .fg(theme.primary_foreground)
+            .bg(theme.primary)
     } else {
-        Color::Reset
+        Style::default().fg(theme.foreground).bg(theme.field)
     };
-    let row_style = Style::default().bg(row_bg);
 
     let mut spans = vec![Span::styled(format!("{active_marker} "), row_style)];
 
@@ -261,7 +273,12 @@ mod tests {
             entry("whisper", "local", None),
         ];
         let mut rows = Vec::new();
-        push_grouped_model_items(&mut rows, entries.iter().collect(), Some("whisper/local"));
+        push_grouped_model_items(
+            &mut rows,
+            entries.iter().collect(),
+            Some("whisper/local"),
+            &Theme::default_dark(),
+        );
 
         for (key, expected_index) in [
             ("http/custom", 2),
@@ -281,30 +298,45 @@ mod tests {
     }
 
     #[test]
-    fn ratcn_list_preserves_legacy_cells_when_scrolled_or_clipped() {
+    fn adaptive_model_rows_preserve_grouping_and_pills_when_scrolled_or_clipped() {
         let entries = [
             entry("http", "custom", Some("Custom models")),
             entry("openai", "cloud", Some("OpenAI")),
             entry("whisper", "local", None),
         ];
-        let mut rows = Vec::new();
-        push_grouped_model_items(&mut rows, entries.iter().collect(), Some("whisper/local"));
-
-        // Compare all cell styles as well as glyphs: selection must not erase pill colors.
-        for (width, height) in [(100, 20), (30, 4), (1, 1), (0, 0)] {
-            for offset in 0..rows.len() {
-                let area = Rect::new(2, 1, width, height);
-                let mut legacy = Buffer::empty(area);
-                let mut migrated = Buffer::empty(area);
-                let mut state = ListState::default().with_offset(offset);
-                StatefulWidget::render(
-                    List::new(rows.iter().cloned().map(ListItem::new)),
-                    area,
-                    &mut legacy,
-                    &mut state,
-                );
-                ListWidget::new(&rows[offset..]).render(area, &mut migrated);
-                assert_eq!(legacy, migrated, "size {width}x{height}, offset {offset}");
+        for theme in [
+            Theme::adaptive(Color::Rgb(26, 27, 38), Color::Rgb(192, 202, 245), None),
+            Theme::adaptive(Color::Rgb(253, 246, 227), Color::Rgb(101, 123, 131), None),
+        ] {
+            let mut rows = Vec::new();
+            push_grouped_model_items(
+                &mut rows,
+                entries.iter().collect(),
+                Some("whisper/local"),
+                &theme,
+            );
+            // Compare glyphs and pill styling against Ratatui with the same active palette.
+            for (width, height) in [(100, 20), (30, 4), (1, 1), (0, 0)] {
+                for offset in 0..rows.len() {
+                    let area = Rect::new(2, 1, width, height);
+                    let mut legacy = Buffer::empty(area);
+                    let mut migrated = Buffer::empty(area);
+                    let mut state = ListState::default().with_offset(offset);
+                    StatefulWidget::render(
+                        List::new(rows.iter().cloned().map(ListItem::new)).style(
+                            Style::default()
+                                .fg(ratcn::ListStyle::from_theme(&theme).foreground)
+                                .bg(ratcn::ListStyle::from_theme(&theme).background),
+                        ),
+                        area,
+                        &mut legacy,
+                        &mut state,
+                    );
+                    ListWidget::new(&rows[offset..])
+                        .themed(&theme)
+                        .render(area, &mut migrated);
+                    assert_eq!(legacy, migrated, "size {width}x{height}, offset {offset}");
+                }
             }
         }
     }

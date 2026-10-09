@@ -1,11 +1,11 @@
 use ratcn::runtime::CellOffset;
 use ratcn::Dialog;
 
+use super::{model_dialog, Msg};
 use crate::transcription::local_models::full_model_id;
-use crate::ui::components::modal::{dialog, ModalMessage, ModalViewState};
 
 use super::local_model_view_helpers::format_bytes;
-use super::types::LocalModelEntry;
+use super::types::{LocalModelEntry, LocalModelsTui};
 
 pub(super) struct LocalModelDeleteConfirmationDialog;
 
@@ -13,8 +13,8 @@ impl LocalModelDeleteConfirmationDialog {
     pub(super) fn dialog(
         entry: &LocalModelEntry,
         offset: CellOffset,
-    ) -> Dialog<ModalViewState, ModalMessage> {
-        dialog(
+    ) -> Dialog<LocalModelsTui, Msg> {
+        model_dialog(
             "Confirm Delete",
             format!(
                 "Delete \"{}\" ({})?\nID: {}\n\nThis cannot be undone.",

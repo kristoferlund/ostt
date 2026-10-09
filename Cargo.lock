@@ -2070,6 +2070,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "ratatui-termina"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c0bf912d9e66f057a759d92e386a280ea886b352ab757d6ac4d653c7ed2c43c2"
+dependencies = [
+ "instability",
+ "ratatui-core",
+ "termina",
+]
+
+[[package]]
 name = "ratatui-textarea"
 version = "0.9.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2108,7 +2119,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0eadf9136e51f0fde70de87047b161cfb17ae2e20752bfc9163e1e9d442955c"
 dependencies = [
  "ratatui",
+ "ratatui-termina",
  "ratatui-textarea",
+ "termina",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -2648,6 +2661,19 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "termina"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9048a889effe34a5cddee0af7f53285198b16dca3be510858d38dfdb3e62a04e"
+dependencies = [
+ "bitflags 2.13.2",
+ "parking_lot",
+ "rustix",
+ "signal-hook",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

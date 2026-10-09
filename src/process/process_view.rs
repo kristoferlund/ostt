@@ -1,19 +1,19 @@
 //! Processing-action pickers: native ratcn management UI and a plain-Ratatui recording popup.
 
 use crate::config::file::ProcessAction;
-use crate::ui::components::list::ListView;
-use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title, scroll};
+use crate::ui::components::list::{clamp_selection, selection_list};
+use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title, scroll, session};
+use crate::ui::{render_themed_footer, render_themed_title};
 use anyhow::Result;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEventKind},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
+use crossterm::event::{Event, KeyCode, MouseEventKind};
 use ratatui::{
     prelude::*,
     widgets::{List, ListItem, ListState},
 };
-use std::io::{self, Stdout};
+use ratcn::{
+    runtime::{EventResult, FocusState, Ratcn},
+    terminal::Session,
+};
 
 /// Keep the recording popup independent of ratcn's components and interaction runtime.
 pub(crate) fn render_popup_process_view(
@@ -80,76 +80,84 @@ pub(crate) fn handle_picker_event(
     }
 }
 
+#[derive(Default)]
+struct State {
+    focus: FocusState,
+    selected: Option<usize>,
+}
+
+enum Msg {
+    Focus(FocusState),
+    Select(usize),
+    Confirm(usize),
+}
+
 struct ProcessView {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    session: Session,
     actions: Vec<ProcessAction>,
-    list: ListView,
-    cleaned_up: bool,
+    rows: Vec<String>,
+    state: State,
+    ratcn: Ratcn<State, Msg>,
 }
 
 impl ProcessView {
     fn new(actions: Vec<ProcessAction>) -> Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-        let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
+        let rows = actions.iter().map(|action| action.name.clone()).collect();
         Ok(Self {
-            terminal,
+            session: session::open()?,
             actions,
-            list: ListView::default(),
-            cleaned_up: false,
+            rows,
+            state: State::default(),
+            ratcn: Ratcn::new().focus(|state: &State| &state.focus, Msg::Focus),
         })
     }
 
     fn draw(&mut self) -> Result<()> {
-        let items: Vec<_> = self
-            .actions
-            .iter()
-            .map(|action| action.name.clone())
-            .collect();
-        let list = &mut self.list;
-        self.terminal.draw(|frame| {
+        clamp_selection(&mut self.state.selected, self.rows.len());
+        let theme = session::theme(&self.session);
+        let state = &self.state;
+        let rows = &self.rows;
+        let ratcn = &mut self.ratcn;
+        self.session.terminal_mut().draw(|frame| {
+            session::paint_background(frame, &theme);
             let layout = render_app_layout(frame, frame.area());
-            render_title(frame, layout.title, "Process action");
-            list.render(frame, layout.body, &items, 1);
-            render_footer(frame, layout.footer, "↑/↓ select, ↵ confirm, esc/q cancel");
+            render_themed_title(frame, layout.title, "Process action", &theme);
+            ratcn.render(frame, layout.body, state, &theme, |ctx| {
+                ctx.component(
+                    "list",
+                    selection_list(rows, 1, |s: &State| s.selected, Msg::Select, Msg::Confirm),
+                    layout.body,
+                );
+            });
+            render_themed_footer(
+                frame,
+                layout.footer,
+                "↑/↓ select, ↵ confirm, esc/q cancel",
+                &theme,
+            );
         })?;
+        self.session.set_pointer_shape(self.ratcn.pointer_shape())?;
         Ok(())
     }
 
-    fn cleanup(&mut self) -> Result<()> {
-        if !self.cleaned_up {
-            self.cleaned_up = true;
-            disable_raw_mode()?;
-            execute!(
-                self.terminal.backend_mut(),
-                LeaveAlternateScreen,
-                DisableMouseCapture
-            )?;
-            self.terminal.show_cursor()?;
-        }
-        Ok(())
-    }
-
-    fn run(&mut self) -> Result<PickerResult> {
-        let result = loop {
+    fn run(mut self) -> Result<PickerResult> {
+        loop {
             self.draw()?;
-            let event = event::read()?;
-            if matches!(&event, Event::Key(key) if is_cancel_key(key)) {
-                break PickerResult::Cancelled;
+            let Some(event) = session::next(&mut self.session, None)? else {
+                continue;
+            };
+            if session::is_cancel(&event) {
+                return Ok(PickerResult::Cancelled);
             }
-            if let Some(index) = self.list.handle_event(event) {
-                break PickerResult::Selected(self.actions[index].id.clone());
+            match self.ratcn.handle_event(event, &self.state) {
+                EventResult::Emit(Msg::Focus(focus)) => self.state.focus = focus,
+                EventResult::Emit(Msg::Select(index)) => self.state.selected = Some(index),
+                EventResult::Emit(Msg::Confirm(index)) => {
+                    return Ok(PickerResult::Selected(self.actions[index].id.clone()))
+                }
+                _ => {}
             }
-        };
-        self.cleanup()?;
-        Ok(result)
-    }
-}
-
-impl Drop for ProcessView {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
+        }
     }
 }
 

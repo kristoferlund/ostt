@@ -8,13 +8,10 @@ pub(crate) mod local_model_list_view;
 pub(crate) mod local_model_view_helpers;
 pub(crate) mod types;
 
-use crate::ui::is_ctrl_c;
-use crossterm::event::{self, Event, KeyCode, KeyEvent};
-use ratatui::backend::CrosstermBackend;
 use ratatui::Frame;
-use ratatui::Terminal;
+use ratcn::runtime::{CellOffset, Event, EventResult, FocusState, KeyCode, KeyEvent, Ratcn};
 use ratcn::InputState as Input;
-use std::io::Stdout;
+use ratcn::{terminal::Session, Button, Dialog, Theme};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -27,8 +24,10 @@ use crate::transcription::local_models::{
     DownloadHandle, LocalModelState, RegistryEntry,
 };
 use crate::transcription::{self, TranscriptionProvider};
-use crate::ui::components::modal::{dialog, ModalAction, ModalView};
-use crate::ui::{render_toast, Toast};
+use crate::ui::components::modal::dialog;
+use crate::ui::{
+    render_app_layout, render_themed_footer, render_themed_title, render_toast, session, Toast,
+};
 
 use custom_model_details_dialog::CustomModelDetailsDialog;
 use custom_model_url_input_dialog::CustomModelUrlInputDialog;
@@ -39,7 +38,45 @@ use local_model_info_view::LocalModelInfoView;
 use local_model_list_view::LocalModelListView;
 use types::{DownloadState, LocalModelEntry, LocalModelsMode, LocalModelsTui, RunningDownload};
 
-pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
+pub(super) enum Msg {
+    Focus(FocusState),
+    Move(CellOffset),
+    Url(Input),
+    Id(Input),
+    Name(Input),
+    Accept,
+    Dismiss,
+    Quit,
+    Previous,
+    Next,
+    Info,
+    Custom,
+    Delete,
+}
+
+fn runtime() -> Ratcn<LocalModelsTui, Msg> {
+    Ratcn::new()
+        .focus(|state: &LocalModelsTui| &state.focus, Msg::Focus)
+        .modals(|state| &state.modals)
+}
+
+fn model_dialog(
+    title: impl Into<String>,
+    description: impl Into<String>,
+    action: &'static str,
+    offset: CellOffset,
+) -> Dialog<LocalModelsTui, Msg> {
+    dialog(
+        title,
+        description,
+        Button::new(action).on_press(|| Msg::Accept),
+    )
+    .offset(offset)
+    .on_offset_change(Msg::Move)
+    .on_dismiss(|| Msg::Dismiss)
+}
+
+pub(crate) async fn run(session: &mut Session) -> anyhow::Result<()> {
     let local_state = load_state();
     let ostt_config =
         config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
@@ -83,12 +120,8 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
         );
     }
     let mut running_download: Option<types::RunningDownload> = None;
-    let _input_modes = ratcn::crossterm::InputModes::new()
-        .mouse()
-        .paste()
-        .enable()?;
-    let mut modal = ModalView::default();
-    let mut info = LocalModelInfoView::default();
+    tui.sync_modal()?;
+    let mut ratcn = runtime();
     let mut last_daemon_probe = std::time::Instant::now()
         .checked_sub(Duration::from_secs(5))
         .unwrap_or_else(std::time::Instant::now);
@@ -98,6 +131,7 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
             tui.toast = None;
         }
         finish_completed_download(&mut tui, &registry, &mut running_download).await?;
+        tui.sync_modal()?;
 
         // Re-probe daemon every 2 seconds to pick up background daemon startup.
         if last_daemon_probe.elapsed() >= Duration::from_secs(2) {
@@ -106,55 +140,42 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
             last_daemon_probe = std::time::Instant::now();
         }
 
-        sync_model_modal(&tui, &mut modal)?;
-        terminal.draw(|frame| render_local_models(frame, &mut tui, &mut modal, &mut info))?;
+        let theme = session::theme(session);
+        session
+            .terminal_mut()
+            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &theme))?;
+        session.set_pointer_shape(ratcn.pointer_shape())?;
 
-        if !event::poll(Duration::from_millis(100))? {
+        let Some(event) = session::next(session, Some(Duration::from_millis(100)))? else {
             continue;
-        }
-
-        let mut event = event::read()?;
-        // Preserve legacy shortcuts and global Ctrl+C; modal events never reach the list.
-        let legacy_key = matches!(&event, Event::Key(key) if is_ctrl_c(key)
-            || (matches!(tui.mode, LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. })
+        };
+        // Keep confirmation/cancellation shortcuts; ordinary keys go through ratcn first.
+        let legacy_key = matches!(&event, Event::Key(key) if (matches!(tui.mode, LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. })
                 && matches!(key.code, KeyCode::Char('y' | 'Y' | 'n' | 'N')))
-            || (matches!(tui.mode, LocalModelsMode::CustomModelInput { .. } | LocalModelsMode::CustomModelDetails { .. }) && key.code == KeyCode::Char('q'))
             || (matches!(tui.mode, LocalModelsMode::Downloading(_)) && key.code == KeyCode::Tab));
-        if !matches!(
-            tui.mode,
-            LocalModelsMode::Browse | LocalModelsMode::Info { .. }
-        ) && !legacy_key
-        {
-            match modal.handle_event(event) {
-                Some(ModalAction::Changed(index)) => {
-                    match &mut tui.mode {
-                        LocalModelsMode::CustomModelInput { input } => {
-                            *input = modal.input(index).clone()
-                        }
-                        LocalModelsMode::CustomModelDetails {
-                            id_input,
-                            name_input,
-                            ..
-                        } => {
-                            if index == 0 {
-                                *id_input = modal.input(index).clone();
-                            } else {
-                                *name_input = modal.input(index).clone();
-                            }
-                        }
-                        _ => {}
-                    }
-                    continue;
-                }
-                Some(ModalAction::Accept | ModalAction::Submit(_)) => {
-                    event = Event::Key(KeyCode::Enter.into())
-                }
-                Some(ModalAction::Dismiss) => event = Event::Key(KeyCode::Esc.into()),
-                _ => continue,
+        let message = if legacy_key {
+            match event {
+                Event::Key(key) => shortcut(&tui.mode, key),
+                _ => None,
             }
-        }
-        if let Event::Key(key) = event {
-            if handle_key(&mut tui, &registry, &mut running_download, key).await? {
+        } else {
+            let result = ratcn.handle_event(event.clone(), &tui);
+            if let Some(text) = ratcn.take_clipboard() {
+                session.set_clipboard(&text)?;
+            } else if session::is_ctrl_c(&event) {
+                return Err(UserQuit.into());
+            }
+            match result {
+                EventResult::Emit(msg) => Some(msg),
+                EventResult::Consumed => None,
+                EventResult::Ignored => match event {
+                    Event::Key(key) => shortcut(&tui.mode, key),
+                    _ => None,
+                },
+            }
+        };
+        if let Some(msg) = message {
+            if update(&mut tui, &registry, &mut running_download, msg).await? {
                 break;
             }
         }
@@ -162,57 +183,72 @@ pub(crate) async fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> an
     Ok(())
 }
 
-fn sync_model_modal(tui: &LocalModelsTui, modal: &mut ModalView) -> anyhow::Result<()> {
-    match &tui.mode {
-        LocalModelsMode::ConfirmDownload { .. } => modal.sync(Some("download"), &[]),
-        LocalModelsMode::ConfirmDelete { .. } => modal.sync(Some("delete"), &[]),
-        LocalModelsMode::CustomModelInput { input } => modal.sync(Some("url"), &[input]),
-        LocalModelsMode::CustomModelDetails {
-            id_input,
-            name_input,
-            ..
-        } => modal.sync(Some("details"), &[id_input, name_input]),
-        LocalModelsMode::Downloading(_) => modal.sync(Some("progress"), &[]),
-        LocalModelsMode::ErrorDialog { .. } => modal.sync(Some("error"), &[]),
-        _ => modal.sync(None, &[]),
-    }
-}
-
 fn render_local_models(
     frame: &mut Frame<'_>,
     tui: &mut LocalModelsTui,
-    modal: &mut ModalView,
-    info: &mut LocalModelInfoView,
+    ratcn: &mut Ratcn<LocalModelsTui, Msg>,
+    theme: &Theme,
 ) {
+    session::paint_background(frame, theme);
+    let layout = render_app_layout(frame, frame.area());
+    let body = ratatui::layout::Rect {
+        height: layout.title.height.saturating_add(layout.body.height),
+        ..layout.title
+    };
+    LocalModelListView::prepare(tui, body.height);
     if let LocalModelsMode::Info { entry } = &tui.mode {
-        info.render(frame, entry);
-    } else {
-        // Dialogs render over the browse list so users keep their place.
-        LocalModelListView::render(frame, tui);
+        render_themed_title(frame, layout.title, &entry.name, theme);
+    }
+    let area = frame.area();
+    ratcn.render(frame, area, tui, theme, |ctx| {
+        if matches!(tui.mode, LocalModelsMode::Info { .. }) {
+            LocalModelInfoView::declare(ctx, layout.body);
+        } else {
+            LocalModelListView::declare(ctx, body);
+        }
+        let offset = tui.dialog_offset;
         match &tui.mode {
-            LocalModelsMode::ConfirmDelete { entry } => modal.render(frame, |state| {
-                LocalModelDeleteConfirmationDialog::dialog(entry, state.offset)
-            }),
-            LocalModelsMode::ConfirmDownload { entry } => modal.render(frame, |state| {
-                LocalModelDownloadConfirmationDialog::dialog(entry, state.offset)
-            }),
-            LocalModelsMode::CustomModelInput { .. } => modal.render(frame, |state| {
-                CustomModelUrlInputDialog::dialog(state.offset)
-            }),
-            LocalModelsMode::CustomModelDetails { .. } => modal.render(frame, |state| {
-                CustomModelDetailsDialog::dialog(state.offset)
-            }),
-            LocalModelsMode::Downloading(download) => modal.render(frame, |state| {
-                LocalModelDownloadProgressDialog::dialog(download, state.offset)
-            }),
-            LocalModelsMode::ErrorDialog { message, .. } => modal.render(frame, |state| {
-                dialog("Error", message.clone(), "Close", state.offset)
-            }),
+            LocalModelsMode::ConfirmDelete { entry } => ctx.modal(
+                "delete",
+                LocalModelDeleteConfirmationDialog::dialog(entry, offset),
+                area,
+            ),
+            LocalModelsMode::ConfirmDownload { entry } => ctx.modal(
+                "download",
+                LocalModelDownloadConfirmationDialog::dialog(entry, offset),
+                area,
+            ),
+            LocalModelsMode::CustomModelInput { .. } => {
+                ctx.modal("url", CustomModelUrlInputDialog::dialog(offset), area)
+            }
+            LocalModelsMode::CustomModelDetails { .. } => {
+                ctx.modal("details", CustomModelDetailsDialog::dialog(offset), area)
+            }
+            LocalModelsMode::Downloading(download) => ctx.modal(
+                "progress",
+                LocalModelDownloadProgressDialog::dialog(download, offset),
+                area,
+            ),
+            LocalModelsMode::ErrorDialog { message, .. } => ctx.modal(
+                "error",
+                model_dialog("Error", message.clone(), "Close", offset),
+                area,
+            ),
             _ => {}
         }
-    }
+    });
+    render_themed_footer(
+        frame,
+        layout.footer,
+        if matches!(tui.mode, LocalModelsMode::Info { .. }) {
+            "esc/q back"
+        } else {
+            "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back"
+        },
+        theme,
+    );
     if let Some(toast) = &tui.toast {
-        render_toast(frame, toast);
+        render_toast(frame, toast, theme);
     }
 }
 
@@ -420,79 +456,92 @@ fn downloaded_model_disk_usage_bytes(entries: &[LocalModelEntry]) -> u64 {
         .sum()
 }
 
-async fn handle_key(
+fn shortcut(mode: &LocalModelsMode, key: KeyEvent) -> Option<Msg> {
+    match (mode, key.code) {
+        (LocalModelsMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => Some(Msg::Quit),
+        (LocalModelsMode::Browse, KeyCode::Down) => Some(Msg::Next),
+        (LocalModelsMode::Browse, KeyCode::Up) => Some(Msg::Previous),
+        (LocalModelsMode::Browse, KeyCode::Enter) => Some(Msg::Accept),
+        (LocalModelsMode::Browse, KeyCode::Char('i')) => Some(Msg::Info),
+        (LocalModelsMode::Browse, KeyCode::Char('c')) => Some(Msg::Custom),
+        (LocalModelsMode::Browse, KeyCode::Char('x' | 'd') | KeyCode::Delete) => Some(Msg::Delete),
+        (LocalModelsMode::Info { .. }, KeyCode::Esc | KeyCode::Char('q')) => Some(Msg::Dismiss),
+        (
+            LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. },
+            KeyCode::Char('y' | 'Y'),
+        ) => Some(Msg::Accept),
+        (
+            LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. },
+            KeyCode::Char('n' | 'N'),
+        ) => Some(Msg::Dismiss),
+        (LocalModelsMode::Downloading(_), KeyCode::Tab) => Some(Msg::Dismiss),
+        _ => None,
+    }
+}
+
+async fn update(
     tui: &mut LocalModelsTui,
     registry: &[RegistryEntry],
     running_download: &mut Option<RunningDownload>,
-    key: KeyEvent,
+    msg: Msg,
 ) -> anyhow::Result<bool> {
-    if is_ctrl_c(&key) {
-        return Err(UserQuit.into());
-    }
-
-    let mode = tui.mode.clone();
-    match (mode, key.code) {
-        (LocalModelsMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => return Ok(true),
-        (LocalModelsMode::Browse, KeyCode::Down) => tui.move_selection_down(),
-        (LocalModelsMode::Browse, KeyCode::Up) => tui.move_selection_up(),
-        (LocalModelsMode::Browse, KeyCode::Enter) => handle_selected_entry(tui, registry).await?,
-        (LocalModelsMode::Browse, KeyCode::Char('i')) => {
+    match msg {
+        Msg::Focus(focus) => tui.focus = focus,
+        Msg::Move(offset) => tui.dialog_offset = offset,
+        Msg::Url(value) => {
+            if let LocalModelsMode::CustomModelInput { input } = &mut tui.mode {
+                *input = value;
+            }
+        }
+        Msg::Id(value) => {
+            if let LocalModelsMode::CustomModelDetails { id_input, .. } = &mut tui.mode {
+                *id_input = value;
+            }
+        }
+        Msg::Name(value) => {
+            if let LocalModelsMode::CustomModelDetails { name_input, .. } = &mut tui.mode {
+                *name_input = value;
+            }
+        }
+        Msg::Quit => return Ok(true),
+        Msg::Previous => tui.move_selection_up(),
+        Msg::Next => tui.move_selection_down(),
+        Msg::Info => {
             tracing::debug!("Opening local model info view");
             tui.show_info();
         }
-        (LocalModelsMode::Browse, KeyCode::Char('c')) => {
+        Msg::Custom => {
             tracing::debug!("Opening custom local model input dialog");
             tui.toast = None;
             tui.show_custom_input();
         }
-        (LocalModelsMode::ErrorDialog { .. }, KeyCode::Enter | KeyCode::Esc) => {
-            tui.close_error_dialog()
-        }
-        (LocalModelsMode::Browse, KeyCode::Char('x') | KeyCode::Char('d') | KeyCode::Delete) => {
-            tui.confirm_delete()
-        }
-        (LocalModelsMode::Info { .. }, KeyCode::Esc | KeyCode::Char('q')) => tui.back_to_browse(),
-        (LocalModelsMode::Downloading(_), KeyCode::Enter | KeyCode::Tab | KeyCode::Esc) => {
-            cancel_download(running_download)
-        }
-        (LocalModelsMode::CustomModelInput { .. }, KeyCode::Esc | KeyCode::Char('q')) => {
-            tui.back_to_browse()
-        }
-        (LocalModelsMode::CustomModelInput { input }, KeyCode::Enter) => {
-            resolve_custom_input(tui, input.value()).await;
-        }
-        (LocalModelsMode::CustomModelDetails { .. }, KeyCode::Esc | KeyCode::Char('q')) => {
-            tui.back_to_browse()
-        }
-        (LocalModelsMode::CustomModelDetails { .. }, KeyCode::Enter) => {
-            start_custom_details_download(tui, running_download)
-        }
-        (
-            LocalModelsMode::ConfirmDownload { .. },
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
-        ) => tui.back_to_browse(),
-        (LocalModelsMode::ConfirmDownload { entry, .. }, KeyCode::Enter) => {
-            start_confirmed_download(tui, running_download, &entry);
-        }
-        (
-            LocalModelsMode::ConfirmDownload { entry, .. },
-            KeyCode::Char('y') | KeyCode::Char('Y'),
-        ) => {
-            start_confirmed_download(tui, running_download, &entry);
-        }
-        (
-            LocalModelsMode::ConfirmDelete { .. },
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N'),
-        ) => tui.back_to_browse(),
-        (LocalModelsMode::ConfirmDelete { entry, .. }, KeyCode::Enter) => {
-            delete_confirmed_entry(tui, registry, &entry)?;
-        }
-        (LocalModelsMode::ConfirmDelete { entry, .. }, KeyCode::Char('y') | KeyCode::Char('Y')) => {
-            delete_confirmed_entry(tui, registry, &entry)?
-        }
-        _ => {}
+        Msg::Delete => tui.confirm_delete(),
+        Msg::Accept => match tui.mode.clone() {
+            LocalModelsMode::Browse => handle_selected_entry(tui, registry).await?,
+            LocalModelsMode::CustomModelInput { input } => {
+                resolve_custom_input(tui, input.value()).await
+            }
+            LocalModelsMode::CustomModelDetails { .. } => {
+                start_custom_details_download(tui, running_download)
+            }
+            LocalModelsMode::ConfirmDownload { entry } => {
+                start_confirmed_download(tui, running_download, &entry)
+            }
+            LocalModelsMode::ConfirmDelete { entry } => {
+                delete_confirmed_entry(tui, registry, &entry)?
+            }
+            LocalModelsMode::Downloading(_) => cancel_download(running_download),
+            LocalModelsMode::ErrorDialog { .. } => tui.close_error_dialog(),
+            LocalModelsMode::Info { .. } => {}
+        },
+        Msg::Dismiss => match tui.mode {
+            LocalModelsMode::Downloading(_) => cancel_download(running_download),
+            LocalModelsMode::ErrorDialog { .. } => tui.close_error_dialog(),
+            _ => tui.back_to_browse(),
+        },
     }
 
+    tui.sync_modal()?;
     Ok(false)
 }
 
@@ -894,6 +943,87 @@ mod tests {
             category: None,
             group_id: None,
         }
+    }
+
+    #[tokio::test]
+    async fn model_messages_transition_modal_state_before_the_next_frame() {
+        let mut tui = LocalModelsTui::new(Vec::new(), 0);
+        tui.focus = FocusState::intent(["models"]);
+        let mut running = None;
+        update(&mut tui, &[], &mut running, Msg::Custom)
+            .await
+            .unwrap();
+        assert_eq!(tui.modals.top().map(|id| id.as_str()), Some("url"));
+        let mut ratcn = runtime();
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        terminal
+            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &Theme::default_dark()))
+            .unwrap();
+        let EventResult::Emit(msg @ Msg::Url(_)) = ratcn.handle_event(KeyCode::Char('q'), &tui)
+        else {
+            panic!("q must remain valid URL/name text")
+        };
+        update(&mut tui, &[], &mut running, msg).await.unwrap();
+        let LocalModelsMode::CustomModelInput { input } = &tui.mode else {
+            panic!("typing must not leave input mode")
+        };
+        assert_eq!(input.value(), "q");
+        update(&mut tui, &[], &mut running, Msg::Dismiss)
+            .await
+            .unwrap();
+        assert!(tui.modals.top().is_none());
+        assert_eq!(tui.focus, FocusState::intent(["models"]));
+        assert!(
+            matches!(
+                ratcn.handle_event(KeyCode::Enter, &tui),
+                EventResult::Consumed
+            ),
+            "closing before redraw cannot access fields from the old mode"
+        );
+    }
+
+    #[test]
+    fn model_information_and_forms_share_the_same_runtime_and_active_palette() {
+        let entry =
+            local_model_entry_from_registry_entry(&registry_entry("small"), &[], None, None);
+        let mut tui = LocalModelsTui::new(vec![entry.clone()], 0);
+        let mut ratcn = runtime();
+        let theme = Theme::adaptive(
+            ratatui::style::Color::Rgb(253, 246, 227),
+            ratatui::style::Color::Rgb(101, 123, 131),
+            None,
+        );
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        tui.mode = LocalModelsMode::Info { entry };
+        terminal
+            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &theme))
+            .unwrap();
+        let screen: String = terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect();
+        assert!(screen.contains("ID: whisper/small"));
+        assert_eq!(terminal.backend().buffer()[(99, 0)].bg, theme.background);
+        tui.show_custom_input();
+        tui.sync_modal().unwrap();
+        terminal
+            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &theme))
+            .unwrap();
+        assert!(terminal
+            .backend()
+            .buffer()
+            .content
+            .iter()
+            .any(|cell| cell.bg == theme.surface));
+        assert!(matches!(
+            ratcn.handle_event(Event::Paste("https://example.com/model.bin".into()), &tui),
+            EventResult::Emit(Msg::Url(_))
+        ));
     }
 
     #[test]

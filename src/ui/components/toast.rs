@@ -1,5 +1,5 @@
 use ratatui::Frame;
-use ratcn::{ToasterState, ToasterWidget};
+use ratcn::{Theme, ToasterState, ToasterWidget};
 use std::time::{Duration, Instant};
 
 const TOAST_DURATION: Duration = Duration::from_secs(2);
@@ -41,10 +41,10 @@ impl Toast {
     }
 }
 
-pub fn render_toast(frame: &mut Frame<'_>, toast: &Toast) {
+pub fn render_toast(frame: &mut Frame<'_>, toast: &Toast, theme: &Theme) {
     let screen = frame.area();
     frame.render_widget(
-        ToasterWidget::new(&toast.toasts, toast.created_at.elapsed()),
+        ToasterWidget::new(&toast.toasts, toast.created_at.elapsed()).themed(theme),
         screen,
     );
 }
@@ -59,7 +59,9 @@ mod tests {
         for mut toast in [Toast::success("Saved"), Toast::error("Failed")] {
             assert!(!toast.is_expired());
             let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-            terminal.draw(|frame| render_toast(frame, &toast)).unwrap();
+            terminal
+                .draw(|frame| render_toast(frame, &toast, &Theme::default_dark()))
+                .unwrap();
             assert!(terminal
                 .backend()
                 .buffer()
@@ -68,7 +70,9 @@ mod tests {
                 .any(|cell| cell.symbol() != " "));
             toast.created_at -= TOAST_DURATION;
             assert!(toast.is_expired());
-            terminal.draw(|frame| render_toast(frame, &toast)).unwrap();
+            terminal
+                .draw(|frame| render_toast(frame, &toast, &Theme::default_dark()))
+                .unwrap();
             assert!(terminal
                 .backend()
                 .buffer()

@@ -1,4 +1,5 @@
 use crate::transcription::local_models::{DownloadHandle, LocalModelState, RegistryEntry};
+use ratcn::runtime::{CellOffset, FocusState, ModalState};
 use ratcn::InputState as Input;
 use std::sync::{Arc, Mutex};
 
@@ -64,6 +65,9 @@ pub(crate) enum LocalModelsMode {
 
 #[derive(Clone, Debug)]
 pub(crate) struct LocalModelsTui {
+    pub focus: FocusState,
+    pub modals: ModalState,
+    pub dialog_offset: CellOffset,
     pub entries: Vec<LocalModelEntry>,
     pub selected: usize,
     pub mode: LocalModelsMode,
@@ -84,6 +88,9 @@ impl LocalModelsTui {
             .position(|entry| entry.is_active)
             .unwrap_or(0);
         Self {
+            focus: FocusState::default(),
+            modals: ModalState::default(),
+            dialog_offset: CellOffset::default(),
             entries,
             selected,
             mode: LocalModelsMode::Browse,
@@ -92,6 +99,26 @@ impl LocalModelsTui {
             toast: None,
             daemon_model_id: None,
         }
+    }
+
+    pub(crate) fn sync_modal(&mut self) -> anyhow::Result<()> {
+        let id = match &self.mode {
+            LocalModelsMode::ConfirmDownload { .. } => Some("download"),
+            LocalModelsMode::ConfirmDelete { .. } => Some("delete"),
+            LocalModelsMode::CustomModelInput { .. } => Some("url"),
+            LocalModelsMode::CustomModelDetails { .. } => Some("details"),
+            LocalModelsMode::Downloading(_) => Some("progress"),
+            LocalModelsMode::ErrorDialog { .. } => Some("error"),
+            _ => None,
+        };
+        if self.modals.top().map(|id| id.as_str()) != id {
+            self.modals.close(&mut self.focus);
+            self.dialog_offset = CellOffset::default();
+            if let Some(id) = id {
+                self.modals.open(id, &mut self.focus)?;
+            }
+        }
+        Ok(())
     }
 
     /// Update cached daemon status and reflect it on each entry's `is_daemon_loaded`.

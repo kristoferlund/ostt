@@ -1,35 +1,41 @@
-//! Interactive terminal UI for viewing transcription history.
+//! Transcription history with one command-owned ratcn runtime.
 
 use crate::history::TranscriptionEntry;
-use crate::ui::components::list::ListView;
-use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
-use anyhow::Result;
-use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+use crate::ui::components::list::{clamp_selection, selection_list};
+use crate::ui::{
+    render_app_layout, render_themed_footer, render_themed_title, render_toast, session, Toast,
 };
-use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::{self, Stdout};
+use anyhow::Result;
+use ratcn::{
+    runtime::{EventResult, FocusState, Ratcn},
+    terminal::Session,
+};
 use std::time::Duration;
+
+#[derive(Default)]
+struct State {
+    focus: FocusState,
+    selected: Option<usize>,
+}
+
+enum Msg {
+    Focus(FocusState),
+    Select(usize),
+    Copy(usize),
+}
 
 /// Interactive history view for transcription entries.
 pub struct HistoryView {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    session: Session,
     entries: Vec<TranscriptionEntry>,
     rows: Vec<String>,
-    list: ListView,
+    state: State,
+    ratcn: Ratcn<State, Msg>,
     notification: Option<Toast>,
-    cleaned_up: bool,
 }
 
 impl HistoryView {
-    /// Creates a new history view with the given entries.
     pub fn new(entries: Vec<TranscriptionEntry>) -> Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-        let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
         let rows = entries
             .iter()
             .map(|entry| {
@@ -41,17 +47,17 @@ impl HistoryView {
             })
             .collect();
         Ok(Self {
-            terminal,
+            session: session::open()?,
             entries,
             rows,
-            list: ListView::default(),
+            state: State::default(),
+            ratcn: Ratcn::new().focus(|state: &State| &state.focus, Msg::Focus),
             notification: None,
-            cleaned_up: false,
         })
     }
 
-    /// Runs the interactive history view loop.
-    pub fn run(&mut self) -> Result<Option<String>> {
+    /// Consume the view so the terminal is restored before clipboard/output work.
+    pub fn run(mut self) -> Result<Option<String>> {
         let mut selected_text = None;
         if !self.entries.is_empty() {
             loop {
@@ -59,56 +65,60 @@ impl HistoryView {
                 if self.notification.as_ref().is_some_and(Toast::is_expired) {
                     break;
                 }
-                if !event::poll(Duration::from_millis(50))? {
+                let timeout = self
+                    .notification
+                    .as_ref()
+                    .map(|_| Duration::from_millis(50));
+                let Some(event) = session::next(&mut self.session, timeout)? else {
                     continue;
-                }
-                let event = event::read()?;
-                if matches!(&event, Event::Key(key) if crate::ui::is_cancel_key(key)) {
+                };
+                if session::is_cancel(&event) {
                     break;
                 }
-                if let Some(index) = self.list.handle_event(event) {
-                    selected_text = Some(self.entries[index].text.clone());
-                    self.notification = Some(Toast::success("Copied to clipboard!"));
+                match self.ratcn.handle_event(event, &self.state) {
+                    EventResult::Emit(Msg::Focus(focus)) => self.state.focus = focus,
+                    EventResult::Emit(Msg::Select(index)) => self.state.selected = Some(index),
+                    EventResult::Emit(Msg::Copy(index)) => {
+                        self.state.selected = Some(index);
+                        selected_text = Some(self.entries[index].text.clone());
+                        self.notification = Some(Toast::success("Copied to clipboard!"));
+                    }
+                    _ => {}
                 }
             }
         }
-        self.cleanup()?;
         Ok(selected_text)
     }
 
     fn draw(&mut self) -> Result<()> {
-        let items = &self.rows;
-        let list = &mut self.list;
+        clamp_selection(&mut self.state.selected, self.rows.len());
+        let theme = session::theme(&self.session);
+        let state = &self.state;
+        let ratcn = &mut self.ratcn;
+        let rows = &self.rows;
         let notification = &self.notification;
-        self.terminal.draw(|frame| {
+        self.session.terminal_mut().draw(|frame| {
+            session::paint_background(frame, &theme);
             let layout = render_app_layout(frame, frame.area());
-            render_title(frame, layout.title, "History");
-            list.render(frame, layout.body, items, 2);
-            render_footer(frame, layout.footer, "↑↓ select, ↵ copy, esc/q exit");
+            render_themed_title(frame, layout.title, "History", &theme);
+            ratcn.render(frame, layout.body, state, &theme, |ctx| {
+                ctx.component(
+                    "list",
+                    selection_list(rows, 2, |s: &State| s.selected, Msg::Select, Msg::Copy),
+                    layout.body,
+                );
+            });
+            render_themed_footer(
+                frame,
+                layout.footer,
+                "↑↓ select, ↵ copy, esc/q exit",
+                &theme,
+            );
             if let Some(toast) = notification {
-                render_toast(frame, toast);
+                render_toast(frame, toast, &theme);
             }
         })?;
+        self.session.set_pointer_shape(self.ratcn.pointer_shape())?;
         Ok(())
-    }
-
-    fn cleanup(&mut self) -> Result<()> {
-        if !self.cleaned_up {
-            self.cleaned_up = true;
-            disable_raw_mode()?;
-            execute!(
-                self.terminal.backend_mut(),
-                LeaveAlternateScreen,
-                DisableMouseCapture
-            )?;
-            self.terminal.show_cursor()?;
-        }
-        Ok(())
-    }
-}
-
-impl Drop for HistoryView {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
     }
 }

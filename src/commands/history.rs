@@ -23,7 +23,7 @@ pub async fn handle_history() -> Result<(), anyhow::Error> {
         return Ok(());
     }
 
-    let mut view = HistoryView::new(entries)?;
+    let view = HistoryView::new(entries)?;
 
     match view.run()? {
         Some(selected_text) => {
