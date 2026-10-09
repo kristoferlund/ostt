@@ -24,12 +24,10 @@ whisper-vulkan = ["whisper-rs/vulkan"]
 
 [dependencies]
 # Terminal UI
-ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std", "crossterm"] }
+ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std"] }
 ratcn = { version = "0.0.6", features = ["termina"] }
-crossterm = "0.29.0"
 cliclack = "0.3.0"
 console = "0.15.8"
-ctrlc = "3.5.1"
 
 # CLI argument parsing
 clap = { version = "4.5", features = ["derive"] }

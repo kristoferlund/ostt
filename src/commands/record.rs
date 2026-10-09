@@ -12,7 +12,6 @@ use crate::recording::{
     RecordingTui,
 };
 use crate::transcription::TranscriptionAnimation;
-use crate::ui::cancel_requested;
 use anyhow::Context;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -462,7 +461,7 @@ fn pick_action_id_with_recording_tui(
     actions: &[ProcessAction],
 ) -> anyhow::Result<Option<String>> {
     // The picker is the same screen `ostt process` shows, in its own session.
-    tui.suspend().map_err(|e| anyhow::anyhow!(e.to_string()))?;
+    tui.suspend();
     let picked = process::process_view::show_action_picker(actions);
     tui.resume().map_err(|e| anyhow::anyhow!(e.to_string()))?;
     Ok(match picked? {
@@ -493,13 +492,14 @@ async fn run_process_action_with_animation(
             break;
         }
 
-        if cancel_requested() {
+        if tui
+            .cancel_requested(std::time::Duration::from_millis(50))
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
             tracing::info!("Processing cancelled by user");
             task_handle.abort();
             return Ok(text);
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
     match task_handle.await {
@@ -566,14 +566,15 @@ async fn transcribe_recording_with_animation(
             break;
         }
 
-        if cancel_requested() {
+        if tui
+            .cancel_requested(std::time::Duration::from_millis(50))
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
+        {
             tracing::info!("Transcription cancelled by user");
             transcription_handle.abort();
             cancelled = true;
             break;
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
     if cancelled {
