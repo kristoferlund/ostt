@@ -1,6 +1,6 @@
 //! List declarations. The calling command owns state, messages, and the runtime.
 
-use ratatui::text::Text;
+use ratatui::text::{Line, Text};
 use ratcn::{List, ListItem, ListStyle, Theme};
 
 /// Lists sit on the app background in every state; only the cursor row is
@@ -22,7 +22,7 @@ pub(crate) fn selection_list<S: 'static, M: 'static>(
     on_focus: fn(usize) -> M,
     on_select: fn(usize) -> M,
 ) -> List<usize, S, M> {
-    let mut list = List::new(
+    List::new(
         items
             .iter()
             .enumerate()
@@ -31,11 +31,12 @@ pub(crate) fn selection_list<S: 'static, M: 'static>(
     .item_focus(selected, move |index, _| on_focus(index))
     .selection(selected, on_select)
     .style(list_style)
-    .row_height(row_height);
-    if row_height > 1 {
-        list = list.paint_item(|_, row| Text::from(row.label.to_string()));
-    }
-    list
+    .row_height(row_height)
+    // Enter acts on the row; there is nothing to mark as selected, so rows
+    // carry no marker, only a one-cell indent.
+    .paint_item(|_, row| {
+        Text::from_iter(row.label.lines().map(|line| Line::from(format!(" {line}"))))
+    })
 }
 
 pub(crate) fn clamp_selection(selected: &mut Option<usize>, len: usize) {

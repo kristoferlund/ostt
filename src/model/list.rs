@@ -68,6 +68,7 @@ fn entry_index(row: Row) -> usize {
 }
 
 pub(super) fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect) {
+    let theme = *ctx.theme;
     let list = List::new(rows(&ctx.state().entries))
         .item_focus(
             |state: &State| state.selected.map(Row::Model),
@@ -78,20 +79,28 @@ pub(super) fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect) {
             |row| Msg::Activate(entry_index(row)),
         )
         .style(list_style)
-        .paint_item(|state: &State, row| match row.value {
+        .paint_item(move |state: &State, row| match row.value {
             Row::Blank(_) => Text::default(),
-            Row::Section(_) => header(row.label, Color::Green),
-            Row::Group(_) => header(row.label, Color::Magenta),
+            // Sections match the screen title; provider groups are a step quieter.
+            Row::Section(_) => header(
+                row.label,
+                Style::default()
+                    .fg(theme.primary_foreground)
+                    .bg(theme.primary),
+            ),
+            Row::Group(_) => header(
+                row.label,
+                Style::default()
+                    .fg(theme.secondary_foreground)
+                    .bg(theme.secondary),
+            ),
             Row::Model(index) => model_row(&state.entries[*index], row.selected),
         });
     ctx.component("models", list, body);
 }
 
-fn header(label: &str, background: Color) -> Text<'static> {
-    Text::from(Span::styled(
-        format!(" {label} "),
-        Style::default().fg(Color::Black).bg(background),
-    ))
+fn header(label: &str, style: Style) -> Text<'static> {
+    Text::from(Span::styled(format!(" {label} "), style))
 }
 
 /// Text without a style of its own takes the list's row colors.
@@ -99,7 +108,7 @@ fn model_row(entry: &ModelEntry, is_selected: bool) -> Text<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
     let description = entry.description.trim();
 
-    let mut spans = vec![Span::raw(format!("{active_marker} "))];
+    let mut spans = vec![Span::raw(format!(" {active_marker} "))];
 
     if entry.is_downloaded && entry.provider_id == "whisper" {
         let (pill_fg, pill_bg) = if is_selected {
