@@ -1,8 +1,8 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState};
+use ratatui::text::{Line, Span, Text};
 use ratatui::Frame;
+use ratcn::ListWidget;
 
 use crate::ui::scroll::update_scroll_offset;
 use crate::ui::{render_app_layout, render_footer};
@@ -38,16 +38,9 @@ impl LocalModelListView {
             items.len(),
             crate::ui::scroll::DEFAULT_SCROLL_MARGIN,
         );
-        let mut state = ListState::default()
-            .with_selected(selected_display_index)
-            .with_offset(tui.scroll_offset);
-        // highlight_style is intentionally blank — selection bg is applied per-span below
-        // so pill background colours are preserved on the selected row.
-        frame.render_stateful_widget(
-            List::new(items).highlight_style(Style::default()),
-            body,
-            &mut state,
-        );
+        // Keep selection styling per-span so downloaded/running pills retain their colors.
+        // Headers and separators remain display rows, not navigable model entries.
+        frame.render_widget(ListWidget::new(&items[tui.scroll_offset..]), body);
 
         render_footer(
             frame,
@@ -57,22 +50,22 @@ impl LocalModelListView {
     }
 }
 
-fn section_header(label: impl Into<String>) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::styled(
+fn section_header(label: impl Into<String>) -> Text<'static> {
+    Text::from(Line::from(Span::styled(
         format!(" {} ", label.into()),
         Style::default().fg(Color::Black).bg(Color::Green),
     )))
 }
 
-fn group_header(label: impl Into<String>) -> ListItem<'static> {
-    ListItem::new(Line::from(Span::styled(
+fn group_header(label: impl Into<String>) -> Text<'static> {
+    Text::from(Line::from(Span::styled(
         format!(" {} ", label.into()),
         Style::default().fg(Color::Black).bg(Color::Magenta),
     )))
 }
 
 fn push_grouped_model_items(
-    items: &mut Vec<ListItem<'static>>,
+    items: &mut Vec<Text<'static>>,
     entries: Vec<&LocalModelEntry>,
     selected_id: Option<&str>,
 ) {
@@ -83,20 +76,20 @@ fn push_grouped_model_items(
         let group = group_label(entry);
         if current_section != Some(section) {
             if current_section.is_some() {
-                items.push(ListItem::new(Line::from("")));
+                items.push(Text::from(Line::from("")));
             }
             items.push(section_header(section.to_string()));
-            items.push(ListItem::new(Line::from("")));
+            items.push(Text::from(Line::from("")));
             current_section = Some(section);
             current_group = None;
         }
         if current_group != Some(group) {
             if current_group.is_some() {
-                items.push(ListItem::new(Line::from("")));
+                items.push(Text::from(Line::from("")));
             }
             if group != section {
                 items.push(group_header(group.to_string()));
-                items.push(ListItem::new(Line::from("")));
+                items.push(Text::from(Line::from("")));
             }
             current_group = Some(group);
         }
@@ -105,7 +98,7 @@ fn push_grouped_model_items(
     }
 }
 
-fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem<'static> {
+fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> Text<'static> {
     let active_marker = if entry.is_active { "◉" } else { "○" };
     let description = entry.description.trim();
 
@@ -168,7 +161,7 @@ fn local_model_list_item(entry: &LocalModelEntry, is_selected: bool) -> ListItem
 
     spans.push(Span::styled(details, row_style));
 
-    ListItem::new(Line::from(spans))
+    Text::from(Line::from(spans))
 }
 
 fn display_index_for_selected_model(tui: &LocalModelsTui) -> Option<usize> {
@@ -232,4 +225,87 @@ fn group_label(entry: &LocalModelEntry) -> &str {
         .group_id
         .as_deref()
         .unwrap_or_else(|| section_label(entry))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::buffer::Buffer;
+    use ratatui::widgets::{List, ListItem, ListState, StatefulWidget, Widget};
+
+    fn entry(provider: &str, id: &str, group: Option<&str>) -> LocalModelEntry {
+        LocalModelEntry {
+            id: id.to_string(),
+            provider_id: provider.to_string(),
+            name: format!("Model {id}"),
+            description: "Multilingual 日本語".to_string(),
+            size_mb: 100,
+            is_downloaded: provider == "whisper",
+            is_active: provider == "whisper",
+            is_daemon_loaded: provider == "whisper",
+            is_available_in_registry: true,
+            languages: vec![],
+            url: String::new(),
+            recommended_hardware: None,
+            category: None,
+            sha256: None,
+            group_id: group.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn grouped_headers_and_separators_do_not_change_model_selection_indices() {
+        let entries = [
+            entry("http", "custom", Some("Custom models")),
+            entry("openai", "cloud", Some("OpenAI")),
+            entry("whisper", "local", None),
+        ];
+        let mut rows = Vec::new();
+        push_grouped_model_items(&mut rows, entries.iter().collect(), Some("whisper/local"));
+
+        for (key, expected_index) in [
+            ("http/custom", 2),
+            ("openai/cloud", 8),
+            ("whisper/local", 12),
+        ] {
+            assert_eq!(
+                grouped_display_index(entries.iter().collect(), key, 0),
+                Some(expected_index)
+            );
+            assert!(rows[expected_index].to_string().contains(key));
+        }
+        assert!(rows[0].to_string().contains("Custom models"));
+        assert!(rows[4].to_string().contains("Cloud models"));
+        assert!(rows[6].to_string().contains("OpenAI"));
+        assert!(rows[10].to_string().contains("Local models"));
+    }
+
+    #[test]
+    fn ratcn_list_preserves_legacy_cells_when_scrolled_or_clipped() {
+        let entries = [
+            entry("http", "custom", Some("Custom models")),
+            entry("openai", "cloud", Some("OpenAI")),
+            entry("whisper", "local", None),
+        ];
+        let mut rows = Vec::new();
+        push_grouped_model_items(&mut rows, entries.iter().collect(), Some("whisper/local"));
+
+        // Compare all cell styles as well as glyphs: selection must not erase pill colors.
+        for (width, height) in [(100, 20), (30, 4), (1, 1), (0, 0)] {
+            for offset in 0..rows.len() {
+                let area = Rect::new(2, 1, width, height);
+                let mut legacy = Buffer::empty(area);
+                let mut migrated = Buffer::empty(area);
+                let mut state = ListState::default().with_offset(offset);
+                StatefulWidget::render(
+                    List::new(rows.iter().cloned().map(ListItem::new)),
+                    area,
+                    &mut legacy,
+                    &mut state,
+                );
+                ListWidget::new(&rows[offset..]).render(area, &mut migrated);
+                assert_eq!(legacy, migrated, "size {width}x{height}, offset {offset}");
+            }
+        }
+    }
 }

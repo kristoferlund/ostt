@@ -1,8 +1,8 @@
-use ratatui::text::Line;
-use ratatui::Frame;
+use ratcn::runtime::CellOffset;
+use ratcn::Dialog;
 
 use crate::transcription::local_models::full_model_id;
-use crate::ui::{render_dialog, DialogAction};
+use crate::ui::components::modal::{dialog, ModalMessage, ModalViewState};
 
 use super::local_model_view_helpers::format_bytes;
 use super::types::LocalModelEntry;
@@ -10,28 +10,20 @@ use super::types::LocalModelEntry;
 pub(super) struct LocalModelDeleteConfirmationDialog;
 
 impl LocalModelDeleteConfirmationDialog {
-    pub(super) fn render(
-        frame: &mut Frame<'_>,
+    pub(super) fn dialog(
         entry: &LocalModelEntry,
-        _selected_action: DialogAction,
-    ) {
-        render_dialog(
-            frame,
+        offset: CellOffset,
+    ) -> Dialog<ModalViewState, ModalMessage> {
+        dialog(
             "Confirm Delete",
-            vec![
-                Line::from(format!(
-                    "Delete \"{}\" ({})?",
-                    entry.name,
-                    format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
-                )),
-                Line::from(format!(
-                    "ID: {}",
-                    full_model_id(&entry.provider_id, &entry.id)
-                )),
-                Line::from(""),
-                Line::from("This cannot be undone."),
-            ],
+            format!(
+                "Delete \"{}\" ({})?\nID: {}\n\nThis cannot be undone.",
+                entry.name,
+                format_bytes(u64::from(entry.size_mb) * 1024 * 1024),
+                full_model_id(&entry.provider_id, &entry.id)
+            ),
             "Delete",
-        );
+            offset,
+        )
     }
 }

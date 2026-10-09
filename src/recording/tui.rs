@@ -18,7 +18,7 @@ use std::io::{stdout, Stdout};
 
 use crate::config::{file::ProcessAction, OsttConfig};
 use crate::config::{ReferenceLevel, VisualizationType};
-use crate::process::process_view::{handle_picker_event, render_process_view, PickerResult};
+use crate::process::process_view::{handle_picker_event, render_popup_process_view, PickerResult};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::is_cancel_key;
 
@@ -566,20 +566,13 @@ impl RecordingTui {
         actions: &[ProcessAction],
         list_state: &mut ListState,
     ) -> Result<Option<PickerResult>, Box<dyn Error>> {
-        let mut list_area = Rect::default();
         self.terminal.draw(|frame| {
             let area = frame.area();
-            list_area = render_process_view(frame, area, actions, list_state, None);
+            render_popup_process_view(frame, area, actions, list_state);
         })?;
 
         if event::poll(std::time::Duration::from_millis(50))? {
-            return Ok(handle_picker_event(
-                event::read()?,
-                actions,
-                list_state,
-                None,
-                list_area,
-            ));
+            return Ok(handle_picker_event(event::read()?, actions, list_state));
         }
 
         Ok(None)

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Migrated management screens to ratcn: grouped model lists, model information, history, keywords, replace rules, and the standalone process-action picker. The model list retains its existing appearance; other lists use native ratcn presentation and interaction.
+- Model confirmations, custom-model forms, errors, download progress, keyword entry, and replace-rule entry now use native movable ratcn dialogs with clickable actions. Inputs support mouse interaction and bracketed paste; notifications use ratcn's native presentation and two-second lifetime.
+- Updated Ratatui and Crossterm for ratcn compatibility and replaced tui-input with ratcn input state. Recording/transcription popups and their embedded process picker remain plain Ratatui.
+
 ## 0.0.27 - 2026-09-24
 
 ### Added

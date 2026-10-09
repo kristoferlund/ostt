@@ -1,7 +1,6 @@
 use crate::transcription::local_models::{DownloadHandle, LocalModelState, RegistryEntry};
-use crate::ui::DialogAction;
+use ratcn::InputState as Input;
 use std::sync::{Arc, Mutex};
-use tui_input::Input;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LocalModelEntry {
@@ -41,18 +40,14 @@ pub(crate) enum LocalModelsMode {
     Browse,
     CustomModelInput {
         input: Input,
-        selected_action: DialogAction,
     },
     CustomModelDetails {
         resolved_entry: RegistryEntry,
         id_input: Input,
         name_input: Input,
-        focus: CustomModelDetailsFocus,
-        selected_action: DialogAction,
     },
     ConfirmDownload {
         entry: LocalModelEntry,
-        selected_action: DialogAction,
     },
     Downloading(DownloadState),
     Info {
@@ -60,18 +55,11 @@ pub(crate) enum LocalModelsMode {
     },
     ConfirmDelete {
         entry: LocalModelEntry,
-        selected_action: DialogAction,
     },
     ErrorDialog {
         message: String,
         return_mode: Box<LocalModelsMode>,
     },
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CustomModelDetailsFocus {
-    Id,
-    Name,
 }
 
 #[derive(Clone, Debug)]
@@ -146,10 +134,7 @@ impl LocalModelsTui {
             .filter(|entry| entry.provider_id == "whisper" && entry.is_downloaded)
             .cloned()
         {
-            self.mode = LocalModelsMode::ConfirmDelete {
-                entry,
-                selected_action: DialogAction::Cancel,
-            };
+            self.mode = LocalModelsMode::ConfirmDelete { entry };
         }
     }
 
@@ -173,7 +158,6 @@ impl LocalModelsTui {
     pub(crate) fn show_custom_input(&mut self) {
         self.mode = LocalModelsMode::CustomModelInput {
             input: Input::default(),
-            selected_action: DialogAction::Ok,
         };
     }
 

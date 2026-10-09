@@ -1,17 +1,22 @@
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::Frame;
+use ratatui::{
+    layout::{Constraint, Layout},
+    widgets::Paragraph,
+};
+use ratcn::{runtime::CellOffset, Dialog, ProgressStyle, ProgressWidget};
 
 use crate::transcription::local_models::full_model_id;
-use crate::ui::render_dialog_content;
+use crate::ui::components::modal::{dialog, ModalMessage, ModalViewState};
 
-use super::local_model_view_helpers::{format_bytes, progress_bar};
+use super::local_model_view_helpers::format_bytes;
 use super::types::DownloadState;
 
 pub(super) struct LocalModelDownloadProgressDialog;
 
 impl LocalModelDownloadProgressDialog {
-    pub(super) fn render(frame: &mut Frame<'_>, state: &DownloadState) {
+    pub(super) fn dialog(
+        state: &DownloadState,
+        offset: CellOffset,
+    ) -> Dialog<ModalViewState, ModalMessage> {
         let eta = if state.speed_mbps > 0.0 && state.total_bytes > state.downloaded_bytes {
             let remaining_mb =
                 (state.total_bytes - state.downloaded_bytes) as f64 / (1024.0 * 1024.0);
@@ -19,48 +24,53 @@ impl LocalModelDownloadProgressDialog {
         } else {
             "ETA: unknown".to_string()
         };
-        render_dialog_content(
-            frame,
+        let model = format!(
+            "Model: {}\nStatus: {}",
+            full_model_id(&state.provider_id, &state.model_id),
+            state.status
+        );
+        let stats = format!(
+            "{} / {}  •  {:.1} MB/s  •  {}",
+            format_bytes(state.downloaded_bytes),
+            if state.total_bytes == 0 {
+                "unknown".to_string()
+            } else {
+                format_bytes(state.total_bytes)
+            },
+            state.speed_mbps,
+            eta
+        );
+        let progress = state.progress;
+        dialog(
             if state.is_custom {
                 "Download Custom Whisper Model 3/3"
             } else {
                 state.status.as_str()
             },
-            vec![
-                Line::from(format!(
-                    "Model: {}",
-                    full_model_id(&state.provider_id, &state.model_id)
-                )),
-                if state.is_custom {
-                    Line::from(format!("Status: {}", state.status))
-                } else {
-                    Line::from("")
-                },
-                Line::from(""),
-                Line::from(progress_bar(state.progress, 58)),
-                Line::from(""),
-                Line::from(format!(
-                    "{} / {}  •  {:.1} MB/s  •  {}",
-                    format_bytes(state.downloaded_bytes),
-                    if state.total_bytes == 0 {
-                        "unknown".to_string()
-                    } else {
-                        format_bytes(state.total_bytes)
-                    },
-                    state.speed_mbps,
-                    eta
-                )),
-                Line::from(""),
-                Line::from(Span::styled(
-                    "<Cancel>",
-                    Style::default()
-                        .fg(Color::Black)
-                        .bg(Color::White)
-                        .add_modifier(Modifier::BOLD),
-                )),
-            ],
-            70,
-            10,
-        );
+            String::new(),
+            "Cancel",
+            offset,
+        )
+        .content(7, move |ctx| {
+            let [heading, bar, stats_area] = Layout::vertical([
+                Constraint::Length(3),
+                Constraint::Length(2),
+                Constraint::Length(2),
+            ])
+            .areas(ctx.area());
+            ctx.paint_widget(Paragraph::new(model), heading);
+            ctx.paint_widget(
+                ProgressWidget::new(progress)
+                    .show_value(true)
+                    .style(ProgressStyle {
+                        fill: ratatui::style::Color::White,
+                        track: ratatui::style::Color::DarkGray,
+                        label: ratatui::style::Color::White,
+                        value: ratatui::style::Color::White,
+                    }),
+                bar,
+            );
+            ctx.paint_widget(Paragraph::new(stats), stats_area);
+        })
     }
 }

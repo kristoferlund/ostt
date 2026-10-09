@@ -1,35 +1,26 @@
 //! Interactive terminal UI for viewing transcription history.
-//!
-//! Provides a scrollable list of transcriptions with keyboard navigation,
-//! mouse support, selection, and clipboard integration.
 
 use crate::history::TranscriptionEntry;
-use crate::ui::{render_app_layout, render_footer, render_title, render_toast, scroll, Toast};
+use crate::ui::components::list::ListView;
+use crate::ui::{render_app_layout, render_footer, render_title, render_toast, Toast};
 use anyhow::Result;
 use crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, MouseEvent, MouseEventKind,
-    },
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    prelude::*,
-    widgets::{List, ListItem, ListState},
-};
+use ratatui::{backend::CrosstermBackend, Terminal};
 use std::io::{self, Stdout};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Interactive history view for transcription entries.
 pub struct HistoryView {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     entries: Vec<TranscriptionEntry>,
-    list_state: ListState,
+    rows: Vec<String>,
+    list: ListView,
     notification: Option<Toast>,
-    pending_click: Option<(usize, Instant)>,
     cleaned_up: bool,
-    hovered_index: Option<usize>,
-    list_area: Rect,
 }
 
 impl HistoryView {
@@ -38,231 +29,82 @@ impl HistoryView {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
         execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
-
-        let mut list_state = ListState::default();
-        if !entries.is_empty() {
-            list_state.select(Some(0));
-        }
-
+        let terminal = Terminal::new(CrosstermBackend::new(stdout))?;
+        let rows = entries
+            .iter()
+            .map(|entry| {
+                format!(
+                    "{}\n{}",
+                    entry.created_at.format("%Y-%m-%d %H:%M:%S"),
+                    entry.text
+                )
+            })
+            .collect();
         Ok(Self {
             terminal,
             entries,
-            list_state,
+            rows,
+            list: ListView::default(),
             notification: None,
-            pending_click: None,
             cleaned_up: false,
-            hovered_index: None,
-            list_area: Rect::default(),
         })
     }
 
     /// Runs the interactive history view loop.
     pub fn run(&mut self) -> Result<Option<String>> {
-        if self.entries.is_empty() {
-            self.cleanup()?;
-            return Ok(None);
-        }
-
-        tracing::debug!("History view started with {} entries", self.entries.len());
-
-        let mut selected_text: Option<String> = None;
-
-        loop {
-            self.draw()?;
-
-            // Check if notification has expired
-            if let Some(notification) = &self.notification {
-                if notification.is_expired() {
-                    self.notification = None;
-                    if selected_text.is_some() {
-                        break; // Exit after showing notification
-                    }
+        let mut selected_text = None;
+        if !self.entries.is_empty() {
+            loop {
+                self.draw()?;
+                if self.notification.as_ref().is_some_and(Toast::is_expired) {
+                    break;
                 }
-            }
-
-            // Check if pending click should be processed
-            if let Some((entry_index, click_time)) = self.pending_click {
-                if click_time.elapsed() >= Duration::from_millis(200) {
-                    selected_text = Some(self.entries[entry_index].text.clone());
-                    self.pending_click = None;
+                if !event::poll(Duration::from_millis(50))? {
+                    continue;
+                }
+                let event = event::read()?;
+                if matches!(&event, Event::Key(key) if crate::ui::is_cancel_key(key)) {
+                    break;
+                }
+                if let Some(index) = self.list.handle_event(event) {
+                    selected_text = Some(self.entries[index].text.clone());
                     self.notification = Some(Toast::success("Copied to clipboard!"));
-                    tracing::info!("Clicked item copied to clipboard");
-                }
-            }
-
-            if event::poll(Duration::from_millis(50))? {
-                match event::read()? {
-                    Event::Key(key) => {
-                        if let Some(action) = self.handle_key(key) {
-                            match action {
-                                InputAction::Exit => break,
-                                InputAction::Select(text) => {
-                                    selected_text = Some(text);
-                                    self.notification =
-                                        Some(Toast::success("Copied to clipboard!"));
-                                }
-                            }
-                        }
-                    }
-                    Event::Mouse(mouse) => {
-                        self.handle_mouse(mouse);
-                    }
-                    _ => {}
                 }
             }
         }
-
         self.cleanup()?;
         Ok(selected_text)
     }
 
-    /// Handles keyboard input.
-    fn handle_key(&mut self, key: crossterm::event::KeyEvent) -> Option<InputAction> {
-        if crate::ui::is_ctrl_c(&key) {
-            return Some(InputAction::Exit);
-        }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => {
-                tracing::debug!("History view exited via Escape/q");
-                Some(InputAction::Exit)
-            }
-            KeyCode::Up => {
-                self.list_state.select_previous();
-                None
-            }
-            KeyCode::Down => {
-                self.list_state.select_next();
-                None
-            }
-            KeyCode::Enter => {
-                if let Some(idx) = self.list_state.selected() {
-                    tracing::debug!("Entry selected via Enter");
-                    Some(InputAction::Select(self.entries[idx].text.clone()))
-                } else {
-                    None
-                }
-            }
-            _ => None,
-        }
-    }
-
-    /// Handles mouse events.
-    fn handle_mouse(&mut self, mouse: MouseEvent) {
-        match mouse.kind {
-            MouseEventKind::ScrollUp => {
-                self.list_state.select_previous();
-            }
-            MouseEventKind::ScrollDown => {
-                self.list_state.select_next();
-            }
-            MouseEventKind::Down(crossterm::event::MouseButton::Left) => {
-                if let Some(selected) = self.list_state.selected() {
-                    self.pending_click = Some((selected, Instant::now()));
-                    tracing::debug!("Item clicked, showing selection feedback");
-                }
-            }
-            MouseEventKind::Moved => {
-                let inner_top = self.list_area.y;
-                let inner_bottom = self.list_area.y + self.list_area.height;
-                if mouse.row < inner_top || mouse.row >= inner_bottom {
-                    self.hovered_index = None;
-                } else {
-                    let relative_y = mouse.row - inner_top;
-                    let visible_index = relative_y as usize / 2; // history items are 2 lines tall
-                    let actual_index = visible_index + self.list_state.offset();
-                    if actual_index < self.entries.len() {
-                        self.hovered_index = Some(actual_index);
-                    } else {
-                        self.hovered_index = None;
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Renders the current state of the history view.
     fn draw(&mut self) -> Result<()> {
-        let notification = self.notification.clone();
-        let hovered_index = self.hovered_index;
-        let selected_index = self.list_state.selected();
-
+        let items = &self.rows;
+        let list = &mut self.list;
+        let notification = &self.notification;
         self.terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
             render_title(frame, layout.title, "History");
-            let list_area = layout.body;
-
-            // Store list_area for mouse hit-testing
-            self.list_area = list_area;
-
-            // Build list items with styled timestamp and text
-            let items: Vec<ListItem> = self
-                .entries
-                .iter()
-                .enumerate()
-                .map(|(i, entry)| {
-                    let timestamp = Line::styled(
-                        entry.created_at.format("%Y-%m-%d %H:%M:%S").to_string(),
-                        Style::default().fg(Color::DarkGray),
-                    );
-                    let text = Line::from(entry.text.clone());
-                    let mut item = ListItem::new(vec![timestamp, text]);
-                    if Some(i) == hovered_index && Some(i) != selected_index {
-                        item = item.style(Style::default().fg(Color::White).bg(Color::DarkGray));
-                    }
-                    item
-                })
-                .collect();
-
-            // Render list with History title
-            let list = List::new(items)
-                .highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
-
-            let viewport_item_count = (list_area.height as usize / 2).max(1);
-            scroll::keep_selected_in_view(
-                &mut self.list_state,
-                viewport_item_count,
-                self.entries.len(),
-            );
-            frame.render_stateful_widget(list, list_area, &mut self.list_state);
-
+            list.render(frame, layout.body, items, 2);
             render_footer(frame, layout.footer, "↑↓ select, ↵ copy, esc/q exit");
-
-            // Render notification modal if active
-            if let Some(toast) = &notification {
+            if let Some(toast) = notification {
                 render_toast(frame, toast);
             }
         })?;
-
         Ok(())
     }
 
-    /// Cleans up terminal and restores normal mode.
     fn cleanup(&mut self) -> Result<()> {
-        if self.cleaned_up {
-            return Ok(());
+        if !self.cleaned_up {
+            self.cleaned_up = true;
+            disable_raw_mode()?;
+            execute!(
+                self.terminal.backend_mut(),
+                LeaveAlternateScreen,
+                DisableMouseCapture
+            )?;
+            self.terminal.show_cursor()?;
         }
-        self.cleaned_up = true;
-
-        disable_raw_mode()?;
-        execute!(
-            self.terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        )?;
-        self.terminal.show_cursor()?;
-        tracing::debug!("History view terminal cleanup complete");
         Ok(())
     }
-}
-
-/// Actions that can result from user input.
-enum InputAction {
-    Exit,
-    Select(String),
 }
 
 impl Drop for HistoryView {

@@ -1,21 +1,17 @@
 use crate::config::OsttConfig;
-use crate::ui::{render_app_layout, render_footer, render_title, scroll};
+use crate::ui::components::list::ListView;
+use crate::ui::components::modal::{form_dialog, ModalAction, ModalView};
+use crate::ui::{render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use ratatui::crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
-    },
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
-};
+use ratatui::prelude::*;
+use ratcn::InputState as Input;
 use std::fs;
 use std::io::{self, Stdout};
-use tui_input::backend::crossterm::EventHandler;
-use tui_input::Input;
 
 pub async fn handle_replace() -> Result<()> {
     let config = OsttConfig::load().map_err(|err| anyhow::anyhow!(err.to_string()))?;
@@ -23,19 +19,15 @@ pub async fn handle_replace() -> Result<()> {
     view.run()
 }
 
-enum InputField {
-    Source,
-    Target,
-}
-
 struct ReplaceView {
     terminal: Terminal<CrosstermBackend<Stdout>>,
-    list_state: ListState,
+    list: ListView,
     config: OsttConfig,
     input_mode: bool,
-    active_field: InputField,
     source_input: Input,
     target_input: Input,
+    modal: ModalView,
+    _input_modes: ratcn::crossterm::InputModeGuard,
     cleaned_up: bool,
 }
 
@@ -47,19 +39,16 @@ impl ReplaceView {
 
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
-        let mut list_state = ListState::default();
-        if !config.text.replace.is_empty() {
-            list_state.select(Some(0));
-        }
-
+        let input_modes = ratcn::crossterm::InputModes::new().paste().enable()?;
         Ok(Self {
             terminal,
-            list_state,
+            list: ListView::default(),
             config,
             input_mode: false,
-            active_field: InputField::Source,
             source_input: Input::default(),
             target_input: Input::default(),
+            modal: ModalView::default(),
+            _input_modes: input_modes,
             cleaned_up: false,
         })
     }
@@ -68,70 +57,40 @@ impl ReplaceView {
         loop {
             self.draw()?;
 
-            match event::read()? {
-                Event::Key(key) => {
-                    if self.input_mode {
-                        self.handle_input_mode_key(key)?;
-                    } else if self.handle_normal_mode_key(key)? {
-                        break;
+            let event = event::read()?;
+            if matches!(&event, Event::Key(key) if crate::ui::is_ctrl_c(key)) {
+                break;
+            }
+            if self.input_mode {
+                if let Some(action) = self.modal.handle_event(event) {
+                    match action {
+                        ModalAction::Changed(index) => {
+                            if index == 0 {
+                                self.source_input = self.modal.input(index).clone();
+                            } else {
+                                self.target_input = self.modal.input(index).clone();
+                            }
+                        }
+                        ModalAction::Submit(0) => self.modal.focus_input("replace", 1),
+                        ModalAction::Submit(_) | ModalAction::Accept => self.add_replace_rule()?,
+                        ModalAction::Dismiss => self.reset_input(),
                     }
                 }
-                Event::Mouse(mouse) if !self.input_mode => match mouse.kind {
-                    MouseEventKind::ScrollUp => self.list_state.select_previous(),
-                    MouseEventKind::ScrollDown => self.list_state.select_next(),
-                    _ => {}
-                },
-                _ => {}
+                continue;
             }
+            if let Event::Key(key) = &event {
+                match key.code {
+                    _ if crate::ui::is_cancel_key(key) => break,
+                    KeyCode::Char('x') | KeyCode::Delete => self.delete_selected_replace_rule()?,
+                    KeyCode::Char('a') => self.input_mode = true,
+                    _ => {}
+                }
+            }
+            self.list.handle_event(event);
         }
 
         self.cleanup()?;
         Ok(())
-    }
-
-    fn handle_normal_mode_key(&mut self, key: KeyEvent) -> Result<bool> {
-        if crate::ui::is_ctrl_c(&key) {
-            return Ok(true);
-        }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
-            KeyCode::Up => self.list_state.select_previous(),
-            KeyCode::Down => self.list_state.select_next(),
-            KeyCode::Char('x') | KeyCode::Delete => self.delete_selected_replace_rule()?,
-            KeyCode::Char('a') => {
-                self.input_mode = true;
-                self.active_field = InputField::Source;
-            }
-            _ => {}
-        }
-        Ok(false)
-    }
-
-    fn handle_input_mode_key(&mut self, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Enter => match self.active_field {
-                InputField::Source => self.active_field = InputField::Target,
-                InputField::Target => self.add_replace_rule()?,
-            },
-            KeyCode::Tab | KeyCode::BackTab => self.toggle_active_field(),
-            KeyCode::Esc => self.reset_input(),
-            _ => match self.active_field {
-                InputField::Source => {
-                    self.source_input.handle_event(&Event::Key(key));
-                }
-                InputField::Target => {
-                    self.target_input.handle_event(&Event::Key(key));
-                }
-            },
-        }
-        Ok(())
-    }
-
-    fn toggle_active_field(&mut self) {
-        self.active_field = match self.active_field {
-            InputField::Source => InputField::Target,
-            InputField::Target => InputField::Source,
-        };
     }
 
     fn add_replace_rule(&mut self) -> Result<()> {
@@ -145,36 +104,23 @@ impl ReplaceView {
             self.target_input.value().trim().to_string(),
         );
         save_replace_rules(&self.config.text.replace)?;
-        self.select_valid_index();
         self.reset_input();
         Ok(())
     }
 
     fn reset_input(&mut self) {
         self.input_mode = false;
-        self.active_field = InputField::Source;
         self.source_input = Input::default();
         self.target_input = Input::default();
     }
 
     fn delete_selected_replace_rule(&mut self) -> Result<()> {
-        let Some(index) = self.list_state.selected() else {
+        let Some(index) = self.list.selected() else {
             return Ok(());
         };
         self.config.text.replace.shift_remove_index(index);
         save_replace_rules(&self.config.text.replace)?;
-        self.select_valid_index();
         Ok(())
-    }
-
-    fn select_valid_index(&mut self) {
-        let len = self.config.text.replace.len();
-        if len == 0 {
-            self.list_state.select(None);
-            return;
-        }
-        let index = self.list_state.selected().unwrap_or(0).min(len - 1);
-        self.list_state.select(Some(index));
     }
 
     fn draw(&mut self) -> Result<()> {
@@ -183,30 +129,26 @@ impl ReplaceView {
             .text
             .replace
             .iter()
-            .map(|(source, target)| (source.clone(), target.clone()))
+            .map(|(source, target)| format!("{source} → {target}"))
             .collect::<Vec<_>>();
         let input_mode = self.input_mode;
-        let source_value = self.source_input.value().to_string();
-        let target_value = self.target_input.value().to_string();
-        let source_cursor = self.source_input.cursor();
-        let target_cursor = self.target_input.cursor();
-        let source_active = matches!(self.active_field, InputField::Source);
-        let list_state = &mut self.list_state;
+        let inputs = [&self.source_input, &self.target_input];
+        self.modal.sync(
+            input_mode.then_some("replace"),
+            if input_mode { &inputs } else { &[] },
+        )?;
+        let list = &mut self.list;
+        let modal = &mut self.modal;
 
         self.terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
             render_title(frame, layout.title, "Replace");
-            Self::render_replace_list(frame, layout.body, &replace_rules, list_state);
+            list.render(frame, layout.body, &replace_rules, 1);
 
             if input_mode {
-                Self::render_add_dialog(
-                    frame,
-                    &source_value,
-                    &target_value,
-                    source_cursor,
-                    target_cursor,
-                    source_active,
-                );
+                modal.render(frame, |state| {
+                    form_dialog("New replace", "", &["Find", "Replace"], "Add", state.offset)
+                });
                 render_footer(frame, layout.footer, "↵ next/add, tab switch, esc cancel");
             } else {
                 render_footer(
@@ -218,126 +160,6 @@ impl ReplaceView {
         })?;
 
         Ok(())
-    }
-
-    fn render_replace_list(
-        frame: &mut Frame,
-        area: Rect,
-        replace_rules: &[(String, String)],
-        list_state: &mut ListState,
-    ) {
-        let items = replace_rules
-            .iter()
-            .map(|(source, target)| ListItem::new(format!("{source} → {target}")))
-            .collect::<Vec<_>>();
-
-        let list = List::new(items)
-            .block(Block::default())
-            .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White));
-        scroll::keep_selected_in_view(list_state, area.height as usize, replace_rules.len());
-        frame.render_stateful_widget(list, area, list_state);
-    }
-
-    fn render_add_dialog(
-        frame: &mut Frame,
-        source: &str,
-        target: &str,
-        source_cursor: usize,
-        target_cursor: usize,
-        source_active: bool,
-    ) {
-        let area = crate::ui::components::dialog::centered_fixed_rect(70, 11, frame.area());
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Block::default().style(Style::default().bg(Color::DarkGray)),
-            area,
-        );
-
-        let inner = Rect {
-            x: area.x.saturating_add(2),
-            y: area.y.saturating_add(1),
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
-        };
-        let title = "New replace";
-        let escape = "esc";
-        let spacer_width = inner
-            .width
-            .saturating_sub((title.len() + escape.len()) as u16);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
-                Span::raw(" ".repeat(spacer_width as usize)),
-                Span::styled(escape, Style::default().fg(Color::Gray)),
-            ]))
-            .style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-            inner,
-        );
-
-        let source_label_area = Rect {
-            y: inner.y.saturating_add(2),
-            height: 1,
-            ..inner
-        };
-        let source_input_area = Rect {
-            y: inner.y.saturating_add(3),
-            height: 1,
-            ..inner
-        };
-        let target_label_area = Rect {
-            y: inner.y.saturating_add(5),
-            height: 1,
-            ..inner
-        };
-        let target_input_area = Rect {
-            y: inner.y.saturating_add(6),
-            height: 1,
-            ..inner
-        };
-
-        Self::render_label(frame, source_label_area, "Find");
-        Self::render_input(frame, source_input_area, source, source_active);
-        Self::render_label(frame, target_label_area, "Replace");
-        Self::render_input(frame, target_input_area, target, !source_active);
-
-        let action_area = Rect {
-            y: inner.y.saturating_add(8),
-            height: 1,
-            ..inner
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "<Add>",
-                Style::default().fg(Color::Black).bg(Color::White),
-            )))
-            .style(Style::default().fg(Color::White).bg(Color::DarkGray))
-            .alignment(Alignment::Center),
-            action_area,
-        );
-
-        let (cursor_area, cursor) = if source_active {
-            (source_input_area, source_cursor)
-        } else {
-            (target_input_area, target_cursor)
-        };
-        let cursor_x = cursor_area.x.saturating_add(cursor as u16);
-        frame.set_cursor_position(Position::new(cursor_x, cursor_area.y));
-    }
-
-    fn render_label(frame: &mut Frame, area: Rect, label: &str) {
-        frame.render_widget(
-            Paragraph::new(label).style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-            area,
-        );
-    }
-
-    fn render_input(frame: &mut Frame, area: Rect, value: &str, active: bool) {
-        let style = if active {
-            Style::default().fg(Color::Black).bg(Color::White)
-        } else {
-            Style::default().fg(Color::DarkGray).bg(Color::Gray)
-        };
-        frame.render_widget(Paragraph::new(value.to_string()).style(style), area);
     }
 
     fn cleanup(&mut self) -> Result<()> {

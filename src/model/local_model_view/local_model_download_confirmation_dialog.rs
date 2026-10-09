@@ -1,8 +1,8 @@
-use ratatui::text::Line;
-use ratatui::Frame;
+use ratcn::runtime::CellOffset;
+use ratcn::Dialog;
 
 use crate::transcription::local_models::full_model_id;
-use crate::ui::{render_dialog, DialogAction};
+use crate::ui::components::modal::{dialog, ModalMessage, ModalViewState};
 
 use super::local_model_view_helpers::format_bytes;
 use super::types::LocalModelEntry;
@@ -10,27 +10,20 @@ use super::types::LocalModelEntry;
 pub(super) struct LocalModelDownloadConfirmationDialog;
 
 impl LocalModelDownloadConfirmationDialog {
-    pub(super) fn render(
-        frame: &mut Frame<'_>,
+    pub(super) fn dialog(
         entry: &LocalModelEntry,
-        _selected_action: DialogAction,
-    ) {
-        render_dialog(
-            frame,
+        offset: CellOffset,
+    ) -> Dialog<ModalViewState, ModalMessage> {
+        dialog(
             "Start Download",
-            vec![
-                Line::from(format!("Download \"{}\"?", entry.name)),
-                Line::from(format!(
-                    "ID: {}",
-                    full_model_id(&entry.provider_id, &entry.id)
-                )),
-                Line::from(""),
-                Line::from(format!(
-                    "Size: {}",
-                    format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
-                )),
-            ],
+            format!(
+                "Download \"{}\"?\nID: {}\n\nSize: {}",
+                entry.name,
+                full_model_id(&entry.provider_id, &entry.id),
+                format_bytes(u64::from(entry.size_mb) * 1024 * 1024)
+            ),
             "Download",
-        );
+            offset,
+        )
     }
 }

@@ -4,35 +4,32 @@
 //! mouse support, selection, and inline editing.
 
 use crate::keywords::KeywordsManager;
-use crate::ui::{render_app_layout, render_footer, render_title, scroll};
+use crate::ui::components::list::ListView;
+use crate::ui::components::modal::{form_dialog, ModalAction, ModalView};
+use crate::ui::{render_app_layout, render_footer, render_title};
 use anyhow::Result;
 use ratatui::crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
-    },
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use ratatui::{
-    prelude::*,
-    widgets::{Block, List, ListItem, ListState, Paragraph},
-};
+use ratatui::prelude::*;
+use ratcn::InputState as Input;
 use std::io::{self, Stdout};
-use tui_input::backend::crossterm::EventHandler;
-use tui_input::Input;
 
 /// Interactive keywords view for managing keywords.
 pub struct KeywordsView {
     /// Terminal interface
     terminal: Terminal<CrosstermBackend<Stdout>>,
-    /// List state for managing selection and scroll
-    list_state: ListState,
+    list: ListView,
     /// List of keywords
     keywords: Vec<String>,
     /// Whether in input mode
     input_mode: bool,
     /// Text input widget
     input: Input,
+    modal: ModalView,
+    _input_modes: ratcn::crossterm::InputModeGuard,
     /// Whether cleanup has been performed
     cleaned_up: bool,
 }
@@ -52,18 +49,16 @@ impl KeywordsView {
 
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
-
-        let mut list_state = ListState::default();
-        if !keywords.is_empty() {
-            list_state.select(Some(0));
-        }
+        let input_modes = ratcn::crossterm::InputModes::new().paste().enable()?;
 
         Ok(Self {
             terminal,
-            list_state,
+            list: ListView::default(),
             keywords,
             input_mode: false,
             input: Input::default(),
+            modal: ModalView::default(),
+            _input_modes: input_modes,
             cleaned_up: false,
         })
     }
@@ -73,134 +68,56 @@ impl KeywordsView {
         loop {
             self.draw()?;
 
-            match event::read()? {
-                Event::Key(key) => {
-                    if self.input_mode {
-                        if self.handle_input_mode_key(manager, key)? {
-                            break;
-                        }
-                    } else if self.handle_normal_mode_key(manager, key)? {
-                        break;
-                    }
-                }
-                Event::Mouse(mouse) => {
-                    if !self.input_mode {
-                        match mouse.kind {
-                            MouseEventKind::ScrollUp => {
-                                self.list_state.select_previous();
-                            }
-                            MouseEventKind::ScrollDown => {
-                                self.list_state.select_next();
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
+            let event = event::read()?;
+            if matches!(&event, Event::Key(key) if crate::ui::is_ctrl_c(key)) {
+                break;
             }
+            if self.input_mode {
+                match self.modal.handle_event(event) {
+                    Some(ModalAction::Changed(index)) => {
+                        self.input = self.modal.input(index).clone();
+                        continue;
+                    }
+                    Some(ModalAction::Accept | ModalAction::Submit(_)) => {
+                        let value = self.input.value().trim();
+                        if !value.is_empty() {
+                            manager.add_keyword(value.to_string())?;
+                            self.keywords = manager.load_keywords()?;
+                        }
+                        self.reset_input();
+                    }
+                    Some(ModalAction::Dismiss) => self.reset_input(),
+                    _ => {}
+                }
+                continue;
+            }
+            if let Event::Key(key) = &event {
+                match key.code {
+                    _ if crate::ui::is_cancel_key(key) => break,
+                    KeyCode::Char('x') | KeyCode::Delete => {
+                        self.delete_selected_keyword(manager)?
+                    }
+                    KeyCode::Char('a') => self.input_mode = true,
+                    _ => {}
+                }
+            }
+            self.list.handle_event(event);
         }
 
         self.cleanup()?;
         Ok(())
     }
 
-    /// Handle key events while *not* in input mode.
-    ///
-    /// Returns `Ok(true)` if the UI should quit.
-    fn handle_normal_mode_key(
-        &mut self,
-        manager: &mut KeywordsManager,
-        key: KeyEvent,
-    ) -> Result<bool> {
-        if crate::ui::is_ctrl_c(&key) {
-            return Ok(true);
-        }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
-            KeyCode::Up => {
-                self.list_state.select_previous();
-            }
-            KeyCode::Down => {
-                self.list_state.select_next();
-            }
-            KeyCode::Char('x') | KeyCode::Delete => {
-                self.delete_selected_keyword(manager)?;
-            }
-            KeyCode::Char('a') => {
-                self.input_mode = true;
-            }
-            _ => {}
-        }
-        Ok(false)
-    }
-
-    /// Handle key events while in input mode.
-    ///
-    /// Returns `Ok(true)` if the UI should quit (never happens here, but
-    /// kept for symmetry with `handle_normal_mode_key`).
-    fn handle_input_mode_key(
-        &mut self,
-        manager: &mut KeywordsManager,
-        key: KeyEvent,
-    ) -> Result<bool> {
-        match key.code {
-            KeyCode::Enter => {
-                let value = self.input.value().trim();
-                if !value.is_empty() {
-                    manager.add_keyword(value.to_string())?;
-                    self.refresh_keywords(manager)?;
-                }
-                self.input_mode = false;
-                self.input = Input::default();
-            }
-            KeyCode::Esc => {
-                self.input_mode = false;
-                self.input = Input::default();
-            }
-            _ => {
-                // Handle all other keys with tui_input
-                let ev = Event::Key(key);
-                self.input.handle_event(&ev);
-            }
-        }
-        Ok(false)
-    }
-
-    /// Refreshes the local keywords list from the manager and adjusts selection.
-    fn refresh_keywords(&mut self, manager: &mut KeywordsManager) -> Result<()> {
-        self.keywords = manager.load_keywords()?;
-        if self.keywords.is_empty() {
-            self.list_state.select(None);
-        } else {
-            // Keep a valid selection (default to first item if none).
-            let idx = self
-                .list_state
-                .selected()
-                .unwrap_or(0)
-                .min(self.keywords.len().saturating_sub(1));
-            self.list_state.select(Some(idx));
-        }
-        Ok(())
+    fn reset_input(&mut self) {
+        self.input_mode = false;
+        self.input = Input::default();
     }
 
     /// Deletes the currently selected keyword and keeps selection in a valid state.
     fn delete_selected_keyword(&mut self, manager: &mut KeywordsManager) -> Result<()> {
-        if self.keywords.is_empty() {
-            return Ok(());
-        }
-
-        if let Some(idx) = self.list_state.selected() {
+        if let Some(idx) = self.list.selected() {
             manager.remove_keyword(idx)?;
             self.keywords = manager.load_keywords()?;
-
-            if self.keywords.is_empty() {
-                self.list_state.select(None);
-            } else if idx >= self.keywords.len() && idx > 0 {
-                self.list_state.select(Some(idx - 1));
-            } else {
-                self.list_state
-                    .select(Some(idx.min(self.keywords.len() - 1)));
-            }
         }
 
         Ok(())
@@ -210,27 +127,26 @@ impl KeywordsView {
     fn draw(&mut self) -> Result<()> {
         // Extract data before the closure to avoid borrow conflicts
         let input_mode = self.input_mode;
-        let input_value = self.input.value().to_string();
-        let input_cursor = self.input.cursor();
-        let keywords = self.keywords.clone();
-        let list_state = &mut self.list_state;
+        let inputs = [&self.input];
+        self.modal.sync(
+            input_mode.then_some("keyword"),
+            if input_mode { &inputs } else { &[] },
+        )?;
+        let keywords = &self.keywords;
+        let list = &mut self.list;
+        let modal = &mut self.modal;
 
         self.terminal.draw(|frame| {
             let layout = render_app_layout(frame, frame.area());
             render_title(frame, layout.title, "Keywords");
+            list.render(frame, layout.body, keywords, 1);
 
             if input_mode {
-                Self::draw_with_input(
-                    frame,
-                    layout.body,
-                    &keywords,
-                    &input_value,
-                    input_cursor,
-                    list_state,
-                );
+                modal.render(frame, |state| {
+                    form_dialog("New Keyword", "", &["Keyword"], "Add", state.offset)
+                });
                 render_footer(frame, layout.footer, "↵ add, esc cancel");
             } else {
-                Self::draw_normal(frame, layout.body, &keywords, list_state);
                 render_footer(
                     frame,
                     layout.footer,
@@ -240,90 +156,6 @@ impl KeywordsView {
         })?;
 
         Ok(())
-    }
-
-    /// Draws the UI when *not* in input mode.
-    fn draw_normal(frame: &mut Frame, area: Rect, keywords: &[String], list_state: &mut ListState) {
-        Self::render_keywords_list(frame, area, keywords, list_state);
-    }
-
-    /// Draws the UI when in input mode.
-    fn draw_with_input(
-        frame: &mut Frame,
-        area: Rect,
-        keywords: &[String],
-        input_value: &str,
-        input_cursor: usize,
-        list_state: &mut ListState,
-    ) {
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(5)])
-            .split(area);
-
-        let list_area = layout[0];
-        let input_area = layout[1];
-
-        Self::render_keywords_list(frame, list_area, keywords, list_state);
-
-        frame.render_widget(
-            Block::default().style(Style::default().bg(Color::DarkGray)),
-            input_area,
-        );
-        let input_inner = Rect {
-            x: input_area.x.saturating_add(2),
-            y: input_area.y.saturating_add(1),
-            width: input_area.width.saturating_sub(4),
-            height: input_area.height.saturating_sub(2),
-        };
-
-        let title = "New Keyword";
-        let escape = "esc";
-        let spacer_width = input_inner
-            .width
-            .saturating_sub((title.len() + escape.len()) as u16);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
-                Span::raw(" ".repeat(spacer_width as usize)),
-                Span::styled(escape, Style::default().fg(Color::White)),
-            ])),
-            input_inner,
-        );
-
-        let input_value_area = Rect {
-            y: input_inner.y.saturating_add(2),
-            height: 1,
-            ..input_inner
-        };
-        frame.render_widget(
-            Paragraph::new(input_value).style(Style::default().fg(Color::DarkGray).bg(Color::Gray)),
-            input_value_area,
-        );
-
-        // Cursor position based on tui_input cursor
-        let cursor_x = input_value_area.x + input_cursor as u16;
-        let cursor_y = input_value_area.y;
-        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
-    }
-
-    /// Renders the keywords list with selection.
-    fn render_keywords_list(
-        frame: &mut Frame,
-        area: Rect,
-        keywords: &[String],
-        list_state: &mut ListState,
-    ) {
-        let items: Vec<ListItem> = keywords
-            .iter()
-            .map(|keyword| ListItem::new(keyword.clone()))
-            .collect();
-
-        let list =
-            List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
-
-        scroll::keep_selected_in_view(list_state, area.height as usize, keywords.len());
-        frame.render_stateful_widget(list, area, list_state);
     }
 
     /// Cleans up terminal.

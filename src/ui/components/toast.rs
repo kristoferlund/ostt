@@ -1,16 +1,12 @@
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Color, Style};
-
-use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
+use ratcn::{ToasterState, ToasterWidget};
 use std::time::{Duration, Instant};
 
 const TOAST_DURATION: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug)]
 pub struct Toast {
-    message: String,
-    style: ToastStyle,
+    toasts: ToasterState<'static>,
     created_at: Instant,
 }
 
@@ -20,17 +16,18 @@ impl Toast {
     }
 
     pub fn success(message: impl Into<String>) -> Self {
-        Self {
-            message: message.into(),
-            style: ToastStyle::success(),
-            created_at: Instant::now(),
-        }
+        Self::from_toast(ratcn::toast::Toast::success(message.into()))
     }
 
     pub fn error(message: impl Into<String>) -> Self {
+        Self::from_toast(ratcn::toast::Toast::error(message.into()))
+    }
+
+    fn from_toast(toast: ratcn::toast::Toast<'static>) -> Self {
+        let mut toasts = ToasterState::default();
+        toasts.push(toast.duration(TOAST_DURATION), Duration::ZERO);
         Self {
-            message: message.into(),
-            style: ToastStyle::error(),
+            toasts,
             created_at: Instant::now(),
         }
     }
@@ -40,63 +37,44 @@ impl Toast {
     }
 
     pub fn message(&self) -> &str {
-        &self.message
-    }
-
-    pub fn style(&self) -> ToastStyle {
-        self.style
-    }
-}
-
-#[derive(Clone, Copy, Debug)]
-pub struct ToastStyle {
-    pub fg: Color,
-    pub bg: Color,
-}
-
-impl ToastStyle {
-    pub const fn default() -> Self {
-        Self::success()
-    }
-
-    pub const fn success() -> Self {
-        Self {
-            fg: Color::Black,
-            bg: Color::Green,
-        }
-    }
-
-    pub const fn error() -> Self {
-        Self {
-            fg: Color::Black,
-            bg: Color::Red,
-        }
+        self.toasts.entries()[0].toast().title()
     }
 }
 
 pub fn render_toast(frame: &mut Frame<'_>, toast: &Toast) {
-    let style = toast.style();
     let screen = frame.area();
-    let width = (toast.message().len() as u16 + 4)
-        .clamp(20, 50)
-        .min(screen.width);
-    let height = 3.min(screen.height);
-    let area = Rect {
-        x: screen.x + screen.width.saturating_sub(width + 2),
-        y: screen.y + screen.height.saturating_sub(height + 2),
-        width,
-        height,
-    };
-    frame.render_widget(Clear, area);
     frame.render_widget(
-        Paragraph::new(toast.message().to_string())
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .style(Style::default().fg(style.fg).bg(style.bg)),
-            )
-            .style(Style::default().fg(style.fg).bg(style.bg))
-            .alignment(Alignment::Center),
-        area,
+        ToasterWidget::new(&toast.toasts, toast.created_at.elapsed()),
+        screen,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn native_toasts_show_feedback_and_expire_after_two_seconds() {
+        for mut toast in [Toast::success("Saved"), Toast::error("Failed")] {
+            assert!(!toast.is_expired());
+            let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+            terminal.draw(|frame| render_toast(frame, &toast)).unwrap();
+            assert!(terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .any(|cell| cell.symbol() != " "));
+            toast.created_at -= TOAST_DURATION;
+            assert!(toast.is_expired());
+            terminal.draw(|frame| render_toast(frame, &toast)).unwrap();
+            assert!(terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .all(|cell| cell.symbol() == " "));
+        }
+    }
 }
