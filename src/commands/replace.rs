@@ -6,7 +6,6 @@ use anyhow::Result;
 use ratatui::layout::Rect;
 use ratcn::{
     runtime::{CellOffset, DeclareCtx, Event, FocusState, KeyCode, ModalState, Ratcn},
-    terminal::Session,
     Button, Dialog, Input, InputState,
 };
 use std::fs;
@@ -15,7 +14,7 @@ const FORM: &str = "replace";
 
 pub async fn handle_replace() -> Result<()> {
     let config = OsttConfig::load().map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    ReplaceView::new(config)?.run()
+    run(config)
 }
 
 struct State {
@@ -82,85 +81,75 @@ fn runtime() -> Ratcn<State, Msg> {
         .modals(|state| &state.modals)
 }
 
-struct ReplaceView {
-    session: Session,
-    state: State,
-    ratcn: Ratcn<State, Msg>,
+/// Every return restores the terminal.
+fn run(config: OsttConfig) -> Result<()> {
+    let mut state = State::new(config);
+    let mut session = session::open()?;
+    let mut ratcn = runtime();
+    loop {
+        session::draw(
+            &mut session,
+            &mut ratcn,
+            &state,
+            chrome(&state),
+            |ctx, body| declare(ctx, body, &state),
+        )?;
+        let Some(event) = session::next_event(&mut session, None)? else {
+            continue;
+        };
+        let msg = match session::route(&mut session, &mut ratcn, &state, event)? {
+            Routed::Msg(msg) => msg,
+            Routed::Ignored(event) if session::is_cancel(&event) => break,
+            Routed::Ignored(Event::Key(key)) => match key.code {
+                KeyCode::Char('a') => Msg::Open,
+                KeyCode::Char('x') | KeyCode::Delete => Msg::Delete,
+                _ => continue,
+            },
+            Routed::Ignored(_) | Routed::Redraw => continue,
+            Routed::Quit => break,
+        };
+        if update(&mut state, msg)? {
+            save_replace_rules(&state.config.text.replace)?;
+        }
+    }
+    Ok(())
 }
 
-impl ReplaceView {
-    fn new(config: OsttConfig) -> Result<Self> {
-        Ok(Self {
-            session: session::open()?,
-            state: State::new(config),
-            ratcn: runtime(),
-        })
-    }
-
-    fn run(mut self) -> Result<()> {
-        loop {
-            let state = &self.state;
-            session::draw(
-                &mut self.session,
-                &mut self.ratcn,
-                state,
-                chrome(state),
-                |ctx, body| declare(ctx, body, state),
-            )?;
-            let Some(event) = session::next_event(&mut self.session, None)? else {
-                continue;
-            };
-            let msg = match session::route(&mut self.session, &mut self.ratcn, &self.state, event)?
-            {
-                Routed::Msg(msg) => msg,
-                Routed::Ignored(event) if session::is_cancel(&event) => break,
-                Routed::Ignored(Event::Key(key)) => match key.code {
-                    KeyCode::Char('a') => Msg::Open,
-                    KeyCode::Char('x') | KeyCode::Delete => Msg::Delete,
-                    _ => continue,
-                },
-                Routed::Ignored(_) | Routed::Redraw => continue,
-                Routed::Quit => break,
-            };
-            self.update(msg)?;
+/// Returns whether the rules changed and need saving. Unlike keywords, which
+/// take their manager, saving here writes the real config path, so `run` does it.
+fn update(state: &mut State, msg: Msg) -> Result<bool> {
+    match msg {
+        Msg::Focus(focus) => state.focus = focus,
+        Msg::Select(index) => state.selected = Some(index),
+        Msg::Source(input) => state.source_input = input,
+        Msg::Target(input) => state.target_input = input,
+        Msg::FormMoved(offset) => state.form_offset = offset,
+        Msg::Open => {
+            state.form_offset = CellOffset::default();
+            state.modals.open(FORM, &mut state.focus)?;
         }
-        Ok(())
-    }
-
-    fn update(&mut self, msg: Msg) -> Result<()> {
-        let state = &mut self.state;
-        match msg {
-            Msg::Focus(focus) => state.focus = focus,
-            Msg::Select(index) => state.selected = Some(index),
-            Msg::Source(input) => state.source_input = input,
-            Msg::Target(input) => state.target_input = input,
-            Msg::FormMoved(offset) => state.form_offset = offset,
-            Msg::Open => {
-                state.form_offset = CellOffset::default();
-                state.modals.open(FORM, &mut state.focus)?;
+        Msg::Next => state.focus = FocusState::intent([FORM, "input-1"]),
+        Msg::Add => {
+            let source = state.source_input.value().trim();
+            let changed = !source.is_empty();
+            if changed {
+                let target = state.target_input.value().trim().to_string();
+                state.config.text.replace.insert(source.to_string(), target);
+                state.refresh_rules();
             }
-            Msg::Next => state.focus = FocusState::intent([FORM, "input-1"]),
-            Msg::Add => {
-                let source = state.source_input.value().trim();
-                if !source.is_empty() {
-                    let target = state.target_input.value().trim().to_string();
-                    state.config.text.replace.insert(source.to_string(), target);
-                    save_replace_rules(&state.config.text.replace)?;
-                    state.refresh_rules();
-                }
-                state.close_form();
-            }
-            Msg::Delete => {
-                if let Some(index) = state.selected {
-                    state.config.text.replace.shift_remove_index(index);
-                    save_replace_rules(&state.config.text.replace)?;
-                    state.refresh_rules();
-                }
-            }
-            Msg::Dismiss => state.close_form(),
+            state.close_form();
+            return Ok(changed);
         }
-        Ok(())
+        Msg::Delete => {
+            if let Some(index) = state.selected {
+                state.config.text.replace.shift_remove_index(index);
+                state.refresh_rules();
+                return Ok(true);
+            }
+        }
+        Msg::Dismiss => state.close_form(),
     }
+    Ok(false)
 }
 
 fn chrome(state: &State) -> Chrome<'static> {
@@ -367,7 +356,7 @@ width = 90
     #[test]
     fn enter_advances_from_find_to_replace_before_adding() {
         let mut state = State::new(OsttConfig::default());
-        state.modals.open(FORM, &mut state.focus).unwrap();
+        update(&mut state, Msg::Open).unwrap();
         let mut ratcn = runtime();
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
@@ -390,11 +379,66 @@ width = 90
             ratcn.handle_event(KeyCode::Enter, &state),
             EventResult::Emit(Msg::Next)
         ));
-        state.focus = FocusState::intent([FORM, "input-1"]);
+        assert!(!update(&mut state, Msg::Next).unwrap());
         paint(&state, &mut ratcn);
         assert!(matches!(
             ratcn.handle_event(KeyCode::Enter, &state),
             EventResult::Emit(Msg::Add)
         ));
+    }
+
+    /// A rule with a Find text is added, reported for saving, and the form closes.
+    #[test]
+    fn add_with_find_inserts_the_rule_and_closes_the_form() {
+        let mut state = State::new(OsttConfig::default());
+        update(&mut state, Msg::Open).unwrap();
+        update(&mut state, Msg::Source(InputState::new("api"))).unwrap();
+        update(&mut state, Msg::Target(InputState::new("API"))).unwrap();
+
+        assert!(update(&mut state, Msg::Add).unwrap());
+        assert_eq!(state.config.text.replace, replace_rules(&[("api", "API")]));
+        assert_eq!(state.rules, ["api → API"]);
+        assert!(!state.modals.is_open(FORM));
+    }
+
+    /// Delete must remove the selected rule and report it for saving, and the
+    /// selection must stay on an existing rule.
+    #[test]
+    fn delete_removes_the_selected_rule_and_keeps_selection_in_range() {
+        let mut config = OsttConfig::default();
+        config.text.replace = replace_rules(&[("api", "API"), ("ostt", "OSTT")]);
+        let mut state = State::new(config);
+        state.selected = Some(1);
+
+        assert!(update(&mut state, Msg::Delete).unwrap());
+        assert_eq!(state.config.text.replace, replace_rules(&[("api", "API")]));
+        assert_eq!(state.rules, ["api → API"]);
+        assert_eq!(state.selected, Some(0));
+    }
+
+    /// Cancelling the form closes it and forgets what was typed.
+    #[test]
+    fn dismiss_closes_the_form_and_clears_both_inputs() {
+        let mut state = State::new(OsttConfig::default());
+        update(&mut state, Msg::Open).unwrap();
+        update(&mut state, Msg::Source(InputState::new("api"))).unwrap();
+        update(&mut state, Msg::Target(InputState::new("API"))).unwrap();
+
+        assert!(!update(&mut state, Msg::Dismiss).unwrap());
+        assert!(!state.modals.is_open(FORM));
+        assert_eq!(state.source_input.value(), "");
+        assert_eq!(state.target_input.value(), "");
+    }
+
+    /// An empty Find adds nothing, so nothing is written to the config.
+    #[test]
+    fn add_without_find_changes_nothing() {
+        let mut state = State::new(OsttConfig::default());
+        update(&mut state, Msg::Open).unwrap();
+        update(&mut state, Msg::Target(InputState::new("API"))).unwrap();
+
+        assert!(!update(&mut state, Msg::Add).unwrap());
+        assert!(state.config.text.replace.is_empty());
+        assert!(!state.modals.is_open(FORM));
     }
 }

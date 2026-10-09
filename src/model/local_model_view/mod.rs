@@ -250,19 +250,13 @@ impl ModelsView {
     fn start_custom_download(&mut self, mut entry: RegistryEntry) {
         let id = self.state.id_input.value().trim();
         let name = self.state.name_input.value().trim();
-        let error = if !is_safe_model_id(id) {
-            Some("Model ID must use lowercase letters, numbers, '.', '_' or '-'".to_string())
-        } else if self.state.entries.iter().any(|entry| entry.id == id) {
-            Some(format!("Model ID '{id}' already exists"))
-        } else if name.is_empty() {
-            Some("Model name is required".to_string())
-        } else {
+        let error = custom_model_error(&self.state.entries, id, name).or_else(|| {
             entry.id = id.to_string();
             entry.name = name.to_string();
             validate_custom_model_registration(&entry)
                 .err()
                 .map(|error| error.to_string())
-        };
+        });
         if let Some(error) = error {
             self.state.toast(Toast::error(error));
             return;
@@ -347,6 +341,19 @@ fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: ratatui::layout::Rect, st
     }
     if let (Some(id), Some(dialog)) = (state.mode.modal_id(), dialogs::dialog(state)) {
         ctx.modal(id, dialog, ctx.area());
+    }
+}
+
+/// The ID becomes a file path, so it must be safe and unused.
+fn custom_model_error(entries: &[LocalModelEntry], id: &str, name: &str) -> Option<String> {
+    if !is_safe_model_id(id) {
+        Some("Model ID must use lowercase letters, numbers, '.', '_' or '-'".to_string())
+    } else if entries.iter().any(|entry| entry.id == id) {
+        Some(format!("Model ID '{id}' already exists"))
+    } else if name.is_empty() {
+        Some("Model name is required".to_string())
+    } else {
+        None
     }
 }
 
@@ -928,5 +935,126 @@ mod tests {
             tui.mode,
             Mode::ConfirmDelete { ref entry, .. } if entry.id == "missing"
         ));
+    }
+
+    fn entry(id: &str) -> LocalModelEntry {
+        LocalModelEntry {
+            id: id.to_string(),
+            provider_id: "whisper".to_string(),
+            name: id.to_string(),
+            description: String::new(),
+            size_mb: 1,
+            is_downloaded: true,
+            is_active: false,
+            is_daemon_loaded: false,
+            is_available_in_registry: true,
+            languages: Vec::new(),
+            url: String::new(),
+            recommended_hardware: None,
+            category: None,
+            sha256: None,
+            group_id: None,
+        }
+    }
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(code.into())
+    }
+
+    fn downloading() -> Mode {
+        Mode::Downloading(DownloadState {
+            model_id: "base".to_string(),
+            provider_id: "whisper".to_string(),
+            downloaded_bytes: 0,
+            total_bytes: 0,
+            progress: 0.0,
+            speed_mbps: 0.0,
+            status: String::new(),
+            is_custom: false,
+        })
+    }
+
+    /// y/n answer both confirmation dialogs, as their footers promise.
+    #[test]
+    fn y_and_n_answer_confirmation_dialogs() {
+        for mode in [
+            Mode::ConfirmDownload { entry: entry("a") },
+            Mode::ConfirmDelete { entry: entry("a") },
+        ] {
+            assert!(matches!(
+                dialog_shortcut(&mode, &key(KeyCode::Char('y'))),
+                Some(Msg::Accept)
+            ));
+            assert!(matches!(
+                dialog_shortcut(&mode, &key(KeyCode::Char('n'))),
+                Some(Msg::Dismiss)
+            ));
+        }
+    }
+
+    /// The list's shortcuts open the matching flows, and Info closes like a dialog.
+    #[test]
+    fn browse_shortcuts_and_info_dismissal() {
+        for code in [KeyCode::Char('x'), KeyCode::Char('d'), KeyCode::Delete] {
+            assert!(matches!(
+                shortcut(&Mode::Browse, &key(code)),
+                Some(Msg::Delete)
+            ));
+        }
+        assert!(matches!(
+            shortcut(&Mode::Browse, &key(KeyCode::Char('i'))),
+            Some(Msg::Info)
+        ));
+        assert!(matches!(
+            shortcut(&Mode::Browse, &key(KeyCode::Char('c'))),
+            Some(Msg::Custom)
+        ));
+        let info = Mode::Info { entry: entry("a") };
+        for code in [KeyCode::Esc, KeyCode::Char('q')] {
+            assert!(matches!(shortcut(&info, &key(code)), Some(Msg::Dismiss)));
+        }
+    }
+
+    /// A failed delete must show its error in place of the confirmation, at
+    /// the default position, and returning to the list must close any dialog.
+    #[test]
+    fn set_mode_swaps_and_closes_the_modal() {
+        let mut state = State::new(vec![entry("a")]);
+        state.set_mode(Mode::ConfirmDelete { entry: entry("a") });
+        state.dialog_offset = CellOffset { x: 3, y: 2 };
+
+        state.set_mode(Mode::Error {
+            message: "failed".to_string(),
+        });
+        assert_eq!(state.modals.top().map(|id| id.as_str()), Some("error"));
+        assert_eq!(state.dialog_offset, CellOffset::default());
+
+        state.set_mode(Mode::Browse);
+        assert_eq!(state.modals.top(), None);
+    }
+
+    /// Progress ticks re-set the same mode; they must not snap a dragged dialog back.
+    #[test]
+    fn set_mode_with_the_same_modal_keeps_the_dragged_dialog_offset() {
+        let mut state = State::new(vec![entry("a")]);
+        state.set_mode(downloading());
+        state.dialog_offset = CellOffset { x: 3, y: 2 };
+
+        state.set_mode(downloading());
+        assert_eq!(state.modals.top().map(|id| id.as_str()), Some("progress"));
+        assert_eq!(state.dialog_offset, CellOffset { x: 3, y: 2 });
+    }
+
+    /// The ID becomes a file path, so unsafe or taken IDs and missing names are refused.
+    #[test]
+    fn custom_model_error_refuses_unsafe_taken_or_unnamed_models() {
+        let entries = vec![LocalModelEntry {
+            name: "Base".to_string(),
+            ..entry("base")
+        }];
+        assert!(custom_model_error(&entries, "a/b", "Evil").is_some());
+        assert!(custom_model_error(&entries, "base", "Other").is_some());
+        assert!(custom_model_error(&entries, "mine", "").is_some());
+        assert_eq!(custom_model_error(&entries, "mine", "Mine"), None);
     }
 }

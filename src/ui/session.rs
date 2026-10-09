@@ -112,18 +112,23 @@ pub(crate) fn route<S, M>(
     state: &S,
     event: Event,
 ) -> io::Result<Routed<M>> {
-    let quit = is_ctrl_c(&event);
     let result = ratcn.handle_event(event.clone(), state);
-    match ratcn.take_clipboard() {
-        Some(text) => session.set_clipboard(&text)?,
-        None if quit => return Ok(Routed::Quit),
-        None => {}
+    let copied = ratcn.take_clipboard();
+    if let Some(text) = &copied {
+        session.set_clipboard(text)?;
     }
-    Ok(match result {
+    Ok(classify(event, result, copied.is_some()))
+}
+
+fn classify<M>(event: Event, result: EventResult<M>, copied: bool) -> Routed<M> {
+    if is_ctrl_c(&event) && !copied {
+        return Routed::Quit;
+    }
+    match result {
         EventResult::Emit(msg) => Routed::Msg(msg),
         EventResult::Consumed => Routed::Redraw,
         EventResult::Ignored => Routed::Ignored(event),
-    })
+    }
 }
 
 fn is_ctrl_c(event: &Event) -> bool {
@@ -133,4 +138,60 @@ fn is_ctrl_c(event: &Event) -> bool {
 pub(crate) fn is_cancel(event: &Event) -> bool {
     is_ctrl_c(event)
         || matches!(event, Event::Key(key) if matches!(key.code, KeyCode::Esc | KeyCode::Char('q')))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratcn::runtime::{KeyEvent, Modifiers};
+
+    fn ctrl_c() -> Event {
+        Event::Key(KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Modifiers::default()
+            },
+        })
+    }
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(code.into())
+    }
+
+    /// Ctrl+C must always leave a screen unless it copied a text selection.
+    #[test]
+    fn ctrl_c_quits_only_when_nothing_was_copied() {
+        let routed = classify(ctrl_c(), EventResult::<()>::Consumed, false);
+        assert!(matches!(routed, Routed::Quit));
+        let routed = classify(ctrl_c(), EventResult::<()>::Consumed, true);
+        assert!(matches!(routed, Routed::Redraw));
+        let routed = classify(key(KeyCode::Char('c')), EventResult::<()>::Ignored, false);
+        assert!(matches!(routed, Routed::Ignored(_)));
+    }
+
+    /// A key a component consumed must not reach app shortcuts as well.
+    #[test]
+    fn consumed_keys_redraw_and_only_ignored_keys_pass_through() {
+        assert!(matches!(
+            classify(key(KeyCode::Char('x')), EventResult::<()>::Consumed, false),
+            Routed::Redraw
+        ));
+        assert!(matches!(
+            classify(key(KeyCode::Char('x')), EventResult::Emit(7), false),
+            Routed::Msg(7)
+        ));
+        assert!(matches!(
+            classify(key(KeyCode::Char('x')), EventResult::<()>::Ignored, false),
+            Routed::Ignored(Event::Key(k)) if k.code == KeyCode::Char('x')
+        ));
+    }
+
+    /// Esc and q leave every management screen; other letters stay shortcuts.
+    #[test]
+    fn esc_and_q_cancel_but_other_letters_do_not() {
+        assert!(is_cancel(&key(KeyCode::Esc)));
+        assert!(is_cancel(&key(KeyCode::Char('q'))));
+        assert!(!is_cancel(&key(KeyCode::Char('x'))));
+    }
 }
