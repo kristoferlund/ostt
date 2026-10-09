@@ -15,7 +15,7 @@ pub fn render_footer(frame: &mut Frame<'_>, area: Rect, text: &'static str) {
 pub(crate) fn render_themed_footer(
     frame: &mut Frame<'_>,
     area: Rect,
-    text: &'static str,
+    text: &str,
     theme: &ratcn::Theme,
 ) {
     render_styled_footer(
@@ -28,7 +28,7 @@ pub(crate) fn render_themed_footer(
     );
 }
 
-fn render_styled_footer(frame: &mut Frame<'_>, area: Rect, text: &'static str, style: Style) {
+fn render_styled_footer(frame: &mut Frame<'_>, area: Rect, text: &str, style: Style) {
     frame.render_widget(
         Paragraph::new(text)
             .alignment(Alignment::Center)

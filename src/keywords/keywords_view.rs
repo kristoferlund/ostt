@@ -1,32 +1,37 @@
-//! Keyword management: app-owned state and messages, one runtime for list and form.
+//! Keyword management: one runtime for the list and the add form.
 
 use crate::keywords::KeywordsManager;
 use crate::ui::components::list::{clamp_selection, selection_list};
-use crate::ui::components::modal::{dialog, form_dialog};
-use crate::ui::{render_app_layout, render_themed_footer, render_themed_title, session};
+use crate::ui::components::modal::form_dialog;
+use crate::ui::session::{self, Chrome, Routed};
 use anyhow::Result;
+use ratatui::layout::Rect;
 use ratcn::{
-    runtime::{CellOffset, Event, EventResult, FocusState, KeyCode, ModalState, Ratcn},
+    runtime::{CellOffset, DeclareCtx, Event, FocusState, KeyCode, ModalState, Ratcn},
     terminal::Session,
-    Button, Input, InputState,
+    Button, Dialog, Input, InputState,
 };
+
+const FORM: &str = "keyword";
 
 #[derive(Default)]
 struct State {
     focus: FocusState,
     modals: ModalState,
-    selected: Option<usize>,
+    form_offset: CellOffset,
     keywords: Vec<String>,
+    selected: Option<usize>,
     input: InputState,
-    offset: CellOffset,
 }
 
 enum Msg {
     Focus(FocusState),
     Select(usize),
     Input(InputState),
-    Move(CellOffset),
+    FormMoved(CellOffset),
+    Open,
     Add,
+    Delete,
     Dismiss,
 }
 
@@ -44,14 +49,15 @@ pub struct KeywordsView {
 }
 
 impl KeywordsView {
-    /// Open the command's adaptive terminal session.
     pub fn new(keywords: Vec<String>) -> Result<Self> {
+        let mut state = State {
+            keywords,
+            ..State::default()
+        };
+        clamp_selection(&mut state.selected, state.keywords.len());
         Ok(Self {
             session: session::open()?,
-            state: State {
-                keywords,
-                ..State::default()
-            },
+            state,
             ratcn: runtime(),
         })
     }
@@ -59,163 +65,152 @@ impl KeywordsView {
     /// Consume the view so every return restores the terminal.
     pub fn run(mut self, manager: &mut KeywordsManager) -> Result<()> {
         loop {
-            self.draw()?;
-            let Some(event) = session::next(&mut self.session, None)? else {
+            let state = &self.state;
+            session::draw(
+                &mut self.session,
+                &mut self.ratcn,
+                state,
+                chrome(state),
+                |ctx, body| declare(ctx, body, state),
+            )?;
+            let Some(event) = session::next_event(&mut self.session, None)? else {
                 continue;
             };
-            let result = self.ratcn.handle_event(event.clone(), &self.state);
-            if let Some(text) = self.ratcn.take_clipboard() {
-                self.session.set_clipboard(&text)?;
-            } else if session::is_ctrl_c(&event) {
-                break;
-            }
-            match result {
-                EventResult::Emit(msg) => self.update(manager, msg)?,
-                EventResult::Consumed => {}
-                EventResult::Ignored => match event {
-                    _ if session::is_cancel(&event) => break,
-                    Event::Key(key) => match key.code {
-                        KeyCode::Char('a') => {
-                            self.state.offset = CellOffset::default();
-                            self.state.modals.open("keyword", &mut self.state.focus)?;
-                        }
-                        KeyCode::Char('x') | KeyCode::Delete => {
-                            if let Some(index) = self.state.selected {
-                                manager.remove_keyword(index)?;
-                                self.state.keywords = manager.load_keywords()?;
-                            }
-                        }
-                        _ => {}
-                    },
-                    _ => {}
+            let msg = match session::route(&mut self.session, &mut self.ratcn, &self.state, event)?
+            {
+                Routed::Msg(msg) => msg,
+                Routed::Ignored(event) if session::is_cancel(&event) => break,
+                Routed::Ignored(Event::Key(key)) => match key.code {
+                    KeyCode::Char('a') => Msg::Open,
+                    KeyCode::Char('x') | KeyCode::Delete => Msg::Delete,
+                    _ => continue,
                 },
-            }
+                Routed::Ignored(_) | Routed::Redraw => continue,
+                Routed::Quit => break,
+            };
+            self.update(manager, msg)?;
         }
         Ok(())
     }
 
     fn update(&mut self, manager: &mut KeywordsManager, msg: Msg) -> Result<()> {
+        let state = &mut self.state;
         match msg {
-            Msg::Focus(focus) => self.state.focus = focus,
-            Msg::Select(index) => self.state.selected = Some(index),
-            Msg::Input(input) => self.state.input = input,
-            Msg::Move(offset) => self.state.offset = offset,
+            Msg::Focus(focus) => state.focus = focus,
+            Msg::Select(index) => state.selected = Some(index),
+            Msg::Input(input) => state.input = input,
+            Msg::FormMoved(offset) => state.form_offset = offset,
+            Msg::Open => {
+                state.form_offset = CellOffset::default();
+                state.modals.open(FORM, &mut state.focus)?;
+            }
             Msg::Add => {
-                let value = self.state.input.value().trim();
+                let value = state.input.value().trim();
                 if !value.is_empty() {
                     manager.add_keyword(value.to_string())?;
-                    self.state.keywords = manager.load_keywords()?;
+                    state.keywords = manager.load_keywords()?;
                 }
-                self.close_form();
+                state.close_form();
             }
-            Msg::Dismiss => self.close_form(),
+            Msg::Delete => {
+                if let Some(index) = state.selected {
+                    manager.remove_keyword(index)?;
+                    state.keywords = manager.load_keywords()?;
+                }
+            }
+            Msg::Dismiss => state.close_form(),
         }
-        Ok(())
-    }
-
-    fn close_form(&mut self) {
-        self.state.modals.close(&mut self.state.focus);
-        self.state.input = InputState::default();
-    }
-
-    fn draw(&mut self) -> Result<()> {
-        clamp_selection(&mut self.state.selected, self.state.keywords.len());
-        let theme = session::theme(&self.session);
-        let state = &self.state;
-        let ratcn = &mut self.ratcn;
-        self.session
-            .terminal_mut()
-            .draw(|frame| render_keywords(frame, state, ratcn, &theme))?;
-        self.session.set_pointer_shape(self.ratcn.pointer_shape())?;
+        clamp_selection(&mut state.selected, state.keywords.len());
         Ok(())
     }
 }
 
-fn render_keywords(
-    frame: &mut ratatui::Frame<'_>,
-    state: &State,
-    ratcn: &mut Ratcn<State, Msg>,
-    theme: &ratcn::Theme,
-) {
-    session::paint_background(frame, theme);
-    let area = frame.area();
-    let layout = render_app_layout(frame, frame.area());
-    render_themed_title(frame, layout.title, "Keywords", theme);
-    ratcn.render(frame, area, state, theme, |ctx| {
-        ctx.component(
-            "list",
-            selection_list(
-                &state.keywords,
-                1,
-                |s: &State| s.selected,
-                Msg::Select,
-                Msg::Select,
-            ),
-            layout.body,
-        );
-        if state.modals.is_open("keyword") {
-            let form = dialog("New Keyword", "", Button::new("Add").on_press(|| Msg::Add))
-                .offset(state.offset)
-                .on_offset_change(Msg::Move)
-                .on_dismiss(|| Msg::Dismiss);
-            ctx.modal(
-                "keyword",
-                form_dialog(
-                    form,
-                    "",
-                    vec![Input::new()
-                        .title("Keyword")
-                        .value(|s: &State| &s.input, Msg::Input)
-                        .on_submit(|| Msg::Add)],
-                ),
-                area,
-            );
-        }
-    });
-    render_themed_footer(
-        frame,
-        layout.footer,
-        if state.modals.is_open("keyword") {
+impl State {
+    fn close_form(&mut self) {
+        self.modals.close(&mut self.focus);
+        self.input = InputState::default();
+    }
+}
+
+fn chrome(state: &State) -> Chrome<'static> {
+    Chrome {
+        title: Some("Keywords"),
+        footer: if state.modals.is_open(FORM) {
             "↵ add, esc cancel"
         } else {
             "↑↓ select, x/del delete, a add, esc/q exit"
         },
-        theme,
+        toasts: None,
+    }
+}
+
+fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect, state: &State) {
+    ctx.component(
+        "list",
+        selection_list(
+            &state.keywords,
+            1,
+            |s: &State| s.selected,
+            Msg::Select,
+            Msg::Select,
+        ),
+        body,
     );
+    if state.modals.is_open(FORM) {
+        let form = Dialog::new()
+            .title("New Keyword")
+            .offset(state.form_offset)
+            .on_offset_change(Msg::FormMoved)
+            .on_dismiss(|| Msg::Dismiss)
+            .action("add", Button::new("Add").on_press(|| Msg::Add));
+        let input = Input::new()
+            .title("Keyword")
+            .value(|s: &State| &s.input, Msg::Input)
+            .on_submit(|| Msg::Add);
+        ctx.modal(FORM, form_dialog(form, "", vec![input]), ctx.area());
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
+    use ratcn::runtime::EventResult;
 
+    /// Shortcut letters are text while the form is open, and closing it hands
+    /// the keys back to the list the user left.
     #[test]
-    fn modal_edits_the_app_input_without_moving_the_background_selection() {
+    fn open_form_captures_shortcut_keys_and_returns_focus_to_the_list() {
         let mut state = State {
-            selected: Some(1),
             keywords: vec!["one".into(), "two".into()],
+            selected: Some(1),
             focus: FocusState::intent(["list"]),
             ..State::default()
         };
         let mut ratcn = runtime();
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
-        state.modals.open("keyword", &mut state.focus).unwrap();
-        terminal
-            .draw(|frame| render_keywords(frame, &state, &mut ratcn, &ratcn::Theme::default_dark()))
-            .unwrap();
-        let EventResult::Emit(Msg::Input(input)) =
-            ratcn.handle_event(Event::Paste("日本語\nkeyword".into()), &state)
-        else {
-            panic!("paste must edit the form, not the list")
+        let mut paint = |state: &State, ratcn: &mut Ratcn<State, Msg>| {
+            terminal
+                .draw(|frame| {
+                    session::render(
+                        frame,
+                        ratcn,
+                        state,
+                        &ratcn::Theme::default_dark(),
+                        chrome(state),
+                        |ctx, body| declare(ctx, body, state),
+                    )
+                })
+                .unwrap();
         };
-        state.input = input;
-        assert_eq!(state.input.value(), "日本語 keyword");
-        assert_eq!(state.selected, Some(1));
-        state.modals.close(&mut state.focus);
-        assert_eq!(state.focus, FocusState::intent(["list"]));
-        terminal
-            .draw(|frame| render_keywords(frame, &state, &mut ratcn, &ratcn::Theme::default_dark()))
-            .unwrap();
+        state.modals.open(FORM, &mut state.focus).unwrap();
+        paint(&state, &mut ratcn);
+        assert!(matches!(
+            ratcn.handle_event(KeyCode::Char('x'), &state),
+            EventResult::Emit(Msg::Input(_))
+        ));
+        state.close_form();
+        paint(&state, &mut ratcn);
         assert!(matches!(
             ratcn.handle_event(KeyCode::Up, &state),
             EventResult::Emit(Msg::Select(0))

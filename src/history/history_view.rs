@@ -2,20 +2,19 @@
 
 use crate::history::TranscriptionEntry;
 use crate::ui::components::list::{clamp_selection, selection_list};
-use crate::ui::{
-    render_app_layout, render_themed_footer, render_themed_title, render_toast, session, Toast,
-};
+use crate::ui::session::{self, Chrome, Routed};
 use anyhow::Result;
 use ratcn::{
-    runtime::{EventResult, FocusState, Ratcn},
+    runtime::{FocusState, Ratcn},
     terminal::Session,
+    Toast, ToasterState,
 };
-use std::time::Duration;
 
 #[derive(Default)]
 struct State {
     focus: FocusState,
     selected: Option<usize>,
+    toasts: ToasterState<'static>,
 }
 
 enum Msg {
@@ -31,12 +30,11 @@ pub struct HistoryView {
     rows: Vec<String>,
     state: State,
     ratcn: Ratcn<State, Msg>,
-    notification: Option<Toast>,
 }
 
 impl HistoryView {
     pub fn new(entries: Vec<TranscriptionEntry>) -> Result<Self> {
-        let rows = entries
+        let rows: Vec<String> = entries
             .iter()
             .map(|entry| {
                 format!(
@@ -46,79 +44,63 @@ impl HistoryView {
                 )
             })
             .collect();
+        let mut state = State::default();
+        clamp_selection(&mut state.selected, rows.len());
         Ok(Self {
             session: session::open()?,
             entries,
             rows,
-            state: State::default(),
+            state,
             ratcn: Ratcn::new().focus(|state: &State| &state.focus, Msg::Focus),
-            notification: None,
         })
     }
 
     /// Consume the view so the terminal is restored before clipboard/output work.
+    /// A copy is confirmed with a toast, and the view closes once it expires.
     pub fn run(mut self) -> Result<Option<String>> {
-        let mut selected_text = None;
-        if !self.entries.is_empty() {
-            loop {
-                self.draw()?;
-                if self.notification.as_ref().is_some_and(Toast::is_expired) {
-                    break;
+        let mut copied = None;
+        loop {
+            self.state.toasts.prune_expired(session::now());
+            if copied.is_some() && self.state.toasts.is_empty() {
+                break;
+            }
+            let rows = &self.rows;
+            let chrome = Chrome {
+                title: Some("History"),
+                footer: "↑↓ select, ↵ copy, esc/q exit",
+                toasts: Some(&self.state.toasts),
+            };
+            session::draw(
+                &mut self.session,
+                &mut self.ratcn,
+                &self.state,
+                chrome,
+                |ctx, body| {
+                    let list =
+                        selection_list(rows, 2, |s: &State| s.selected, Msg::Select, Msg::Copy);
+                    ctx.component("list", list, body);
+                },
+            )?;
+            let timeout = self.state.toasts.time_until_next_expiry(session::now());
+            let Some(event) = session::next_event(&mut self.session, timeout)? else {
+                continue;
+            };
+            match session::route(&mut self.session, &mut self.ratcn, &self.state, event)? {
+                Routed::Msg(Msg::Focus(focus)) => self.state.focus = focus,
+                Routed::Msg(Msg::Select(index)) => self.state.selected = Some(index),
+                Routed::Msg(Msg::Copy(index)) => {
+                    self.state.selected = Some(index);
+                    copied = Some(self.entries[index].text.clone());
+                    self.state.toasts.push(
+                        Toast::success("Copied to clipboard!").duration(session::TOAST_DURATION),
+                        session::now(),
+                    );
                 }
-                let timeout = self
-                    .notification
-                    .as_ref()
-                    .map(|_| Duration::from_millis(50));
-                let Some(event) = session::next(&mut self.session, timeout)? else {
-                    continue;
-                };
-                if session::is_cancel(&event) {
-                    break;
-                }
-                match self.ratcn.handle_event(event, &self.state) {
-                    EventResult::Emit(Msg::Focus(focus)) => self.state.focus = focus,
-                    EventResult::Emit(Msg::Select(index)) => self.state.selected = Some(index),
-                    EventResult::Emit(Msg::Copy(index)) => {
-                        self.state.selected = Some(index);
-                        selected_text = Some(self.entries[index].text.clone());
-                        self.notification = Some(Toast::success("Copied to clipboard!"));
-                    }
-                    _ => {}
-                }
+                Routed::Ignored(event) if session::is_cancel(&event) => break,
+                Routed::Quit => break,
+                Routed::Ignored(_) | Routed::Redraw => {}
             }
         }
-        Ok(selected_text)
-    }
-
-    fn draw(&mut self) -> Result<()> {
-        clamp_selection(&mut self.state.selected, self.rows.len());
-        let theme = session::theme(&self.session);
-        let state = &self.state;
-        let ratcn = &mut self.ratcn;
-        let rows = &self.rows;
-        let notification = &self.notification;
-        self.session.terminal_mut().draw(|frame| {
-            session::paint_background(frame, &theme);
-            let layout = render_app_layout(frame, frame.area());
-            render_themed_title(frame, layout.title, "History", &theme);
-            ratcn.render(frame, layout.body, state, &theme, |ctx| {
-                ctx.component(
-                    "list",
-                    selection_list(rows, 2, |s: &State| s.selected, Msg::Select, Msg::Copy),
-                    layout.body,
-                );
-            });
-            render_themed_footer(
-                frame,
-                layout.footer,
-                "↑↓ select, ↵ copy, esc/q exit",
-                &theme,
-            );
-            if let Some(toast) = notification {
-                render_toast(frame, toast, &theme);
-            }
-        })?;
-        self.session.set_pointer_shape(self.ratcn.pointer_shape())?;
-        Ok(())
+        Ok(copied)
     }
 }

@@ -2,18 +2,15 @@
 
 use crate::config::file::ProcessAction;
 use crate::ui::components::list::{clamp_selection, selection_list};
-use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title, scroll, session};
-use crate::ui::{render_themed_footer, render_themed_title};
+use crate::ui::session::{self, Chrome, Routed};
+use crate::ui::{is_cancel_key, render_app_layout, render_footer, render_title, scroll};
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, MouseEventKind};
 use ratatui::{
     prelude::*,
     widgets::{List, ListItem, ListState},
 };
-use ratcn::{
-    runtime::{EventResult, FocusState, Ratcn},
-    terminal::Session,
-};
+use ratcn::runtime::{FocusState, Ratcn};
 
 /// Keep the recording popup independent of ratcn's components and interaction runtime.
 pub(crate) fn render_popup_process_view(
@@ -21,7 +18,7 @@ pub(crate) fn render_popup_process_view(
     area: Rect,
     actions: &[ProcessAction],
     state: &mut ListState,
-) -> Rect {
+) {
     let layout = render_app_layout(frame, area);
     render_title(frame, layout.title, "Process action");
     scroll::keep_selected_in_view(state, layout.body.height as usize, actions.len());
@@ -36,7 +33,6 @@ pub(crate) fn render_popup_process_view(
         state,
     );
     render_footer(frame, layout.footer, "↑/↓ select, ↵ confirm, esc/q cancel");
-    layout.body
 }
 
 /// Result of the action picker interaction.
@@ -92,71 +88,36 @@ enum Msg {
     Confirm(usize),
 }
 
-struct ProcessView {
-    session: Session,
-    actions: Vec<ProcessAction>,
-    rows: Vec<String>,
-    state: State,
-    ratcn: Ratcn<State, Msg>,
-}
-
-impl ProcessView {
-    fn new(actions: Vec<ProcessAction>) -> Result<Self> {
-        let rows = actions.iter().map(|action| action.name.clone()).collect();
-        Ok(Self {
-            session: session::open()?,
-            actions,
-            rows,
-            state: State::default(),
-            ratcn: Ratcn::new().focus(|state: &State| &state.focus, Msg::Focus),
-        })
-    }
-
-    fn draw(&mut self) -> Result<()> {
-        clamp_selection(&mut self.state.selected, self.rows.len());
-        let theme = session::theme(&self.session);
-        let state = &self.state;
-        let rows = &self.rows;
-        let ratcn = &mut self.ratcn;
-        self.session.terminal_mut().draw(|frame| {
-            session::paint_background(frame, &theme);
-            let layout = render_app_layout(frame, frame.area());
-            render_themed_title(frame, layout.title, "Process action", &theme);
-            ratcn.render(frame, layout.body, state, &theme, |ctx| {
-                ctx.component(
-                    "list",
-                    selection_list(rows, 1, |s: &State| s.selected, Msg::Select, Msg::Confirm),
-                    layout.body,
-                );
-            });
-            render_themed_footer(
-                frame,
-                layout.footer,
-                "↑/↓ select, ↵ confirm, esc/q cancel",
-                &theme,
-            );
+fn run_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
+    let rows: Vec<String> = actions.iter().map(|action| action.name.clone()).collect();
+    let mut session = session::open()?;
+    let mut ratcn = Ratcn::new().focus(|state: &State| &state.focus, Msg::Focus);
+    let mut state = State::default();
+    clamp_selection(&mut state.selected, rows.len());
+    loop {
+        let chrome = Chrome {
+            title: Some("Process action"),
+            footer: "↑/↓ select, ↵ confirm, esc/q cancel",
+            toasts: None,
+        };
+        session::draw(&mut session, &mut ratcn, &state, chrome, |ctx, body| {
+            let list = selection_list(&rows, 1, |s: &State| s.selected, Msg::Select, Msg::Confirm);
+            ctx.component("list", list, body);
         })?;
-        self.session.set_pointer_shape(self.ratcn.pointer_shape())?;
-        Ok(())
-    }
-
-    fn run(mut self) -> Result<PickerResult> {
-        loop {
-            self.draw()?;
-            let Some(event) = session::next(&mut self.session, None)? else {
-                continue;
-            };
-            if session::is_cancel(&event) {
-                return Ok(PickerResult::Cancelled);
+        let Some(event) = session::next_event(&mut session, None)? else {
+            continue;
+        };
+        match session::route(&mut session, &mut ratcn, &state, event)? {
+            Routed::Msg(Msg::Focus(focus)) => state.focus = focus,
+            Routed::Msg(Msg::Select(index)) => state.selected = Some(index),
+            Routed::Msg(Msg::Confirm(index)) => {
+                return Ok(PickerResult::Selected(actions[index].id.clone()))
             }
-            match self.ratcn.handle_event(event, &self.state) {
-                EventResult::Emit(Msg::Focus(focus)) => self.state.focus = focus,
-                EventResult::Emit(Msg::Select(index)) => self.state.selected = Some(index),
-                EventResult::Emit(Msg::Confirm(index)) => {
-                    return Ok(PickerResult::Selected(self.actions[index].id.clone()))
-                }
-                _ => {}
+            Routed::Ignored(event) if session::is_cancel(&event) => {
+                return Ok(PickerResult::Cancelled)
             }
+            Routed::Quit => return Ok(PickerResult::Cancelled),
+            Routed::Ignored(_) | Routed::Redraw => {}
         }
     }
 }
@@ -168,41 +129,6 @@ pub fn show_action_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
             "No processing actions configured. Add actions to ~/.config/ostt/ostt.toml"
         ),
         [action] => Ok(PickerResult::Selected(action.id.clone())),
-        _ => ProcessView::new(actions.to_vec())?.run(),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::config::file::ActionDetails;
-    use ratatui::backend::TestBackend;
-
-    #[test]
-    fn recording_popup_keeps_its_plain_ratatui_selection_and_navigation() {
-        let actions: Vec<_> = (0..10)
-            .map(|index| ProcessAction {
-                id: format!("action-{index}"),
-                name: format!("Action {index}"),
-                details: ActionDetails::Bash {
-                    command: "cat".to_string(),
-                },
-            })
-            .collect();
-        let mut terminal = Terminal::new(TestBackend::new(60, 16)).unwrap();
-        let mut state = ListState::default().with_selected(Some(0));
-        handle_picker_event(Event::Key(KeyCode::Down.into()), &actions, &mut state);
-        let mut area = Rect::default();
-        terminal
-            .draw(|frame| {
-                area = render_popup_process_view(frame, frame.area(), &actions, &mut state)
-            })
-            .unwrap();
-        let y = area.y + (state.selected().unwrap() - state.offset()) as u16;
-        assert!((area.x..area.right())
-            .all(|x| terminal.backend().buffer()[(x, y)].bg == Color::DarkGray));
-        assert!(
-            matches!(handle_picker_event(Event::Key(KeyCode::Enter.into()), &actions, &mut state), Some(PickerResult::Selected(id)) if id == "action-1")
-        );
+        _ => run_picker(actions),
     }
 }

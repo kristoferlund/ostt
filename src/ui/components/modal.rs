@@ -4,18 +4,7 @@ use ratatui::{
     layout::{Constraint, Layout},
     widgets::Paragraph,
 };
-use ratcn::{Button, Dialog, Input};
-
-pub(crate) fn dialog<S: 'static, M: 'static>(
-    title: impl Into<String>,
-    description: impl Into<String>,
-    action: Button<M>,
-) -> Dialog<S, M> {
-    Dialog::new()
-        .title(title)
-        .description(description)
-        .action("accept", action)
-}
+use ratcn::{Dialog, Input};
 
 pub(crate) fn form_dialog<S: 'static, M: 'static>(
     dialog: Dialog<S, M>,

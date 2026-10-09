@@ -1,18 +1,6 @@
 mod local_model_view;
-mod model_view;
 
-pub use model_view::ModelView;
-
-#[derive(Debug)]
-pub struct UserQuit;
-
-impl std::fmt::Display for UserQuit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("quit")
-    }
-}
-
-impl std::error::Error for UserQuit {}
+pub(crate) use local_model_view::run;
 
 #[cfg(test)]
 mod tests {

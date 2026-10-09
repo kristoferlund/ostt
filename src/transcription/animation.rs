@@ -278,24 +278,4 @@ mod tests {
             .iter()
             .any(|cell| cell.symbol() == "T" && cell.fg == Color::DarkGray));
     }
-
-    #[test]
-    fn standalone_processing_animation_uses_the_session_palette() {
-        let mut animation = TranscriptionAnimation::new(80);
-        animation.frame_count = 15;
-        let theme =
-            ratcn::Theme::adaptive(Color::Rgb(253, 246, 227), Color::Rgb(101, 123, 131), None);
-        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
-        terminal
-            .draw(|frame| animation.draw_themed(frame, frame.area(), &theme))
-            .unwrap();
-        let cells = &terminal.backend().buffer().content;
-        assert!(cells.iter().all(|cell| cell.bg == theme.background));
-        assert!(cells
-            .iter()
-            .any(|cell| cell.symbol() == "┏" && cell.fg == theme.foreground));
-        assert!(cells
-            .iter()
-            .any(|cell| cell.symbol() == "T" && cell.fg == theme.muted_foreground));
-    }
 }

@@ -1,6 +1,7 @@
 use crate::transcription::local_models::{DownloadHandle, LocalModelState, RegistryEntry};
+use crate::ui::session;
 use ratcn::runtime::{CellOffset, FocusState, ModalState};
-use ratcn::InputState as Input;
+use ratcn::{InputState, Toast, ToasterState};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,6 +24,24 @@ pub(crate) struct LocalModelEntry {
     pub group_id: Option<String>,
 }
 
+impl LocalModelEntry {
+    pub(crate) fn registry_entry(&self) -> RegistryEntry {
+        RegistryEntry {
+            id: self.id.clone(),
+            provider_id: self.provider_id.clone(),
+            name: self.name.clone(),
+            description: self.description.clone(),
+            languages: self.languages.clone(),
+            size_mb: self.size_mb,
+            url: self.url.clone(),
+            recommended_hardware: self.recommended_hardware.clone(),
+            sha256: self.sha256.clone(),
+            category: self.category.clone(),
+            group_id: self.group_id.clone(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct DownloadState {
     pub model_id: String,
@@ -32,57 +51,55 @@ pub(crate) struct DownloadState {
     pub progress: f64,
     pub speed_mbps: f64,
     pub status: String,
-    pub is_complete: bool,
     pub is_custom: bool,
 }
 
+/// What the screen shows. Every mode except `Browse` and `Info` is a dialog,
+/// and [`State::set_mode`] keeps the runtime's modal stack in step with it.
 #[derive(Clone, Debug)]
-pub(crate) enum LocalModelsMode {
+pub(crate) enum Mode {
     Browse,
-    CustomModelInput {
-        input: Input,
-    },
-    CustomModelDetails {
-        resolved_entry: RegistryEntry,
-        id_input: Input,
-        name_input: Input,
-    },
-    ConfirmDownload {
-        entry: LocalModelEntry,
-    },
+    Info { entry: LocalModelEntry },
+    CustomUrl,
+    CustomDetails { resolved_entry: RegistryEntry },
+    ConfirmDownload { entry: LocalModelEntry },
     Downloading(DownloadState),
-    Info {
-        entry: LocalModelEntry,
-    },
-    ConfirmDelete {
-        entry: LocalModelEntry,
-    },
-    ErrorDialog {
-        message: String,
-        return_mode: Box<LocalModelsMode>,
-    },
+    ConfirmDelete { entry: LocalModelEntry },
+    Error { message: String },
 }
 
-#[derive(Clone, Debug)]
-pub(crate) struct LocalModelsTui {
+impl Mode {
+    pub(crate) fn modal_id(&self) -> Option<&'static str> {
+        match self {
+            Mode::Browse | Mode::Info { .. } => None,
+            Mode::CustomUrl => Some("url"),
+            Mode::CustomDetails { .. } => Some("details"),
+            Mode::ConfirmDownload { .. } => Some("download"),
+            Mode::Downloading(_) => Some("progress"),
+            Mode::ConfirmDelete { .. } => Some("delete"),
+            Mode::Error { .. } => Some("error"),
+        }
+    }
+}
+
+pub(crate) struct State {
     pub focus: FocusState,
     pub modals: ModalState,
     pub dialog_offset: CellOffset,
+    pub mode: Mode,
     pub entries: Vec<LocalModelEntry>,
     pub selected: usize,
-    pub mode: LocalModelsMode,
-    pub downloaded_model_disk_usage_bytes: u64,
     pub scroll_offset: usize,
-    pub toast: Option<crate::ui::Toast>,
+    pub url_input: InputState,
+    pub id_input: InputState,
+    pub name_input: InputState,
+    pub toasts: ToasterState<'static>,
     /// Model ID currently loaded in the daemon, if any.
     pub daemon_model_id: Option<String>,
 }
 
-impl LocalModelsTui {
-    pub(crate) fn new(
-        entries: Vec<LocalModelEntry>,
-        downloaded_model_disk_usage_bytes: u64,
-    ) -> Self {
+impl State {
+    pub(crate) fn new(entries: Vec<LocalModelEntry>) -> Self {
         let selected = entries
             .iter()
             .position(|entry| entry.is_active)
@@ -91,34 +108,35 @@ impl LocalModelsTui {
             focus: FocusState::default(),
             modals: ModalState::default(),
             dialog_offset: CellOffset::default(),
+            mode: Mode::Browse,
             entries,
             selected,
-            mode: LocalModelsMode::Browse,
-            downloaded_model_disk_usage_bytes,
             scroll_offset: 0,
-            toast: None,
+            url_input: InputState::default(),
+            id_input: InputState::default(),
+            name_input: InputState::default(),
+            toasts: ToasterState::default(),
             daemon_model_id: None,
         }
     }
 
-    pub(crate) fn sync_modal(&mut self) -> anyhow::Result<()> {
-        let id = match &self.mode {
-            LocalModelsMode::ConfirmDownload { .. } => Some("download"),
-            LocalModelsMode::ConfirmDelete { .. } => Some("delete"),
-            LocalModelsMode::CustomModelInput { .. } => Some("url"),
-            LocalModelsMode::CustomModelDetails { .. } => Some("details"),
-            LocalModelsMode::Downloading(_) => Some("progress"),
-            LocalModelsMode::ErrorDialog { .. } => Some("error"),
-            _ => None,
-        };
-        if self.modals.top().map(|id| id.as_str()) != id {
+    pub(crate) fn set_mode(&mut self, mode: Mode) {
+        let id = mode.modal_id();
+        if self.modals.top().map(|top| top.as_str()) != id {
             self.modals.close(&mut self.focus);
             self.dialog_offset = CellOffset::default();
             if let Some(id) = id {
-                self.modals.open(id, &mut self.focus)?;
+                self.modals
+                    .open(id, &mut self.focus)
+                    .expect("model dialogs never nest");
             }
         }
-        Ok(())
+        self.mode = mode;
+    }
+
+    pub(crate) fn toast(&mut self, toast: Toast<'static>) {
+        self.toasts
+            .push(toast.duration(session::TOAST_DURATION), session::now());
     }
 
     /// Update cached daemon status and reflect it on each entry's `is_daemon_loaded`.
@@ -130,28 +148,22 @@ impl LocalModelsTui {
     }
 
     pub(crate) fn selected_entry(&self) -> Option<&LocalModelEntry> {
-        self.display_entries().get(self.selected).copied()
-    }
-
-    pub(crate) fn display_entries(&self) -> Vec<&LocalModelEntry> {
-        self.entries.iter().collect()
+        self.entries.get(self.selected)
     }
 
     pub(crate) fn move_selection_down(&mut self) {
-        if self.selected + 1 < self.display_entries().len() {
+        if self.selected + 1 < self.entries.len() {
             self.selected += 1;
         }
     }
 
     pub(crate) fn move_selection_up(&mut self) {
-        if self.selected > 0 {
-            self.selected -= 1;
-        }
+        self.selected = self.selected.saturating_sub(1);
     }
 
     pub(crate) fn show_info(&mut self) {
         if let Some(entry) = self.selected_entry().cloned() {
-            self.mode = LocalModelsMode::Info { entry };
+            self.set_mode(Mode::Info { entry });
         }
     }
 
@@ -161,31 +173,13 @@ impl LocalModelsTui {
             .filter(|entry| entry.provider_id == "whisper" && entry.is_downloaded)
             .cloned()
         {
-            self.mode = LocalModelsMode::ConfirmDelete { entry };
+            self.set_mode(Mode::ConfirmDelete { entry });
         }
     }
 
-    pub(crate) fn show_error_dialog(&mut self, message: String) {
-        self.mode = LocalModelsMode::ErrorDialog {
-            message,
-            return_mode: Box::new(self.mode.clone()),
-        };
-    }
-
-    pub(crate) fn close_error_dialog(&mut self) {
-        if let LocalModelsMode::ErrorDialog { return_mode, .. } = self.mode.clone() {
-            self.mode = *return_mode;
-        }
-    }
-
-    pub(crate) fn back_to_browse(&mut self) {
-        self.mode = LocalModelsMode::Browse;
-    }
-
-    pub(crate) fn show_custom_input(&mut self) {
-        self.mode = LocalModelsMode::CustomModelInput {
-            input: Input::default(),
-        };
+    pub(crate) fn show_custom_url(&mut self) {
+        self.url_input = InputState::default();
+        self.set_mode(Mode::CustomUrl);
     }
 
     pub(crate) fn refresh(
@@ -197,21 +191,15 @@ impl LocalModelsTui {
         let config = crate::config::OsttConfig::load()
             .map_err(|error| anyhow::anyhow!(error.to_string()))?;
         let authorized_provider_ids = crate::config::get_authorized_providers()?;
-        let daemon_model_id = self.daemon_model_id.as_deref();
         self.entries = super::build_model_entries(
             &config,
             &authorized_provider_ids,
             local_state,
             registry,
             selected_model.as_ref(),
-            daemon_model_id,
+            self.daemon_model_id.as_deref(),
         );
-        self.downloaded_model_disk_usage_bytes =
-            super::downloaded_model_disk_usage_bytes(&self.entries);
-        let display_len = self.display_entries().len();
-        if self.selected >= display_len {
-            self.selected = display_len.saturating_sub(1);
-        }
+        self.selected = self.selected.min(self.entries.len().saturating_sub(1));
         Ok(())
     }
 }

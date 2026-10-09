@@ -1,22 +1,14 @@
-pub(crate) mod custom_model_details_dialog;
-pub(crate) mod custom_model_url_input_dialog;
-pub(crate) mod local_model_delete_confirmation_dialog;
-pub(crate) mod local_model_download_confirmation_dialog;
-pub(crate) mod local_model_download_progress_dialog;
-pub(crate) mod local_model_info_view;
-pub(crate) mod local_model_list_view;
-pub(crate) mod local_model_view_helpers;
-pub(crate) mod types;
+mod dialogs;
+mod info;
+mod list;
+mod types;
 
-use ratatui::Frame;
-use ratcn::runtime::{CellOffset, Event, EventResult, FocusState, KeyCode, KeyEvent, Ratcn};
-use ratcn::InputState as Input;
-use ratcn::{terminal::Session, Button, Dialog, Theme};
+use ratcn::runtime::{CellOffset, DeclareCtx, Event, FocusState, KeyCode, Ratcn};
+use ratcn::{terminal::Session, InputState, Toast};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::config::{self, SelectedModel};
-use crate::model::UserQuit;
 use crate::transcription::local_models::{
     delete_model, download_model_with_handle, fetch_registry, is_safe_model_id, load_state,
     mark_downloaded_registry_model, model_destination, register_downloaded_custom_model,
@@ -24,29 +16,18 @@ use crate::transcription::local_models::{
     DownloadHandle, LocalModelState, RegistryEntry,
 };
 use crate::transcription::{self, TranscriptionProvider};
-use crate::ui::components::modal::dialog;
-use crate::ui::{
-    render_app_layout, render_themed_footer, render_themed_title, render_toast, session, Toast,
-};
+use crate::ui::session::{self, Chrome, Routed};
 
-use custom_model_details_dialog::CustomModelDetailsDialog;
-use custom_model_url_input_dialog::CustomModelUrlInputDialog;
-use local_model_delete_confirmation_dialog::LocalModelDeleteConfirmationDialog;
-use local_model_download_confirmation_dialog::LocalModelDownloadConfirmationDialog;
-use local_model_download_progress_dialog::LocalModelDownloadProgressDialog;
-use local_model_info_view::LocalModelInfoView;
-use local_model_list_view::LocalModelListView;
-use types::{DownloadState, LocalModelEntry, LocalModelsMode, LocalModelsTui, RunningDownload};
+use types::{DownloadState, LocalModelEntry, Mode, RunningDownload, State};
 
 pub(super) enum Msg {
     Focus(FocusState),
-    Move(CellOffset),
-    Url(Input),
-    Id(Input),
-    Name(Input),
+    DialogMoved(CellOffset),
+    Url(InputState),
+    Id(InputState),
+    Name(InputState),
     Accept,
     Dismiss,
-    Quit,
     Previous,
     Next,
     Info,
@@ -54,202 +35,364 @@ pub(super) enum Msg {
     Delete,
 }
 
-fn runtime() -> Ratcn<LocalModelsTui, Msg> {
+fn runtime() -> Ratcn<State, Msg> {
     Ratcn::new()
-        .focus(|state: &LocalModelsTui| &state.focus, Msg::Focus)
+        .focus(|state: &State| &state.focus, Msg::Focus)
         .modals(|state| &state.modals)
 }
 
-fn model_dialog(
-    title: impl Into<String>,
-    description: impl Into<String>,
-    action: &'static str,
-    offset: CellOffset,
-) -> Dialog<LocalModelsTui, Msg> {
-    dialog(
-        title,
-        description,
-        Button::new(action).on_press(|| Msg::Accept),
-    )
-    .offset(offset)
-    .on_offset_change(Msg::Move)
-    .on_dismiss(|| Msg::Dismiss)
-}
-
-pub(crate) async fn run(session: &mut Session) -> anyhow::Result<()> {
+/// Run the model screen until the user leaves it.
+pub(crate) async fn run() -> anyhow::Result<()> {
     let local_state = load_state();
     let ostt_config =
         config::OsttConfig::load().map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let authorized_provider_ids = config::get_authorized_providers()?;
-    let registry = match fetch_registry().await {
-        Ok(registry) => registry,
-        Err(error) => {
-            tracing::error!("Failed to fetch local model registry: {}", error);
-            Vec::new()
-        }
-    };
-    let selected_model = crate::config::get_selected_model_entry()?;
-
-    // Probe daemon once at open to show initial loaded status.
-    let daemon_model_id = crate::transcription::daemon_client::probe_daemon()
+    let registry = fetch_registry().await.unwrap_or_else(|error| {
+        tracing::error!("Failed to fetch local model registry: {}", error);
+        Vec::new()
+    });
+    let selected_model = config::get_selected_model_entry()?;
+    let daemon_model_id = transcription::daemon_client::probe_daemon()
         .await
-        .map(|d| d.model_id);
+        .map(|daemon| daemon.model_id);
 
-    let entries = build_model_entries(
+    let mut state = State::new(build_model_entries(
         &ostt_config,
         &authorized_provider_ids,
         &local_state,
         &registry,
         selected_model.as_ref(),
         daemon_model_id.as_deref(),
-    );
-    let mut tui =
-        types::LocalModelsTui::new(entries.clone(), downloaded_model_disk_usage_bytes(&entries));
-    tui.daemon_model_id = daemon_model_id;
-
-    tracing::debug!(
-        "Local model view opened with {} registry models and {} custom models",
-        registry.len(),
-        local_state.custom_models.len()
-    );
+    ));
+    state.daemon_model_id = daemon_model_id;
     if registry.is_empty() {
-        tracing::debug!("Local model registry unavailable; custom model entry remains enabled");
-        tui.show_error_dialog(
-            "Could not load remote registry; custom URL entry is still available with [c]"
+        state.set_mode(Mode::Error {
+            message: "Could not load remote registry; custom URL entry is still available with [c]"
                 .to_string(),
-        );
+        });
     }
-    let mut running_download: Option<types::RunningDownload> = None;
-    tui.sync_modal()?;
-    let mut ratcn = runtime();
-    let mut last_daemon_probe = std::time::Instant::now()
-        .checked_sub(Duration::from_secs(5))
-        .unwrap_or_else(std::time::Instant::now);
 
-    loop {
-        if tui.toast.as_ref().is_some_and(Toast::is_expired) {
-            tui.toast = None;
-        }
-        finish_completed_download(&mut tui, &registry, &mut running_download).await?;
-        tui.sync_modal()?;
-
-        // Re-probe daemon every 2 seconds to pick up background daemon startup.
-        if last_daemon_probe.elapsed() >= Duration::from_secs(2) {
-            let info = crate::transcription::daemon_client::probe_daemon().await;
-            tui.update_daemon_status(info.as_ref().map(|d| d.model_id.as_str()));
-            last_daemon_probe = std::time::Instant::now();
-        }
-
-        let theme = session::theme(session);
-        session
-            .terminal_mut()
-            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &theme))?;
-        session.set_pointer_shape(ratcn.pointer_shape())?;
-
-        let Some(event) = session::next(session, Some(Duration::from_millis(100)))? else {
-            continue;
-        };
-        // Keep confirmation/cancellation shortcuts; ordinary keys go through ratcn first.
-        let legacy_key = matches!(&event, Event::Key(key) if (matches!(tui.mode, LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. })
-                && matches!(key.code, KeyCode::Char('y' | 'Y' | 'n' | 'N')))
-            || (matches!(tui.mode, LocalModelsMode::Downloading(_)) && key.code == KeyCode::Tab));
-        let message = if legacy_key {
-            match event {
-                Event::Key(key) => shortcut(&tui.mode, key),
-                _ => None,
-            }
-        } else {
-            let result = ratcn.handle_event(event.clone(), &tui);
-            if let Some(text) = ratcn.take_clipboard() {
-                session.set_clipboard(&text)?;
-            } else if session::is_ctrl_c(&event) {
-                return Err(UserQuit.into());
-            }
-            match result {
-                EventResult::Emit(msg) => Some(msg),
-                EventResult::Consumed => None,
-                EventResult::Ignored => match event {
-                    Event::Key(key) => shortcut(&tui.mode, key),
-                    _ => None,
-                },
-            }
-        };
-        if let Some(msg) = message {
-            if update(&mut tui, &registry, &mut running_download, msg).await? {
-                break;
-            }
-        }
+    ModelsView {
+        session: session::open()?,
+        ratcn: runtime(),
+        state,
+        registry,
+        download: None,
     }
-    Ok(())
+    .run()
+    .await
 }
 
-fn render_local_models(
-    frame: &mut Frame<'_>,
-    tui: &mut LocalModelsTui,
-    ratcn: &mut Ratcn<LocalModelsTui, Msg>,
-    theme: &Theme,
-) {
-    session::paint_background(frame, theme);
-    let layout = render_app_layout(frame, frame.area());
-    let body = ratatui::layout::Rect {
-        height: layout.title.height.saturating_add(layout.body.height),
-        ..layout.title
+struct ModelsView {
+    session: Session,
+    ratcn: Ratcn<State, Msg>,
+    state: State,
+    registry: Vec<RegistryEntry>,
+    download: Option<RunningDownload>,
+}
+
+impl ModelsView {
+    async fn run(mut self) -> anyhow::Result<()> {
+        let mut last_daemon_probe = Instant::now();
+        loop {
+            self.finish_download().await?;
+            // Re-probe to pick up a daemon that started or stopped in the background.
+            if last_daemon_probe.elapsed() >= Duration::from_secs(2) {
+                let daemon = transcription::daemon_client::probe_daemon().await;
+                self.state
+                    .update_daemon_status(daemon.as_ref().map(|d| d.model_id.as_str()));
+                last_daemon_probe = Instant::now();
+            }
+            self.state.toasts.prune_expired(session::now());
+            self.draw()?;
+
+            let Some(event) =
+                session::next_event(&mut self.session, Some(Duration::from_millis(100)))?
+            else {
+                continue;
+            };
+            let msg = match dialog_shortcut(&self.state.mode, &event) {
+                Some(msg) => msg,
+                None => {
+                    match session::route(&mut self.session, &mut self.ratcn, &self.state, event)? {
+                        Routed::Msg(msg) => msg,
+                        Routed::Ignored(event)
+                            if matches!(self.state.mode, Mode::Browse)
+                                && session::is_cancel(&event) =>
+                        {
+                            return Ok(())
+                        }
+                        Routed::Ignored(event) => match shortcut(&self.state.mode, &event) {
+                            Some(msg) => msg,
+                            None => continue,
+                        },
+                        Routed::Quit => return Ok(()),
+                        Routed::Redraw => continue,
+                    }
+                }
+            };
+            self.update(msg).await?;
+        }
+    }
+
+    fn draw(&mut self) -> std::io::Result<()> {
+        let title = match &self.state.mode {
+            Mode::Info { entry } => Some(entry.name.clone()),
+            _ => None,
+        };
+        let size = self.session.terminal_mut().size()?;
+        let body = session::body_area(size.into(), title.is_some());
+        list::scroll_to_selection(&mut self.state, body.height);
+        let state = &self.state;
+        let chrome = Chrome {
+            title: title.as_deref(),
+            footer: if title.is_some() {
+                "esc/q back"
+            } else {
+                "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back"
+            },
+            toasts: Some(&state.toasts),
+        };
+        session::draw(
+            &mut self.session,
+            &mut self.ratcn,
+            state,
+            chrome,
+            |ctx, body| declare(ctx, body, state),
+        )
+    }
+
+    async fn update(&mut self, msg: Msg) -> anyhow::Result<()> {
+        let state = &mut self.state;
+        match msg {
+            Msg::Focus(focus) => state.focus = focus,
+            Msg::DialogMoved(offset) => state.dialog_offset = offset,
+            Msg::Url(input) => state.url_input = input,
+            Msg::Id(input) => state.id_input = input,
+            Msg::Name(input) => state.name_input = input,
+            Msg::Previous => state.move_selection_up(),
+            Msg::Next => state.move_selection_down(),
+            Msg::Info => state.show_info(),
+            Msg::Custom => state.show_custom_url(),
+            Msg::Delete => state.confirm_delete(),
+            Msg::Accept => match state.mode.clone() {
+                Mode::Browse => self.activate_selected().await?,
+                Mode::CustomUrl => self.resolve_custom_url().await,
+                Mode::CustomDetails { resolved_entry } => {
+                    self.start_custom_download(resolved_entry)
+                }
+                Mode::ConfirmDownload { entry } => {
+                    tracing::info!("Starting download for local model '{}'", entry.id);
+                    self.start_download(entry.registry_entry(), false);
+                }
+                Mode::ConfirmDelete { entry } => self.delete(&entry)?,
+                Mode::Downloading(_) => self.cancel_download(),
+                Mode::Error { .. } | Mode::Info { .. } => state.set_mode(Mode::Browse),
+            },
+            Msg::Dismiss => match state.mode {
+                Mode::Downloading(_) => self.cancel_download(),
+                _ => state.set_mode(Mode::Browse),
+            },
+        }
+        Ok(())
+    }
+
+    async fn activate_selected(&mut self) -> anyhow::Result<()> {
+        let Some(entry) = self.state.selected_entry().cloned() else {
+            return Ok(());
+        };
+        tracing::debug!("Selected local model '{}'", entry.id);
+
+        if entry.provider_id == "whisper" && !entry.is_downloaded {
+            if entry.is_available_in_registry {
+                self.state.set_mode(Mode::ConfirmDownload { entry });
+            } else {
+                self.state.set_mode(Mode::Error {
+                    message: "Custom models must be added through [c]".to_string(),
+                });
+            }
+            return Ok(());
+        }
+
+        match activate_entry(&entry).await {
+            Ok(()) => {
+                tracing::info!("Activated local model '{}'", entry.id);
+                self.state
+                    .toast(Toast::success(format!("Activated {}", entry.name)));
+                self.state.refresh(&load_state(), &self.registry)?;
+            }
+            Err(error) => {
+                tracing::error!("Failed to activate local model '{}': {}", entry.id, error);
+                self.state.toast(Toast::error(error.to_string()));
+            }
+        }
+        Ok(())
+    }
+
+    async fn resolve_custom_url(&mut self) {
+        match resolve_custom_model(self.state.url_input.value()).await {
+            Ok(entry) => {
+                tracing::debug!("Resolved custom local model '{}'", entry.id);
+                self.state.id_input = InputState::new(entry.id.clone());
+                self.state.name_input = InputState::new(entry.name.clone());
+                self.state.set_mode(Mode::CustomDetails {
+                    resolved_entry: entry,
+                });
+            }
+            Err(error) => {
+                tracing::error!("Failed to resolve custom local model input: {}", error);
+                self.state.toast(Toast::error(error.to_string()));
+            }
+        }
+    }
+
+    fn start_custom_download(&mut self, mut entry: RegistryEntry) {
+        let id = self.state.id_input.value().trim();
+        let name = self.state.name_input.value().trim();
+        let error = if !is_safe_model_id(id) {
+            Some("Model ID must use lowercase letters, numbers, '.', '_' or '-'".to_string())
+        } else if self.state.entries.iter().any(|entry| entry.id == id) {
+            Some(format!("Model ID '{id}' already exists"))
+        } else if name.is_empty() {
+            Some("Model name is required".to_string())
+        } else {
+            entry.id = id.to_string();
+            entry.name = name.to_string();
+            validate_custom_model_registration(&entry)
+                .err()
+                .map(|error| error.to_string())
+        };
+        if let Some(error) = error {
+            self.state.toast(Toast::error(error));
+            return;
+        }
+        tracing::info!("Starting download for custom local model '{}'", entry.id);
+        self.start_download(entry, true);
+    }
+
+    fn start_download(&mut self, entry: RegistryEntry, is_custom: bool) {
+        let running = spawn_download(entry, is_custom);
+        sync_download_progress(&mut self.state, &running);
+        self.download = Some(running);
+    }
+
+    fn cancel_download(&mut self) {
+        if let Some(running) = &self.download {
+            tracing::info!("Cancelling local model download");
+            running.handle.cancel();
+            if let Ok(mut state) = running.state.lock() {
+                state.status = "Cancelling download".to_string();
+            }
+        }
+    }
+
+    async fn finish_download(&mut self) -> anyhow::Result<()> {
+        let Some(running) = &self.download else {
+            return Ok(());
+        };
+        sync_download_progress(&mut self.state, running);
+        if !running.task.is_finished() {
+            return Ok(());
+        }
+
+        let running = self.download.take().expect("running download");
+        self.state.set_mode(Mode::Browse);
+        match running.task.await? {
+            Ok(()) => {
+                tracing::info!("Local model download completed");
+                self.state.refresh(&load_state(), &self.registry)?;
+                self.state.toast(Toast::success("Download complete"));
+            }
+            Err(error) if error.to_string() == "model download cancelled" => {
+                tracing::debug!("Local model download cancelled");
+            }
+            Err(error) => {
+                tracing::error!("Local model download failed: {}", error);
+                self.state.set_mode(Mode::Error {
+                    message: error.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+
+    fn delete(&mut self, entry: &LocalModelEntry) -> anyhow::Result<()> {
+        self.state.set_mode(Mode::Browse);
+        match delete_entry(entry) {
+            Ok(()) => {
+                tracing::info!("Deleted local model '{}'", entry.id);
+                if entry.is_daemon_loaded {
+                    stop_daemon_for_deleted_model(&entry.id);
+                }
+                self.state
+                    .toast(Toast::success(format!("Deleted {}", entry.name)));
+                self.state.refresh(&load_state(), &self.registry)?;
+            }
+            Err(error) => {
+                tracing::error!("Failed to delete local model '{}': {}", entry.id, error);
+                self.state.set_mode(Mode::Error {
+                    message: error.to_string(),
+                });
+            }
+        }
+        Ok(())
+    }
+}
+
+fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: ratatui::layout::Rect, state: &State) {
+    match &state.mode {
+        Mode::Info { entry } => ctx.paint_widget(info::paragraph(entry), body),
+        _ => list::declare(ctx, body),
+    }
+    if let (Some(id), Some(dialog)) = (state.mode.modal_id(), dialogs::dialog(state)) {
+        ctx.modal(id, dialog, ctx.area());
+    }
+}
+
+/// Confirmation keys answer the open dialog before its buttons see them.
+fn dialog_shortcut(mode: &Mode, event: &Event) -> Option<Msg> {
+    let Event::Key(key) = event else {
+        return None;
     };
-    LocalModelListView::prepare(tui, body.height);
-    if let LocalModelsMode::Info { entry } = &tui.mode {
-        render_themed_title(frame, layout.title, &entry.name, theme);
-    }
-    let area = frame.area();
-    ratcn.render(frame, area, tui, theme, |ctx| {
-        if matches!(tui.mode, LocalModelsMode::Info { .. }) {
-            LocalModelInfoView::declare(ctx, layout.body);
-        } else {
-            LocalModelListView::declare(ctx, body);
+    match (mode, key.code) {
+        (Mode::ConfirmDownload { .. } | Mode::ConfirmDelete { .. }, KeyCode::Char('y' | 'Y')) => {
+            Some(Msg::Accept)
         }
-        let offset = tui.dialog_offset;
-        match &tui.mode {
-            LocalModelsMode::ConfirmDelete { entry } => ctx.modal(
-                "delete",
-                LocalModelDeleteConfirmationDialog::dialog(entry, offset),
-                area,
-            ),
-            LocalModelsMode::ConfirmDownload { entry } => ctx.modal(
-                "download",
-                LocalModelDownloadConfirmationDialog::dialog(entry, offset),
-                area,
-            ),
-            LocalModelsMode::CustomModelInput { .. } => {
-                ctx.modal("url", CustomModelUrlInputDialog::dialog(offset), area)
-            }
-            LocalModelsMode::CustomModelDetails { .. } => {
-                ctx.modal("details", CustomModelDetailsDialog::dialog(offset), area)
-            }
-            LocalModelsMode::Downloading(download) => ctx.modal(
-                "progress",
-                LocalModelDownloadProgressDialog::dialog(download, offset),
-                area,
-            ),
-            LocalModelsMode::ErrorDialog { message, .. } => ctx.modal(
-                "error",
-                model_dialog("Error", message.clone(), "Close", offset),
-                area,
-            ),
-            _ => {}
+        (Mode::ConfirmDownload { .. } | Mode::ConfirmDelete { .. }, KeyCode::Char('n' | 'N')) => {
+            Some(Msg::Dismiss)
         }
-    });
-    render_themed_footer(
-        frame,
-        layout.footer,
-        if matches!(tui.mode, LocalModelsMode::Info { .. }) {
-            "esc/q back"
-        } else {
-            "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back"
-        },
-        theme,
-    );
-    if let Some(toast) = &tui.toast {
-        render_toast(frame, toast, theme);
+        (Mode::Downloading(_), KeyCode::Tab) => Some(Msg::Dismiss),
+        _ => None,
     }
+}
+
+/// Keys no component wanted.
+fn shortcut(mode: &Mode, event: &Event) -> Option<Msg> {
+    let Event::Key(key) = event else {
+        return None;
+    };
+    match (mode, key.code) {
+        (Mode::Browse, KeyCode::Down) => Some(Msg::Next),
+        (Mode::Browse, KeyCode::Up) => Some(Msg::Previous),
+        (Mode::Browse, KeyCode::Enter) => Some(Msg::Accept),
+        (Mode::Browse, KeyCode::Char('i')) => Some(Msg::Info),
+        (Mode::Browse, KeyCode::Char('c')) => Some(Msg::Custom),
+        (Mode::Browse, KeyCode::Char('x' | 'd') | KeyCode::Delete) => Some(Msg::Delete),
+        (Mode::Info { .. }, _) if session::is_cancel(event) => Some(Msg::Dismiss),
+        _ => None,
+    }
+}
+
+async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
+    if entry.provider_id != "whisper" {
+        config::save_selected_model(&entry.provider_id, &entry.id)?;
+        return Ok(());
+    }
+    if !model_destination(&entry.registry_entry()).exists() {
+        anyhow::bail!("Download first with [d]");
+    }
+    config::save_selected_model(&entry.provider_id, &entry.id)?;
+    reload_daemon_if_running(&entry.id).await
 }
 
 pub(crate) fn build_model_entries(
@@ -272,7 +415,6 @@ pub(crate) fn build_model_entries(
         selected_model,
     ));
     entries.extend(build_local_model_entries(
-        local_state,
         registry,
         selected_model,
         daemon_model_id,
@@ -392,12 +534,10 @@ fn build_cloud_model_entries(
 }
 
 pub(crate) fn build_local_model_entries(
-    local_state: &LocalModelState,
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
     daemon_model_id: Option<&str>,
 ) -> Vec<LocalModelEntry> {
-    let _ = local_state;
     registry
         .iter()
         .map(|entry| {
@@ -442,160 +582,6 @@ fn local_model_entry_from_registry_entry(
     }
 }
 
-fn downloaded_model_disk_usage_bytes(entries: &[LocalModelEntry]) -> u64 {
-    entries
-        .iter()
-        .filter(|entry| entry.provider_id == "whisper")
-        .filter(|entry| entry.is_downloaded)
-        .filter_map(|entry| {
-            model_destination(&registry_entry_from_model(entry))
-                .metadata()
-                .ok()
-        })
-        .map(|metadata| metadata.len())
-        .sum()
-}
-
-fn shortcut(mode: &LocalModelsMode, key: KeyEvent) -> Option<Msg> {
-    match (mode, key.code) {
-        (LocalModelsMode::Browse, KeyCode::Char('q') | KeyCode::Esc) => Some(Msg::Quit),
-        (LocalModelsMode::Browse, KeyCode::Down) => Some(Msg::Next),
-        (LocalModelsMode::Browse, KeyCode::Up) => Some(Msg::Previous),
-        (LocalModelsMode::Browse, KeyCode::Enter) => Some(Msg::Accept),
-        (LocalModelsMode::Browse, KeyCode::Char('i')) => Some(Msg::Info),
-        (LocalModelsMode::Browse, KeyCode::Char('c')) => Some(Msg::Custom),
-        (LocalModelsMode::Browse, KeyCode::Char('x' | 'd') | KeyCode::Delete) => Some(Msg::Delete),
-        (LocalModelsMode::Info { .. }, KeyCode::Esc | KeyCode::Char('q')) => Some(Msg::Dismiss),
-        (
-            LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. },
-            KeyCode::Char('y' | 'Y'),
-        ) => Some(Msg::Accept),
-        (
-            LocalModelsMode::ConfirmDownload { .. } | LocalModelsMode::ConfirmDelete { .. },
-            KeyCode::Char('n' | 'N'),
-        ) => Some(Msg::Dismiss),
-        (LocalModelsMode::Downloading(_), KeyCode::Tab) => Some(Msg::Dismiss),
-        _ => None,
-    }
-}
-
-async fn update(
-    tui: &mut LocalModelsTui,
-    registry: &[RegistryEntry],
-    running_download: &mut Option<RunningDownload>,
-    msg: Msg,
-) -> anyhow::Result<bool> {
-    match msg {
-        Msg::Focus(focus) => tui.focus = focus,
-        Msg::Move(offset) => tui.dialog_offset = offset,
-        Msg::Url(value) => {
-            if let LocalModelsMode::CustomModelInput { input } = &mut tui.mode {
-                *input = value;
-            }
-        }
-        Msg::Id(value) => {
-            if let LocalModelsMode::CustomModelDetails { id_input, .. } = &mut tui.mode {
-                *id_input = value;
-            }
-        }
-        Msg::Name(value) => {
-            if let LocalModelsMode::CustomModelDetails { name_input, .. } = &mut tui.mode {
-                *name_input = value;
-            }
-        }
-        Msg::Quit => return Ok(true),
-        Msg::Previous => tui.move_selection_up(),
-        Msg::Next => tui.move_selection_down(),
-        Msg::Info => {
-            tracing::debug!("Opening local model info view");
-            tui.show_info();
-        }
-        Msg::Custom => {
-            tracing::debug!("Opening custom local model input dialog");
-            tui.toast = None;
-            tui.show_custom_input();
-        }
-        Msg::Delete => tui.confirm_delete(),
-        Msg::Accept => match tui.mode.clone() {
-            LocalModelsMode::Browse => handle_selected_entry(tui, registry).await?,
-            LocalModelsMode::CustomModelInput { input } => {
-                resolve_custom_input(tui, input.value()).await
-            }
-            LocalModelsMode::CustomModelDetails { .. } => {
-                start_custom_details_download(tui, running_download)
-            }
-            LocalModelsMode::ConfirmDownload { entry } => {
-                start_confirmed_download(tui, running_download, &entry)
-            }
-            LocalModelsMode::ConfirmDelete { entry } => {
-                delete_confirmed_entry(tui, registry, &entry)?
-            }
-            LocalModelsMode::Downloading(_) => cancel_download(running_download),
-            LocalModelsMode::ErrorDialog { .. } => tui.close_error_dialog(),
-            LocalModelsMode::Info { .. } => {}
-        },
-        Msg::Dismiss => match tui.mode {
-            LocalModelsMode::Downloading(_) => cancel_download(running_download),
-            LocalModelsMode::ErrorDialog { .. } => tui.close_error_dialog(),
-            _ => tui.back_to_browse(),
-        },
-    }
-
-    tui.sync_modal()?;
-    Ok(false)
-}
-
-async fn handle_selected_entry(
-    tui: &mut LocalModelsTui,
-    registry: &[RegistryEntry],
-) -> anyhow::Result<()> {
-    let Some(entry) = tui.selected_entry().cloned() else {
-        return Ok(());
-    };
-    tracing::debug!("Selected local model '{}'", entry.id);
-
-    if entry.provider_id == "whisper" && !entry.is_downloaded {
-        if entry.is_available_in_registry {
-            tracing::debug!("Confirming download for local model '{}'", entry.id);
-            tui.mode = LocalModelsMode::ConfirmDownload { entry };
-        } else {
-            tui.show_error_dialog("Custom models must be added through [c]".to_string());
-        }
-        return Ok(());
-    }
-
-    match activate_entry(&entry).await {
-        Ok(()) => {
-            tracing::info!("Activated local model '{}'", entry.id);
-            tui.toast = Some(Toast::success(format!("Activated {}", entry.name)));
-            tui.refresh(&load_state(), registry)?;
-        }
-        Err(error) => {
-            tracing::error!("Failed to activate local model '{}': {}", entry.id, error);
-            tui.toast = Some(Toast::error(error.to_string()));
-        }
-    }
-    Ok(())
-}
-
-async fn activate_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
-    if entry.provider_id != "whisper" {
-        config::save_selected_model(&entry.provider_id, &entry.id)?;
-        return Ok(());
-    }
-
-    if !entry.is_downloaded {
-        anyhow::bail!("Download first with [d]");
-    }
-    let path = model_destination(&registry_entry_from_model(entry));
-    if !path.exists() {
-        anyhow::bail!("Download first with [d]");
-    }
-    config::save_selected_model(&entry.provider_id, &entry.id)?;
-    reload_daemon_if_running(&entry.id).await?;
-    Ok(())
-}
-
 async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
     let Some(info) = crate::transcription::daemon_client::probe_daemon().await else {
         tracing::debug!(
@@ -617,19 +603,17 @@ async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
     crate::transcription::daemon_client::ensure_daemon(model_id, None).await
 }
 
-fn start_confirmed_download(
-    tui: &mut LocalModelsTui,
-    running_download: &mut Option<RunningDownload>,
-    entry: &LocalModelEntry,
-) {
-    tracing::info!("Starting download for local model '{}'", entry.id);
-    let running = start_download(registry_entry_from_model(entry), false);
-    sync_download_progress(tui, &running);
-    *running_download = Some(running);
-}
-
-fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
-    let state = Arc::new(Mutex::new(initial_download_state(&entry, is_custom)));
+fn spawn_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
+    let state = Arc::new(Mutex::new(DownloadState {
+        model_id: entry.id.clone(),
+        provider_id: entry.provider_id.clone(),
+        downloaded_bytes: 0,
+        total_bytes: u64::from(entry.size_mb) * 1024 * 1024,
+        progress: 0.0,
+        speed_mbps: 0.0,
+        status: "Starting download".to_string(),
+        is_custom,
+    }));
     let progress_state = state.clone();
     let handle = DownloadHandle::new();
     let task_handle = handle.clone();
@@ -686,112 +670,10 @@ fn start_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
     }
 }
 
-fn initial_download_state(entry: &RegistryEntry, is_custom: bool) -> DownloadState {
-    DownloadState {
-        model_id: entry.id.clone(),
-        provider_id: entry.provider_id.clone(),
-        downloaded_bytes: 0,
-        total_bytes: u64::from(entry.size_mb) * 1024 * 1024,
-        progress: 0.0,
-        speed_mbps: 0.0,
-        status: "Starting download".to_string(),
-        is_complete: false,
-        is_custom,
+fn sync_download_progress(state: &mut State, running: &RunningDownload) {
+    if let Ok(download) = running.state.lock() {
+        state.set_mode(Mode::Downloading(download.clone()));
     }
-}
-
-fn cancel_download(running_download: &mut Option<RunningDownload>) {
-    if let Some(running) = running_download.as_ref() {
-        tracing::info!("Cancelling local model download");
-        running.handle.cancel();
-        if let Ok(mut state) = running.state.lock() {
-            state.status = "Cancelling download".to_string();
-        }
-    }
-}
-
-async fn resolve_custom_input(tui: &mut LocalModelsTui, value: &str) {
-    tracing::debug!("Resolving custom local model input");
-    match resolve_custom_model(value).await {
-        Ok(entry) => {
-            tracing::debug!("Resolved custom local model '{}'", entry.id);
-            tui.toast = None;
-            tui.mode = LocalModelsMode::CustomModelDetails {
-                id_input: Input::new(entry.id.clone()),
-                name_input: Input::new(entry.name.clone()),
-                resolved_entry: entry,
-            };
-        }
-        Err(error) => {
-            tracing::error!("Failed to resolve custom local model input: {}", error);
-            tui.toast = Some(Toast::error(error.to_string()));
-        }
-    }
-}
-
-fn start_custom_details_download(
-    tui: &mut LocalModelsTui,
-    running_download: &mut Option<RunningDownload>,
-) {
-    let LocalModelsMode::CustomModelDetails {
-        mut resolved_entry,
-        id_input,
-        name_input,
-        ..
-    } = tui.mode.clone()
-    else {
-        return;
-    };
-    let id = id_input.value().trim();
-    let name = name_input.value().trim();
-    if !is_safe_model_id(id) {
-        tui.toast = Some(Toast::error(
-            "Model ID must use lowercase letters, numbers, '.', '_' or '-'",
-        ));
-        return;
-    }
-    if tui.entries.iter().any(|entry| entry.id == id) {
-        tui.toast = Some(Toast::error(format!("Model ID '{id}' already exists")));
-        return;
-    }
-    if name.is_empty() {
-        tui.toast = Some(Toast::error("Model name is required"));
-        return;
-    }
-    resolved_entry.id = id.to_string();
-    resolved_entry.name = name.to_string();
-    if let Err(error) = validate_custom_model_registration(&resolved_entry) {
-        tui.toast = Some(Toast::error(error.to_string()));
-        return;
-    }
-    tracing::info!("Starting download for custom local model '{id}'");
-    let running = start_download(resolved_entry, true);
-    sync_download_progress(tui, &running);
-    *running_download = Some(running);
-}
-
-fn delete_confirmed_entry(
-    tui: &mut LocalModelsTui,
-    registry: &[RegistryEntry],
-    entry: &LocalModelEntry,
-) -> anyhow::Result<()> {
-    match delete_entry(entry) {
-        Ok(()) => {
-            tracing::info!("Deleted local model '{}'", entry.id);
-            if entry.is_daemon_loaded {
-                stop_daemon_for_deleted_model(&entry.id);
-            }
-            tui.toast = Some(Toast::success(format!("Deleted {}", entry.name)));
-            tui.back_to_browse();
-            tui.refresh(&load_state(), registry)?;
-        }
-        Err(error) => {
-            tracing::error!("Failed to delete local model '{}': {}", entry.id, error);
-            tui.back_to_browse();
-            tui.show_error_dialog(error.to_string());
-        }
-    }
-    Ok(())
 }
 
 fn stop_daemon_for_deleted_model(model_id: &str) {
@@ -813,7 +695,7 @@ fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let path = model_destination(&registry_entry_from_model(entry));
+    let path = model_destination(&entry.registry_entry());
     std::fs::remove_file(&path)?;
     if config::get_selected_model_entry()?.is_some_and(|selected| {
         selected.provider_id == entry.provider_id && selected.model_id == entry.id
@@ -823,69 +705,18 @@ fn delete_entry(entry: &LocalModelEntry) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn finish_completed_download(
-    tui: &mut LocalModelsTui,
-    registry: &[RegistryEntry],
-    running_download: &mut Option<RunningDownload>,
-) -> anyhow::Result<()> {
-    let Some(running) = running_download.as_ref() else {
-        return Ok(());
-    };
-
-    sync_download_progress(tui, running);
-    if !running.task.is_finished() {
-        return Ok(());
-    }
-
-    let running = running_download.take().expect("running download");
-    match running.task.await? {
-        Ok(()) => {
-            tracing::info!("Local model download completed");
-            tui.back_to_browse();
-            tui.refresh(&load_state(), registry)?;
-            tui.toast = Some(Toast::success("Download complete"));
-        }
-        Err(error) => {
-            if error.to_string() != "model download cancelled" {
-                tracing::error!("Local model download failed: {}", error);
-                tui.back_to_browse();
-                tui.show_error_dialog(error.to_string());
-            } else {
-                tracing::debug!("Local model download cancelled");
-                tui.back_to_browse();
-            }
-        }
-    }
-    Ok(())
-}
-
-fn sync_download_progress(tui: &mut LocalModelsTui, running: &RunningDownload) {
-    if let Ok(state) = running.state.lock() {
-        tui.mode = LocalModelsMode::Downloading(state.clone());
-    }
-}
-
-fn registry_entry_from_model(entry: &LocalModelEntry) -> RegistryEntry {
-    RegistryEntry {
-        id: entry.id.clone(),
-        provider_id: entry.provider_id.clone(),
-        name: entry.name.clone(),
-        description: entry.description.clone(),
-        languages: entry.languages.clone(),
-        size_mb: entry.size_mb,
-        url: entry.url.clone(),
-        recommended_hardware: entry.recommended_hardware.clone(),
-        sha256: entry.sha256.clone(),
-        category: entry.category.clone(),
-        group_id: entry.group_id.clone(),
+pub(super) fn format_bytes(bytes: u64) -> String {
+    let mb = bytes as f64 / (1024.0 * 1024.0);
+    if mb >= 1024.0 {
+        format!("{:.1} GB", mb / 1024.0)
+    } else {
+        format!("{mb:.0} MB")
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::types::LocalModelEntry;
     use super::*;
-    use crate::config::SelectedModel;
     use crate::transcription::local_models::{
         model_files_dir, set_test_models_dir, LocalModelState, RegistryEntry, TEST_ENV_LOCK,
     };
@@ -945,87 +776,6 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn model_messages_transition_modal_state_before_the_next_frame() {
-        let mut tui = LocalModelsTui::new(Vec::new(), 0);
-        tui.focus = FocusState::intent(["models"]);
-        let mut running = None;
-        update(&mut tui, &[], &mut running, Msg::Custom)
-            .await
-            .unwrap();
-        assert_eq!(tui.modals.top().map(|id| id.as_str()), Some("url"));
-        let mut ratcn = runtime();
-        let mut terminal =
-            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
-        terminal
-            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &Theme::default_dark()))
-            .unwrap();
-        let EventResult::Emit(msg @ Msg::Url(_)) = ratcn.handle_event(KeyCode::Char('q'), &tui)
-        else {
-            panic!("q must remain valid URL/name text")
-        };
-        update(&mut tui, &[], &mut running, msg).await.unwrap();
-        let LocalModelsMode::CustomModelInput { input } = &tui.mode else {
-            panic!("typing must not leave input mode")
-        };
-        assert_eq!(input.value(), "q");
-        update(&mut tui, &[], &mut running, Msg::Dismiss)
-            .await
-            .unwrap();
-        assert!(tui.modals.top().is_none());
-        assert_eq!(tui.focus, FocusState::intent(["models"]));
-        assert!(
-            matches!(
-                ratcn.handle_event(KeyCode::Enter, &tui),
-                EventResult::Consumed
-            ),
-            "closing before redraw cannot access fields from the old mode"
-        );
-    }
-
-    #[test]
-    fn model_information_and_forms_share_the_same_runtime_and_active_palette() {
-        let entry =
-            local_model_entry_from_registry_entry(&registry_entry("small"), &[], None, None);
-        let mut tui = LocalModelsTui::new(vec![entry.clone()], 0);
-        let mut ratcn = runtime();
-        let theme = Theme::adaptive(
-            ratatui::style::Color::Rgb(253, 246, 227),
-            ratatui::style::Color::Rgb(101, 123, 131),
-            None,
-        );
-        let mut terminal =
-            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
-        tui.mode = LocalModelsMode::Info { entry };
-        terminal
-            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &theme))
-            .unwrap();
-        let screen: String = terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect();
-        assert!(screen.contains("ID: whisper/small"));
-        assert_eq!(terminal.backend().buffer()[(99, 0)].bg, theme.background);
-        tui.show_custom_input();
-        tui.sync_modal().unwrap();
-        terminal
-            .draw(|frame| render_local_models(frame, &mut tui, &mut ratcn, &theme))
-            .unwrap();
-        assert!(terminal
-            .backend()
-            .buffer()
-            .content
-            .iter()
-            .any(|cell| cell.bg == theme.surface));
-        assert!(matches!(
-            ratcn.handle_event(Event::Paste("https://example.com/model.bin".into()), &tui),
-            EventResult::Emit(Msg::Url(_))
-        ));
-    }
-
     #[test]
     fn model_picker_opens_on_active_model() {
         let entries = vec![
@@ -1065,7 +815,7 @@ mod tests {
             },
         ];
 
-        let tui = types::LocalModelsTui::new(entries, 0);
+        let tui = State::new(entries);
 
         assert_eq!(
             tui.selected_entry().map(|entry| entry.id.as_str()),
@@ -1141,29 +891,11 @@ mod tests {
                 model_id: "turbo".to_string(),
             };
 
-            let entries = build_local_model_entries(
-                &LocalModelState::default(),
-                &registry,
-                Some(&selected),
-                None,
-            );
+            let entries = build_local_model_entries(&registry, Some(&selected), None);
 
             assert_eq!(entries.len(), 1);
             assert!(entries[0].is_downloaded);
             assert!(entries[0].is_active);
-        });
-    }
-
-    #[test]
-    fn disk_usage_sums_downloaded_model_files_only() {
-        with_isolated_models_dir(|_| {
-            let registry = vec![registry_entry("turbo"), registry_entry("base")];
-            fs::create_dir_all(model_files_dir()).expect("create files dir");
-            fs::write(model_files_dir().join("turbo.bin"), [1, 2, 3]).expect("write model");
-            let entries =
-                build_local_model_entries(&LocalModelState::default(), &registry, None, None);
-
-            assert_eq!(downloaded_model_disk_usage_bytes(&entries), 3);
         });
     }
 
@@ -1186,108 +918,17 @@ mod tests {
             sha256: None,
             group_id: None,
         }];
-        let mut tui = types::LocalModelsTui::new(entries.clone(), 0);
+        let mut tui = State::new(entries.clone());
 
         tui.confirm_delete();
-        assert!(matches!(tui.mode, LocalModelsMode::Browse));
+        assert!(matches!(tui.mode, Mode::Browse));
 
         entries[0].is_downloaded = true;
-        let mut tui = types::LocalModelsTui::new(entries, 0);
+        let mut tui = State::new(entries);
         tui.confirm_delete();
         assert!(matches!(
             tui.mode,
-            LocalModelsMode::ConfirmDelete { ref entry, .. } if entry.id == "missing"
+            Mode::ConfirmDelete { ref entry, .. } if entry.id == "missing"
         ));
-    }
-
-    #[test]
-    fn selection_navigation_stays_in_bounds() {
-        let entries = vec![
-            LocalModelEntry {
-                id: "a".to_string(),
-                provider_id: "whisper".to_string(),
-                name: "A".to_string(),
-                description: String::new(),
-                size_mb: 1,
-                is_downloaded: false,
-                is_active: false,
-                is_daemon_loaded: false,
-                is_available_in_registry: true,
-                languages: Vec::new(),
-                url: "https://example.com/a.bin".to_string(),
-                recommended_hardware: None,
-                category: None,
-                sha256: None,
-                group_id: None,
-            },
-            LocalModelEntry {
-                id: "b".to_string(),
-                provider_id: "whisper".to_string(),
-                name: "B".to_string(),
-                description: String::new(),
-                size_mb: 1,
-                is_downloaded: false,
-                is_active: false,
-                is_daemon_loaded: false,
-                is_available_in_registry: true,
-                languages: Vec::new(),
-                url: "https://example.com/b.bin".to_string(),
-                recommended_hardware: None,
-                category: None,
-                sha256: None,
-                group_id: None,
-            },
-        ];
-        let mut tui = types::LocalModelsTui::new(entries, 0);
-
-        tui.move_selection_up();
-        assert_eq!(tui.selected, 0);
-        tui.move_selection_down();
-        tui.move_selection_down();
-        assert_eq!(tui.selected, 1);
-    }
-
-    #[test]
-    fn grouped_display_index_finds_position_within_rendered_groups() {
-        use super::local_model_list_view::grouped_display_index;
-
-        let entries = vec![
-            LocalModelEntry {
-                id: "tiny".to_string(),
-                provider_id: "whisper".to_string(),
-                name: "Tiny".to_string(),
-                description: String::new(),
-                size_mb: 1,
-                is_downloaded: false,
-                is_active: false,
-                is_daemon_loaded: false,
-                is_available_in_registry: true,
-                languages: Vec::new(),
-                url: "https://example.com/tiny.bin".to_string(),
-                recommended_hardware: None,
-                category: None,
-                sha256: None,
-                group_id: Some("group-a".to_string()),
-            },
-            LocalModelEntry {
-                id: "large".to_string(),
-                provider_id: "whisper".to_string(),
-                name: "Large".to_string(),
-                description: String::new(),
-                size_mb: 1,
-                is_downloaded: true,
-                is_active: false,
-                is_daemon_loaded: false,
-                is_available_in_registry: true,
-                languages: Vec::new(),
-                url: "https://example.com/large.bin".to_string(),
-                recommended_hardware: None,
-                category: None,
-                sha256: None,
-                group_id: None,
-            },
-        ];
-        let idx = grouped_display_index(entries.iter().collect(), "whisper/tiny", 0);
-        assert_eq!(idx, Some(4));
     }
 }

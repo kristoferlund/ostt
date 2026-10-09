@@ -164,7 +164,7 @@ pub async fn execute_action_with_animation(
     let mut cancelled = false;
     loop {
         // Render animation frame
-        let theme = session::theme(&session);
+        let theme = session.theme();
         session.terminal_mut().draw(|frame| {
             let area = frame.area();
             animation.update();
@@ -176,7 +176,7 @@ pub async fn execute_action_with_animation(
             break;
         }
 
-        if session::next(&mut session, Some(std::time::Duration::from_millis(50)))?
+        if session::next_event(&mut session, Some(std::time::Duration::from_millis(50)))?
             .as_ref()
             .is_some_and(session::is_cancel)
         {
