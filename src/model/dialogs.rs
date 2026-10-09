@@ -1,65 +1,83 @@
 //! The model screen's dialogs. Each is rebuilt from state every frame.
 
 use ratatui::{
-    layout::{Constraint, Layout},
+    layout::{Constraint, Layout, Rect},
     widgets::Paragraph,
 };
-use ratcn::{Button, Dialog, Input, ProgressWidget};
+use ratcn::{runtime::DeclareCtx, Dialog, Input, ProgressWidget};
 
 use super::types::{DownloadState, Mode, ModelEntry, State};
 use super::{format_bytes, Msg};
 use crate::transcription::local_models::full_model_id;
-use crate::ui::components::modal::form_dialog;
+use crate::ui::components::modal::{self, form_dialog, message_dialog};
 
 pub(super) fn dialog(state: &State) -> Option<Dialog<State, Msg>> {
     let dialog = match &state.mode {
         Mode::Browse | Mode::Info { .. } => return None,
         Mode::CustomUrl => form_dialog(
-            base("Download Custom Whisper Model 1/3", "Next"),
+            "Download Custom Whisper Model 1/3",
             "Paste a Hugging Face model page or a direct model file URL.\nSupported files: .gguf and ggml-*.bin.",
-            vec![Input::new()
-                .title("URL")
-                .value(|s: &State| &s.url_input, Msg::Url)
-                .on_submit(|| Msg::Accept)],
+            vec![(
+                "",
+                Input::new()
+                    .placeholder("https://huggingface.co/…")
+                    .value(|s: &State| &s.url_input, Msg::Url)
+                    .on_submit(|| Msg::Accept),
+            )],
+            "Next",
+            || Msg::Accept,
         ),
         Mode::CustomDetails { .. } => form_dialog(
-            base("Download Custom Whisper Model 2/3", "Download"),
+            "Download Custom Whisper Model 2/3",
             "Choose how this custom model should appear in OSTT.",
             vec![
-                Input::new()
-                    .title("ID")
-                    .value(|s: &State| &s.id_input, Msg::Id)
-                    .on_submit(|| Msg::Accept),
-                Input::new()
-                    .title("Name")
-                    .value(|s: &State| &s.name_input, Msg::Name)
-                    .on_submit(|| Msg::Accept),
+                (
+                    "ID",
+                    Input::new()
+                        .value(|s: &State| &s.id_input, Msg::Id)
+                        .on_submit(|| Msg::Accept),
+                ),
+                (
+                    "Name",
+                    Input::new()
+                        .value(|s: &State| &s.name_input, Msg::Name)
+                        .on_submit(|| Msg::Accept),
+                ),
             ],
+            "Download",
+            || Msg::Accept,
         ),
-        Mode::ConfirmDownload { entry } => base("Start Download", "Download").description(format!(
-            "Download \"{}\"?\nID: {}\n\nSize: {}",
-            entry.name,
-            full_model_id(&entry.provider_id, &entry.id),
-            entry_size(entry)
-        )),
+        Mode::ConfirmDownload { entry } => message_dialog(
+            "Start Download",
+            format!(
+                "Download \"{}\"?\nID: {}\n\nSize: {}",
+                entry.name,
+                full_model_id(&entry.provider_id, &entry.id),
+                entry_size(entry)
+            ),
+            "Download",
+            || Msg::Accept,
+        ),
         Mode::Downloading(download) => progress(download),
-        Mode::ConfirmDelete { entry } => base("Confirm Delete", "Delete").description(format!(
-            "Delete \"{}\" ({})?\nID: {}\n\nThis cannot be undone.",
-            entry.name,
-            entry_size(entry),
-            full_model_id(&entry.provider_id, &entry.id)
-        )),
-        Mode::Error { message } => base("Error", "Close").description(message.clone()),
+        Mode::ConfirmDelete { entry } => message_dialog(
+            "Confirm Delete",
+            format!(
+                "Delete \"{}\" ({})?\nID: {}\n\nThis cannot be undone.",
+                entry.name,
+                entry_size(entry),
+                full_model_id(&entry.provider_id, &entry.id)
+            ),
+            "Delete",
+            || Msg::Accept,
+        ),
+        Mode::Error { message } => message_dialog("Error", message.clone(), "Close", || Msg::Accept),
     };
-    Some(dialog.offset(state.dialog_offset))
-}
-
-fn base(title: &str, action: &'static str) -> Dialog<State, Msg> {
-    Dialog::new()
-        .title(title)
-        .on_offset_change(Msg::DialogMoved)
-        .on_dismiss(|| Msg::Dismiss)
-        .action("accept", Button::new(action).on_press(|| Msg::Accept))
+    Some(
+        dialog
+            .offset(state.dialog_offset)
+            .on_offset_change(Msg::DialogMoved)
+            .on_dismiss(|| Msg::Dismiss),
+    )
 }
 
 fn entry_size(entry: &ModelEntry) -> String {
@@ -95,13 +113,13 @@ fn progress(download: &DownloadState) -> Dialog<State, Msg> {
     } else {
         download.status.as_str()
     };
-    base(title, "Cancel").content(7, move |ctx| {
+    let body = move |ctx: &mut DeclareCtx<'_, State, Msg>, area: Rect| {
         let [heading, bar, stats_area] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(2),
             Constraint::Length(2),
         ])
-        .areas(ctx.area());
+        .areas(area);
         ctx.paint_widget(Paragraph::new(model), heading);
         ctx.paint(move |paint| {
             paint.widget(
@@ -112,5 +130,6 @@ fn progress(download: &DownloadState) -> Dialog<State, Msg> {
             )
         });
         ctx.paint_widget(Paragraph::new(stats), stats_area);
-    })
+    };
+    modal::dialog(title, 7, body, "Cancel", || Msg::Accept)
 }

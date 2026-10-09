@@ -6,7 +6,7 @@ use anyhow::Result;
 use ratatui::layout::Rect;
 use ratcn::{
     runtime::{CellOffset, DeclareCtx, Event, FocusState, KeyCode, ModalState, Ratcn},
-    Button, Dialog, Input, InputState,
+    Input, InputState,
 };
 use std::fs;
 
@@ -177,23 +177,25 @@ fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect, state: &State) {
         body,
     );
     if state.modals.is_open(FORM) {
-        let form = Dialog::new()
-            .title("New replace")
+        let fields = vec![
+            (
+                "Find",
+                Input::new()
+                    .value(|s: &State| &s.source_input, Msg::Source)
+                    .on_submit(|| Msg::Next),
+            ),
+            (
+                "Replace",
+                Input::new()
+                    .value(|s: &State| &s.target_input, Msg::Target)
+                    .on_submit(|| Msg::Add),
+            ),
+        ];
+        let form = form_dialog("New replace", "", fields, "Add", || Msg::Add)
             .offset(state.form_offset)
             .on_offset_change(Msg::FormMoved)
-            .on_dismiss(|| Msg::Dismiss)
-            .action("add", Button::new("Add").on_press(|| Msg::Add));
-        let inputs = vec![
-            Input::new()
-                .title("Find")
-                .value(|s: &State| &s.source_input, Msg::Source)
-                .on_submit(|| Msg::Next),
-            Input::new()
-                .title("Replace")
-                .value(|s: &State| &s.target_input, Msg::Target)
-                .on_submit(|| Msg::Add),
-        ];
-        ctx.modal(FORM, form_dialog(form, "", inputs), ctx.area());
+            .on_dismiss(|| Msg::Dismiss);
+        ctx.modal(FORM, form, ctx.area());
     }
 }
 

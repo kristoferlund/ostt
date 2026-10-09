@@ -8,7 +8,7 @@ use anyhow::Result;
 use ratatui::layout::Rect;
 use ratcn::{
     runtime::{CellOffset, DeclareCtx, Event, FocusState, KeyCode, ModalState, Ratcn},
-    Button, Dialog, Input, InputState,
+    Input, InputState,
 };
 
 const FORM: &str = "keyword";
@@ -138,17 +138,16 @@ fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect, state: &State) {
         body,
     );
     if state.modals.is_open(FORM) {
-        let form = Dialog::new()
-            .title("New Keyword")
-            .offset(state.form_offset)
-            .on_offset_change(Msg::FormMoved)
-            .on_dismiss(|| Msg::Dismiss)
-            .action("add", Button::new("Add").on_press(|| Msg::Add));
         let input = Input::new()
-            .title("Keyword")
             .value(|s: &State| &s.input, Msg::Input)
             .on_submit(|| Msg::Add);
-        ctx.modal(FORM, form_dialog(form, "", vec![input]), ctx.area());
+        let form = form_dialog("New keyword", "", vec![("Keyword", input)], "Add", || {
+            Msg::Add
+        })
+        .offset(state.form_offset)
+        .on_offset_change(Msg::FormMoved)
+        .on_dismiss(|| Msg::Dismiss);
+        ctx.modal(FORM, form, ctx.area());
     }
 }
 
