@@ -1,7 +1,7 @@
 //! The model screen's dialogs. Each is rebuilt from state every frame.
 
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Layout},
     widgets::Paragraph,
 };
 use ratcn::{runtime::DeclareCtx, Dialog, Input, ProgressWidget};
@@ -103,7 +103,8 @@ fn progress(download: &DownloadState) -> Dialog<State, Msg> {
         format_bytes(download.total_bytes)
     };
     let stats = format!(
-        "{} / {total}  •  {:.1} MB/s  •  {eta}",
+        "{:.0}%  •  {} / {total}  •  {:.1} MB/s  •  {eta}",
+        download.progress * 100.0,
         format_bytes(download.downloaded_bytes),
         download.speed_mbps,
     );
@@ -113,23 +114,18 @@ fn progress(download: &DownloadState) -> Dialog<State, Msg> {
     } else {
         download.status.as_str()
     };
-    let body = move |ctx: &mut DeclareCtx<'_, State, Msg>, area: Rect| {
+    let body = move |ctx: &mut DeclareCtx<'_, State, Msg>| {
         let [heading, bar, stats_area] = Layout::vertical([
             Constraint::Length(3),
             Constraint::Length(2),
             Constraint::Length(2),
         ])
-        .areas(area);
-        ctx.paint_widget(Paragraph::new(model), heading);
+        .areas(ctx.area());
+        ctx.paint_widget(Paragraph::new(model).centered(), heading);
         ctx.paint(move |paint| {
-            paint.widget(
-                ProgressWidget::new(progress)
-                    .show_value(true)
-                    .themed(paint.theme),
-                bar,
-            )
+            paint.widget(ProgressWidget::new(progress).themed(paint.theme), bar)
         });
-        ctx.paint_widget(Paragraph::new(stats), stats_area);
+        ctx.paint_widget(Paragraph::new(stats).centered(), stats_area);
     };
     modal::dialog(title, 7, body, "Cancel", || Msg::Accept)
 }

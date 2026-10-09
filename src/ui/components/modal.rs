@@ -1,58 +1,40 @@
 //! Dialog declarations; focus, values, and modal lifetime belong to the command.
 //!
-//! Every dialog has ostt's look: no visible border, an underlined title with an
-//! `esc` hint, the body, and one centered `<Action>` button.
+//! Every dialog shares one look: the title, the body, and one centered
+//! `<Action>` button.
 
 use ratatui::{
-    layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
-    text::Span,
+    layout::{Constraint, Layout},
     widgets::Paragraph,
 };
-use ratcn::{runtime::DeclareCtx, Button, Dialog, DialogStyle, Input};
-
-/// The title row and the blank row under it.
-const HEADER_HEIGHT: u16 = 2;
+use ratcn::{color::dim, runtime::DeclareCtx, Button, Dialog, DialogStyle, Input};
 
 /// A dialog whose `body_height` rows of body are declared by `body`.
 pub(crate) fn dialog<S: 'static, M: 'static>(
     title: impl Into<String>,
     body_height: u16,
-    body: impl FnOnce(&mut DeclareCtx<'_, S, M>, Rect) + 'static,
+    body: impl FnOnce(&mut DeclareCtx<'_, S, M>) + 'static,
     action: &str,
     on_press: impl Fn() -> M + 'static,
 ) -> Dialog<S, M> {
-    let title = title.into();
     let button = Button::new(format!("<{action}>")).on_press(on_press);
     Dialog::new()
         .style(|theme| {
             let style = DialogStyle::from_theme(theme);
+            let bg = dim(theme.secondary_foreground, theme.background, 95);
             DialogStyle {
-                border: style.background,
+                background: bg,
+                border: theme.border,
                 ..style
             }
         })
-        .content(HEADER_HEIGHT + body_height, move |ctx| {
-            let [header, _, body_area] = Layout::vertical([
-                Constraint::Length(1),
-                Constraint::Length(1),
-                Constraint::Fill(1),
-            ])
-            .areas(ctx.area());
-            let title_style = Style::default()
-                .fg(ctx.theme.foreground)
-                .add_modifier(Modifier::UNDERLINED);
-            let hint_style = Style::default().fg(ctx.theme.muted_foreground);
-            ctx.paint_widget(Paragraph::new(Span::styled(title, title_style)), header);
-            ctx.paint_widget(
-                Paragraph::new(Span::styled("esc", hint_style)).right_aligned(),
-                header,
-            );
-            body(ctx, body_area);
-        })
+        .title(title)
+        .outer_width(70)
+        .content(body_height, body)
         .footer(1, move |ctx| {
-            let area = ctx.area();
-            let button_area = area.centered_horizontally(Constraint::Length(button.width()));
+            let button_area = ctx
+                .area()
+                .centered_horizontally(Constraint::Length(button.width()));
             ctx.component("accept", button, button_area);
         })
 }
@@ -68,7 +50,7 @@ pub(crate) fn message_dialog<S: 'static, M: 'static>(
     dialog(
         title,
         height,
-        move |ctx, area| ctx.paint_widget(Paragraph::new(text).centered(), area),
+        move |ctx| ctx.paint_widget(Paragraph::new(text).centered(), ctx.area()),
         action,
         on_press,
     )
@@ -101,8 +83,8 @@ pub(crate) fn form_dialog<S: 'static, M: 'static>(
     dialog(
         title,
         height,
-        move |ctx, area| {
-            let areas = Layout::vertical(constraints).split(area);
+        move |ctx| {
+            let areas = Layout::vertical(constraints).split(ctx.area());
             ctx.paint_widget(Paragraph::new(instructions).centered(), areas[0]);
             for (index, (label, input)) in fields.into_iter().enumerate() {
                 let row = 1 + index * 3;
