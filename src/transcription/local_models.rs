@@ -1486,6 +1486,8 @@ mod tests {
         });
     }
 
+    // The guard serializes HOME/XDG mutation with the sync tests for the whole test.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn download_model_replaces_existing_file_without_activating() {
         let _guard = test_env_lock();
@@ -1582,6 +1584,8 @@ mod tests {
         assert!(error.to_string().contains("require a URL"));
     }
 
+    // The guard serializes HOME/XDG mutation with the sync tests for the whole test.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn direct_model_file_url_resolves_to_custom_entry() {
         let _guard = test_env_lock();
@@ -1613,6 +1617,8 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    // The guard serializes HOME/XDG mutation with the sync tests for the whole test.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn hugging_face_page_resolution_selects_compatible_file() {
         let _guard = test_env_lock();

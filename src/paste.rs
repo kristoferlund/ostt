@@ -186,7 +186,9 @@ fn paste_key_failure_message(paste_key: &str) -> String {
 enum PasteKeyFailureContext {
     #[cfg(any(target_os = "macos", test))]
     Macos,
+    #[cfg(any(not(target_os = "macos"), test))]
     GnomeWayland,
+    #[cfg(any(not(target_os = "macos"), test))]
     Other,
 }
 
@@ -203,9 +205,11 @@ fn paste_key_failure_message_for_context(
             message.push_str("\nNext step: ");
             message.push_str(MACOS_ACCESSIBILITY_REMEDIATION);
         }
+        #[cfg(any(not(target_os = "macos"), test))]
         PasteKeyFailureContext::GnomeWayland => {
             message.push_str("\nGNOME Wayland does not support wtype or xdotool for native Wayland apps. Install ydotool and start ydotoold to enable auto-paste.");
         }
+        #[cfg(any(not(target_os = "macos"), test))]
         PasteKeyFailureContext::Other => {}
     }
     message
