@@ -5,7 +5,9 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 use ratcn::runtime::DeclareCtx;
-use ratcn::{List, ListItem, ListStyle};
+use ratcn::{List, ListItem};
+
+use crate::ui::components::list::list_style;
 
 use super::format_bytes;
 use super::types::{LocalModelEntry, State};
@@ -75,17 +77,7 @@ pub(super) fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect) {
             |state: &State| state.selected.map(Row::Model),
             |row| Msg::Activate(entry_index(row)),
         )
-        // Headers are disabled only so the cursor skips them; they keep the
-        // list's backdrop instead of the dimmed disabled fill. That fill is
-        // fixed, so hovering must not shift the backdrop either.
-        .style(|theme| {
-            let style = ListStyle::from_theme(theme);
-            ListStyle {
-                hovered_background: style.focused_background,
-                disabled_background: style.focused_background,
-                ..style
-            }
-        })
+        .style(list_style)
         .paint_item(|state: &State, row| match row.value {
             Row::Blank(_) => Text::default(),
             Row::Section(_) => header(row.label, Color::Green),
