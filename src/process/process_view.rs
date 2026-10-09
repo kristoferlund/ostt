@@ -58,13 +58,11 @@ fn run_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
     }
 }
 
-/// Show the action picker, skipping it when only one action is configured.
+/// Show the action picker, even for a single action, so the choice can be
+/// confirmed or cancelled.
 pub fn show_action_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
-    match actions {
-        [] => anyhow::bail!(
-            "No processing actions configured. Add actions to ~/.config/ostt/ostt.toml"
-        ),
-        [action] => Ok(PickerResult::Selected(action.id.clone())),
-        _ => run_picker(actions),
+    if actions.is_empty() {
+        anyhow::bail!("No processing actions configured. Add actions to ~/.config/ostt/ostt.toml");
     }
+    run_picker(actions)
 }

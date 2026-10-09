@@ -461,9 +461,6 @@ fn pick_action_id_with_recording_tui(
     tui: &mut RecordingTui,
     actions: &[ProcessAction],
 ) -> anyhow::Result<Option<String>> {
-    if let [action] = actions {
-        return Ok(Some(action.id.clone()));
-    }
     // The picker is the same screen `ostt process` shows, in its own session.
     tui.suspend().map_err(|e| anyhow::anyhow!(e.to_string()))?;
     let picked = process::process_view::show_action_picker(actions);
