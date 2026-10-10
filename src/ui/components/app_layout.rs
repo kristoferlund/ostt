@@ -5,35 +5,36 @@ use ratatui::Frame;
 const LOGO: &str = "┏┓┏╋╋ \n┗┛┛┗┗ \n";
 
 pub struct AppLayout {
+    pub header: Rect,
     pub title: Rect,
     pub body: Rect,
     pub footer: Rect,
-    pub full: Rect,
 }
 
-pub fn render_app_layout(frame: &mut Frame<'_>, area: Rect) -> AppLayout {
-    let padding_block = Block::default().padding(Padding::new(0, 0, 1, 0));
-    frame.render_widget(&padding_block, area);
-    let padded_area = padding_block.inner(area);
-
-    let main_block = Block::default();
-    frame.render_widget(&main_block, padded_area);
-    let inner_area = main_block.inner(padded_area);
-
-    let [header_area, title, body, footer] = Layout::vertical([
+fn app_layout(area: Rect) -> AppLayout {
+    let inner = Block::default()
+        .padding(Padding::new(0, 0, 1, 0))
+        .inner(area);
+    let [header, title, body, footer] = Layout::vertical([
         Constraint::Length(3),
         Constraint::Length(2),
         Constraint::Min(5),
         Constraint::Length(1),
     ])
-    .areas(inner_area);
-
-    frame.render_widget(Paragraph::new(LOGO).alignment(Alignment::Left), header_area);
-
+    .areas(inner);
     AppLayout {
+        header,
         title,
         body,
         footer,
-        full: area,
     }
+}
+
+pub fn render_app_layout(frame: &mut Frame<'_>, area: Rect) -> AppLayout {
+    let layout = app_layout(area);
+    frame.render_widget(
+        Paragraph::new(LOGO).alignment(Alignment::Left),
+        layout.header,
+    );
+    layout
 }

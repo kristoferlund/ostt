@@ -7,13 +7,8 @@
 
 use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
-use crate::ui::cancel_requested;
-use crossterm::{
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::prelude::*;
-use std::io::{self, Stdout};
+use crate::ui::session;
+use ratcn::terminal::{Session, SessionOptions};
 
 /// Executes a processing action on the given transcription text.
 ///
@@ -139,48 +134,6 @@ fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Resul
         })
 }
 
-/// Drop-based cleanup guard that ensures the terminal is restored even on
-/// panic or early return.
-struct TerminalGuard {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
-    cleaned_up: bool,
-}
-
-impl TerminalGuard {
-    /// Creates a new terminal guard, entering raw mode and alternate screen.
-    fn new() -> anyhow::Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen)?;
-
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
-
-        Ok(Self {
-            terminal,
-            cleaned_up: false,
-        })
-    }
-
-    /// Restores the terminal to normal mode.
-    fn cleanup(&mut self) -> anyhow::Result<()> {
-        if self.cleaned_up {
-            return Ok(());
-        }
-        self.cleaned_up = true;
-        disable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
-        self.terminal.show_cursor()?;
-        Ok(())
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
-    }
-}
-
 /// Executes an action with an animated progress indicator.
 ///
 /// Shows the OSTT logo animation with a "Processing..." label while the action runs.
@@ -195,7 +148,8 @@ pub async fn execute_action_with_animation(
     transcription: &str,
     keywords: &[String],
 ) -> anyhow::Result<Option<String>> {
-    let mut guard = TerminalGuard::new()?;
+    // No mouse: motion reports would wake the loop and advance the animation.
+    let mut session = Session::open(SessionOptions::new().adaptive())?;
 
     let mut animation = TranscriptionAnimation::new(80);
     animation.set_status_label("Processing...");
@@ -212,10 +166,11 @@ pub async fn execute_action_with_animation(
     let mut cancelled = false;
     loop {
         // Render animation frame
-        guard.terminal.draw(|frame| {
+        let theme = session.theme();
+        session.terminal_mut().draw(|frame| {
             let area = frame.area();
             animation.update();
-            animation.draw(frame, area);
+            animation.draw_themed(frame, area, &theme);
         })?;
 
         // Check if task finished
@@ -223,18 +178,19 @@ pub async fn execute_action_with_animation(
             break;
         }
 
-        if cancel_requested() {
+        if session::next_event(&mut session, Some(std::time::Duration::from_millis(50)))?
+            .as_ref()
+            .is_some_and(session::is_cancel)
+        {
             tracing::info!("Processing cancelled by user");
             task_handle.abort();
             cancelled = true;
             break;
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
     // Restore terminal before returning
-    guard.cleanup()?;
+    drop(session);
 
     if cancelled {
         return Ok(None);

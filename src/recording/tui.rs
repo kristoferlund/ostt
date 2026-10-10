@@ -3,24 +3,23 @@
 //! Supports frequency spectrum and time-domain waveform visualization modes.
 //! Handles real-time display updates, volume metering, and user input during recording.
 
-use crossterm::{
-    event::{self, Event, KeyCode},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode},
-};
 use ratatui::{
     prelude::*,
     style::{Color, Style},
-    widgets::{ListState, Paragraph, Sparkline, Wrap},
+    widgets::{Paragraph, Sparkline, Wrap},
+};
+use ratcn::{
+    runtime::{Event, KeyCode},
+    terminal::{Session, SessionOptions},
 };
 use std::error::Error;
-use std::io::{stdout, Stdout};
+use std::io;
+use std::time::Duration;
 
-use crate::config::{file::ProcessAction, OsttConfig};
+use crate::config::OsttConfig;
 use crate::config::{ReferenceLevel, VisualizationType};
-use crate::process::process_view::{handle_picker_event, render_process_view, PickerResult};
 use crate::transcription::TranscriptionAnimation;
-use crate::ui::is_cancel_key;
+use crate::ui::session;
 
 use super::visualizations::{
     center_out_layout, resize_waveform, update_waveform, SpectrumAnalyzer,
@@ -68,7 +67,8 @@ pub enum RecordingCommand {
 /// Supports multiple visualization types: frequency spectrum or time-domain waveform.
 /// Displays real-time visualization, volume levels, recording duration, and animated transcription progress.
 pub struct RecordingTui {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
+    /// `None` while suspended for another screen or after cleanup.
+    session: Option<Session>,
     display_data: Vec<u64>,
     last_sample_time: std::time::Instant,
     sample_interval: std::time::Duration,
@@ -96,7 +96,6 @@ pub struct RecordingTui {
     spectrum_analyzer: Option<SpectrumAnalyzer>,
     /// Per-column peak cap positions (spectrum mode), sinking slowly over time
     peak_caps: Vec<f32>,
-    cleaned_up: bool,
 }
 
 impl RecordingTui {
@@ -107,14 +106,9 @@ impl RecordingTui {
     /// - If raw mode cannot be enabled
     /// - If alternate screen cannot be entered
     pub fn new(config: &OsttConfig, sample_rate: u32) -> Result<Self, Box<dyn Error>> {
-        enable_raw_mode()?;
-        let mut stdout = stdout();
-        execute!(stdout, crossterm::terminal::EnterAlternateScreen)?;
+        let mut session = open_session()?;
 
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
-
-        let size = terminal.size()?;
+        let size = session.terminal_mut().size()?;
         let terminal_width = size.width as usize;
 
         let sample_interval = std::time::Duration::from_millis(50);
@@ -129,7 +123,7 @@ impl RecordingTui {
 
         let now = std::time::Instant::now();
         Ok(RecordingTui {
-            terminal,
+            session: Some(session),
             display_data,
             last_sample_time: now,
             sample_interval,
@@ -148,7 +142,6 @@ impl RecordingTui {
             visualization_type: config.audio.visualization,
             spectrum_analyzer,
             peak_caps: Vec::new(),
-            cleaned_up: false,
         })
     }
 
@@ -212,7 +205,7 @@ impl RecordingTui {
             self.last_sample_time = std::time::Instant::now();
         }
 
-        let size = self.terminal.size()?;
+        let size = active(&mut self.session)?.terminal_mut().size()?;
         let current_width = size.width as usize;
 
         if current_width != self.terminal_width {
@@ -283,7 +276,7 @@ impl RecordingTui {
             )
         };
 
-        self.terminal.draw(|frame| {
+        active(&mut self.session)?.terminal_mut().draw(|frame| {
             let area = frame.area();
             let background = ratatui::widgets::Block::default().style(
                 Style::default()
@@ -483,27 +476,34 @@ impl RecordingTui {
     /// # Errors
     /// - If event polling fails
     pub fn handle_input(&mut self) -> Result<RecordingCommand, Box<dyn Error>> {
-        if event::poll(std::time::Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                return Ok(match key.code {
-                    KeyCode::Enter => {
-                        tracing::debug!("Enter pressed: proceeding to transcription");
-                        RecordingCommand::Transcribe
-                    }
-                    _ if is_cancel_key(&key) => {
-                        tracing::debug!("Cancel key pressed: canceling recording");
-                        RecordingCommand::Cancel
-                    }
-                    KeyCode::Char(' ') => {
-                        tracing::debug!("Space pressed: toggling pause");
-                        self.toggle_pause_state();
-                        RecordingCommand::TogglePause
-                    }
-                    _ => RecordingCommand::Continue,
-                });
+        let command = self
+            .next_event(Duration::from_millis(50))?
+            .map_or(RecordingCommand::Continue, |event| key_command(&event));
+        match command {
+            RecordingCommand::Transcribe => {
+                tracing::debug!("Enter pressed: proceeding to transcription")
             }
+            RecordingCommand::Cancel => tracing::debug!("Cancel key pressed: canceling recording"),
+            RecordingCommand::TogglePause => {
+                tracing::debug!("Space pressed: toggling pause");
+                self.toggle_pause_state();
+            }
+            RecordingCommand::Continue => {}
         }
-        Ok(RecordingCommand::Continue)
+        Ok(command)
+    }
+
+    /// Waits up to `timeout` for a cancel key, for the animation loops that
+    /// run after recording stops. The wait also paces their frames.
+    pub fn cancel_requested(&mut self, timeout: Duration) -> Result<bool, Box<dyn Error>> {
+        Ok(self
+            .next_event(timeout)?
+            .is_some_and(|event| session::is_cancel(&event)))
+    }
+
+    /// Waits up to `timeout` for input. A zero timeout would not poll at all.
+    fn next_event(&mut self, timeout: Duration) -> io::Result<Option<Event>> {
+        session::next_event(active(&mut self.session)?, Some(timeout))
     }
 
     /// Handles pause state transitions, managing pause duration tracking.
@@ -545,7 +545,7 @@ impl RecordingTui {
         &mut self,
         animation: &mut TranscriptionAnimation,
     ) -> Result<(), Box<dyn Error>> {
-        self.terminal.draw(|f| {
+        active(&mut self.session)?.terminal_mut().draw(|f| {
             let main_area = f.area();
             animation.draw(f, main_area);
         })?;
@@ -553,42 +553,22 @@ impl RecordingTui {
         Ok(())
     }
 
-    /// Renders one frame of the action picker and polls for input.
-    ///
-    /// Returns `Ok(Some(PickerResult))` if the user made a selection or cancelled,
-    /// `Ok(None)` if the event loop should continue (no actionable input).
-    ///
-    /// # Errors
-    /// - If terminal rendering fails
-    /// - If event polling fails
-    pub fn render_action_picker(
-        &mut self,
-        actions: &[ProcessAction],
-        list_state: &mut ListState,
-    ) -> Result<Option<PickerResult>, Box<dyn Error>> {
-        let mut list_area = Rect::default();
-        self.terminal.draw(|frame| {
-            let area = frame.area();
-            list_area = render_process_view(frame, area, actions, list_state, None);
-        })?;
+    /// Give the terminal to another screen (the shared action picker), which
+    /// opens its own session.
+    pub fn suspend(&mut self) {
+        self.session = None;
+    }
 
-        if event::poll(std::time::Duration::from_millis(50))? {
-            return Ok(handle_picker_event(
-                event::read()?,
-                actions,
-                list_state,
-                None,
-                list_area,
-            ));
-        }
-
-        Ok(None)
+    /// Take the terminal back after [`suspend`](Self::suspend).
+    pub fn resume(&mut self) -> Result<(), Box<dyn Error>> {
+        self.session = Some(open_session()?);
+        Ok(())
     }
 
     /// Displays an error in the active recording UI until the user presses a key.
     pub fn show_error(&mut self, title: &str, message: &str) -> Result<(), Box<dyn Error>> {
         loop {
-            self.terminal.draw(|frame| {
+            active(&mut self.session)?.terminal_mut().draw(|frame| {
                 let area = frame.area();
                 let background = ratatui::widgets::Block::default().style(Style::reset());
                 frame.render_widget(background, area);
@@ -632,34 +612,42 @@ impl RecordingTui {
                 frame.render_widget(paragraph, padded_area);
             })?;
 
-            if event::poll(std::time::Duration::from_millis(100))? {
-                if let Event::Key(_) = event::read()? {
-                    break;
-                }
+            if matches!(
+                self.next_event(Duration::from_millis(100))?,
+                Some(Event::Key(_))
+            ) {
+                break;
             }
         }
 
         Ok(())
     }
 
-    /// Cleans up terminal state and exits alternate screen mode.
-    ///
-    /// # Errors
-    /// - If terminal mode cannot be disabled
-    /// - If cursor cannot be shown
+    /// Restores the terminal: leaves the alternate screen and raw mode.
     pub fn cleanup(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.cleaned_up {
-            return Ok(());
-        }
-
-        self.cleaned_up = true;
-        disable_raw_mode()?;
-        execute!(
-            self.terminal.backend_mut(),
-            crossterm::terminal::LeaveAlternateScreen
-        )?;
-        self.terminal.show_cursor()?;
+        self.session = None;
         Ok(())
+    }
+}
+
+/// The recording screen paints its own fixed colors and has no mouse UI.
+fn open_session() -> io::Result<Session> {
+    Session::open(SessionOptions::new())
+}
+
+fn active(session: &mut Option<Session>) -> io::Result<&mut Session> {
+    session
+        .as_mut()
+        .ok_or_else(|| io::Error::other("recording screen is not on the terminal"))
+}
+
+/// What a key means on the recording screen.
+fn key_command(event: &Event) -> RecordingCommand {
+    match event {
+        Event::Key(key) if key.code == KeyCode::Enter => RecordingCommand::Transcribe,
+        _ if session::is_cancel(event) => RecordingCommand::Cancel,
+        Event::Key(key) if key.code == KeyCode::Char(' ') => RecordingCommand::TogglePause,
+        _ => RecordingCommand::Continue,
     }
 }
 
@@ -681,8 +669,43 @@ fn wrapped_line_count(line: &str, width: u16) -> u16 {
     line.chars().count().div_ceil(width) as u16
 }
 
-impl Drop for RecordingTui {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratcn::runtime::{KeyEvent, Modifiers};
+
+    fn key(code: KeyCode) -> Event {
+        Event::Key(code.into())
+    }
+
+    /// Esc, q and Ctrl+C must discard a recording, as on every other screen;
+    /// only Enter may lead to a transcription.
+    #[test]
+    fn recording_keys_map_to_their_commands() {
+        let ctrl_c = Event::Key(KeyEvent {
+            code: KeyCode::Char('c'),
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Modifiers::default()
+            },
+        });
+        assert_eq!(
+            key_command(&key(KeyCode::Enter)),
+            RecordingCommand::Transcribe
+        );
+        assert_eq!(key_command(&key(KeyCode::Esc)), RecordingCommand::Cancel);
+        assert_eq!(
+            key_command(&key(KeyCode::Char('q'))),
+            RecordingCommand::Cancel
+        );
+        assert_eq!(key_command(&ctrl_c), RecordingCommand::Cancel);
+        assert_eq!(
+            key_command(&key(KeyCode::Char(' '))),
+            RecordingCommand::TogglePause
+        );
+        assert_eq!(
+            key_command(&key(KeyCode::Char('c'))),
+            RecordingCommand::Continue
+        );
     }
 }

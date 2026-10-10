@@ -2,7 +2,7 @@
 //!
 //! Orchestrates the keywords management UI and storage.
 
-use crate::keywords::{KeywordsManager, KeywordsView};
+use crate::keywords::{keywords_view, KeywordsManager};
 use anyhow::Result;
 
 /// Handles the keywords management command.
@@ -13,8 +13,7 @@ pub async fn handle_keywords() -> Result<()> {
 
     let mut manager = KeywordsManager::new(&config_dir)?;
 
-    let mut view = KeywordsView::new(manager.load_keywords()?)?;
-    view.run(&mut manager)?;
+    keywords_view::run(&mut manager)?;
 
     Ok(())
 }

@@ -3,7 +3,7 @@
 //! Displays and manages transcription history with copy-to-clipboard functionality.
 
 use crate::clipboard::copy_to_clipboard;
-use crate::history::{HistoryManager, HistoryView};
+use crate::history::{history_view, HistoryManager};
 
 /// Displays the transcription history view with copy-to-clipboard functionality.
 ///
@@ -23,9 +23,7 @@ pub async fn handle_history() -> Result<(), anyhow::Error> {
         return Ok(());
     }
 
-    let mut view = HistoryView::new(entries)?;
-
-    match view.run()? {
+    match history_view::run(entries)? {
         Some(selected_text) => {
             copy_to_clipboard(&selected_text)?;
             tracing::info!("Selected transcription copied to clipboard");

@@ -166,6 +166,34 @@ impl TranscriptionAnimation {
 
     /// Renders the animation
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
+        self.draw_with_colors(
+            frame,
+            area,
+            Color::Rgb(0, 0, 0),
+            Color::White,
+            Color::DarkGray,
+        );
+    }
+
+    /// The standalone processing screen follows its adaptive management session.
+    pub(crate) fn draw_themed(&mut self, frame: &mut Frame, area: Rect, theme: &ratcn::Theme) {
+        self.draw_with_colors(
+            frame,
+            area,
+            theme.background,
+            theme.foreground,
+            theme.muted_foreground,
+        );
+    }
+
+    fn draw_with_colors(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        background: Color,
+        foreground: Color,
+        muted: Color,
+    ) {
         let width = area.width;
         let height = area.height;
 
@@ -177,13 +205,13 @@ impl TranscriptionAnimation {
             for x in area.x..area.x + area.width {
                 frame
                     .buffer_mut()
-                    .set_string(x, y, " ", Style::default().bg(Color::Rgb(0, 0, 0)));
+                    .set_string(x, y, " ", Style::default().bg(background));
             }
         }
 
         // Render ASCII art characters (2 lines each)
         let center_y = height / 2;
-        let color = Color::White;
+        let color = foreground;
 
         for anim_char in &self.chars {
             // Use the x position directly (already calculated in update_chars)
@@ -222,8 +250,32 @@ impl TranscriptionAnimation {
                 area.x + label_x,
                 area.y + label_y,
                 &self.status_label,
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(muted),
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    #[test]
+    fn recording_animation_keeps_its_original_colors() {
+        let mut animation = TranscriptionAnimation::new(80);
+        animation.frame_count = 15;
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        terminal
+            .draw(|frame| animation.draw(frame, frame.area()))
+            .unwrap();
+        let cells = &terminal.backend().buffer().content;
+        assert!(cells.iter().all(|cell| cell.bg == Color::Rgb(0, 0, 0)));
+        assert!(cells
+            .iter()
+            .any(|cell| cell.symbol() == "┏" && cell.fg == Color::White));
+        assert!(cells
+            .iter()
+            .any(|cell| cell.symbol() == "T" && cell.fg == Color::DarkGray));
     }
 }
