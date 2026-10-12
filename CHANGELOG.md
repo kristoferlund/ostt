@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The `model`, `history`, `keyword` and `replace` screens and the process-action picker now use ratcn: movable dialogs with clickable buttons, mouse and paste support in lists and inputs, and colors that follow the terminal theme. Recording popups are unchanged.
+- Ctrl+C during a model download now cancels the download before quitting, so no partial model file is left behind.
+
 ## 0.0.27 - 2026-09-24
 
 ### Added

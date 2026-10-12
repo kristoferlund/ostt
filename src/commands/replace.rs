@@ -1,364 +1,201 @@
 use crate::config::OsttConfig;
-use crate::ui::{render_app_layout, render_footer, render_title, scroll};
+use crate::ui::components::list::{clamp_selection, selection_list};
+use crate::ui::components::modal::form_dialog;
+use crate::ui::session::{self, Chrome, Routed};
 use anyhow::Result;
-use ratatui::crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
-    },
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Clear, List, ListItem, ListState, Paragraph},
+use ratatui::layout::Rect;
+use ratcn::{
+    runtime::{CellOffset, DeclareCtx, Event, FocusState, KeyCode, ModalState, Ratcn},
+    Input, InputState,
 };
 use std::fs;
-use std::io::{self, Stdout};
-use tui_input::backend::crossterm::EventHandler;
-use tui_input::Input;
+
+const FORM: &str = "replace";
 
 pub async fn handle_replace() -> Result<()> {
     let config = OsttConfig::load().map_err(|err| anyhow::anyhow!(err.to_string()))?;
-    let mut view = ReplaceView::new(config)?;
-    view.run()
+    run(config)
 }
 
-enum InputField {
-    Source,
-    Target,
-}
-
-struct ReplaceView {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
-    list_state: ListState,
+struct State {
+    focus: FocusState,
+    modals: ModalState,
+    form_offset: CellOffset,
     config: OsttConfig,
-    input_mode: bool,
-    active_field: InputField,
-    source_input: Input,
-    target_input: Input,
-    cleaned_up: bool,
+    rules: Vec<String>,
+    selected: Option<usize>,
+    source_input: InputState,
+    target_input: InputState,
 }
 
-impl ReplaceView {
-    fn new(config: OsttConfig) -> Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
-        let mut list_state = ListState::default();
-        if !config.text.replace.is_empty() {
-            list_state.select(Some(0));
-        }
-
-        Ok(Self {
-            terminal,
-            list_state,
+impl State {
+    fn new(config: OsttConfig) -> Self {
+        let mut state = Self {
+            focus: FocusState::default(),
+            modals: ModalState::default(),
+            form_offset: CellOffset::default(),
             config,
-            input_mode: false,
-            active_field: InputField::Source,
-            source_input: Input::default(),
-            target_input: Input::default(),
-            cleaned_up: false,
-        })
-    }
-
-    fn run(&mut self) -> Result<()> {
-        loop {
-            self.draw()?;
-
-            match event::read()? {
-                Event::Key(key) => {
-                    if self.input_mode {
-                        self.handle_input_mode_key(key)?;
-                    } else if self.handle_normal_mode_key(key)? {
-                        break;
-                    }
-                }
-                Event::Mouse(mouse) if !self.input_mode => match mouse.kind {
-                    MouseEventKind::ScrollUp => self.list_state.select_previous(),
-                    MouseEventKind::ScrollDown => self.list_state.select_next(),
-                    _ => {}
-                },
-                _ => {}
-            }
-        }
-
-        self.cleanup()?;
-        Ok(())
-    }
-
-    fn handle_normal_mode_key(&mut self, key: KeyEvent) -> Result<bool> {
-        if crate::ui::is_ctrl_c(&key) {
-            return Ok(true);
-        }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
-            KeyCode::Up => self.list_state.select_previous(),
-            KeyCode::Down => self.list_state.select_next(),
-            KeyCode::Char('x') | KeyCode::Delete => self.delete_selected_replace_rule()?,
-            KeyCode::Char('a') => {
-                self.input_mode = true;
-                self.active_field = InputField::Source;
-            }
-            _ => {}
-        }
-        Ok(false)
-    }
-
-    fn handle_input_mode_key(&mut self, key: KeyEvent) -> Result<()> {
-        match key.code {
-            KeyCode::Enter => match self.active_field {
-                InputField::Source => self.active_field = InputField::Target,
-                InputField::Target => self.add_replace_rule()?,
-            },
-            KeyCode::Tab | KeyCode::BackTab => self.toggle_active_field(),
-            KeyCode::Esc => self.reset_input(),
-            _ => match self.active_field {
-                InputField::Source => {
-                    self.source_input.handle_event(&Event::Key(key));
-                }
-                InputField::Target => {
-                    self.target_input.handle_event(&Event::Key(key));
-                }
-            },
-        }
-        Ok(())
-    }
-
-    fn toggle_active_field(&mut self) {
-        self.active_field = match self.active_field {
-            InputField::Source => InputField::Target,
-            InputField::Target => InputField::Source,
+            rules: Vec::new(),
+            selected: None,
+            source_input: InputState::default(),
+            target_input: InputState::default(),
         };
+        state.refresh_rules();
+        state
     }
 
-    fn add_replace_rule(&mut self) -> Result<()> {
-        let source = self.source_input.value().trim();
-        if source.is_empty() {
-            return Ok(());
-        }
-
-        self.config.text.replace.insert(
-            source.to_string(),
-            self.target_input.value().trim().to_string(),
-        );
-        save_replace_rules(&self.config.text.replace)?;
-        self.select_valid_index();
-        self.reset_input();
-        Ok(())
-    }
-
-    fn reset_input(&mut self) {
-        self.input_mode = false;
-        self.active_field = InputField::Source;
-        self.source_input = Input::default();
-        self.target_input = Input::default();
-    }
-
-    fn delete_selected_replace_rule(&mut self) -> Result<()> {
-        let Some(index) = self.list_state.selected() else {
-            return Ok(());
-        };
-        self.config.text.replace.shift_remove_index(index);
-        save_replace_rules(&self.config.text.replace)?;
-        self.select_valid_index();
-        Ok(())
-    }
-
-    fn select_valid_index(&mut self) {
-        let len = self.config.text.replace.len();
-        if len == 0 {
-            self.list_state.select(None);
-            return;
-        }
-        let index = self.list_state.selected().unwrap_or(0).min(len - 1);
-        self.list_state.select(Some(index));
-    }
-
-    fn draw(&mut self) -> Result<()> {
-        let replace_rules = self
+    fn refresh_rules(&mut self) {
+        self.rules = self
             .config
             .text
             .replace
             .iter()
-            .map(|(source, target)| (source.clone(), target.clone()))
-            .collect::<Vec<_>>();
-        let input_mode = self.input_mode;
-        let source_value = self.source_input.value().to_string();
-        let target_value = self.target_input.value().to_string();
-        let source_cursor = self.source_input.cursor();
-        let target_cursor = self.target_input.cursor();
-        let source_active = matches!(self.active_field, InputField::Source);
-        let list_state = &mut self.list_state;
-
-        self.terminal.draw(|frame| {
-            let layout = render_app_layout(frame, frame.area());
-            render_title(frame, layout.title, "Replace");
-            Self::render_replace_list(frame, layout.body, &replace_rules, list_state);
-
-            if input_mode {
-                Self::render_add_dialog(
-                    frame,
-                    &source_value,
-                    &target_value,
-                    source_cursor,
-                    target_cursor,
-                    source_active,
-                );
-                render_footer(frame, layout.footer, "↵ next/add, tab switch, esc cancel");
-            } else {
-                render_footer(
-                    frame,
-                    layout.footer,
-                    "↑↓ select, x/del delete, a add, esc/q exit",
-                );
-            }
-        })?;
-
-        Ok(())
+            .map(|(source, target)| format!("{source} → {target}"))
+            .collect();
+        clamp_selection(&mut self.selected, self.rules.len());
     }
 
-    fn render_replace_list(
-        frame: &mut Frame,
-        area: Rect,
-        replace_rules: &[(String, String)],
-        list_state: &mut ListState,
-    ) {
-        let items = replace_rules
-            .iter()
-            .map(|(source, target)| ListItem::new(format!("{source} → {target}")))
-            .collect::<Vec<_>>();
-
-        let list = List::new(items)
-            .block(Block::default())
-            .highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White));
-        scroll::keep_selected_in_view(list_state, area.height as usize, replace_rules.len());
-        frame.render_stateful_widget(list, area, list_state);
-    }
-
-    fn render_add_dialog(
-        frame: &mut Frame,
-        source: &str,
-        target: &str,
-        source_cursor: usize,
-        target_cursor: usize,
-        source_active: bool,
-    ) {
-        let area = crate::ui::components::dialog::centered_fixed_rect(70, 11, frame.area());
-        frame.render_widget(Clear, area);
-        frame.render_widget(
-            Block::default().style(Style::default().bg(Color::DarkGray)),
-            area,
-        );
-
-        let inner = Rect {
-            x: area.x.saturating_add(2),
-            y: area.y.saturating_add(1),
-            width: area.width.saturating_sub(4),
-            height: area.height.saturating_sub(2),
-        };
-        let title = "New replace";
-        let escape = "esc";
-        let spacer_width = inner
-            .width
-            .saturating_sub((title.len() + escape.len()) as u16);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
-                Span::raw(" ".repeat(spacer_width as usize)),
-                Span::styled(escape, Style::default().fg(Color::Gray)),
-            ]))
-            .style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-            inner,
-        );
-
-        let source_label_area = Rect {
-            y: inner.y.saturating_add(2),
-            height: 1,
-            ..inner
-        };
-        let source_input_area = Rect {
-            y: inner.y.saturating_add(3),
-            height: 1,
-            ..inner
-        };
-        let target_label_area = Rect {
-            y: inner.y.saturating_add(5),
-            height: 1,
-            ..inner
-        };
-        let target_input_area = Rect {
-            y: inner.y.saturating_add(6),
-            height: 1,
-            ..inner
-        };
-
-        Self::render_label(frame, source_label_area, "Find");
-        Self::render_input(frame, source_input_area, source, source_active);
-        Self::render_label(frame, target_label_area, "Replace");
-        Self::render_input(frame, target_input_area, target, !source_active);
-
-        let action_area = Rect {
-            y: inner.y.saturating_add(8),
-            height: 1,
-            ..inner
-        };
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                "<Add>",
-                Style::default().fg(Color::Black).bg(Color::White),
-            )))
-            .style(Style::default().fg(Color::White).bg(Color::DarkGray))
-            .alignment(Alignment::Center),
-            action_area,
-        );
-
-        let (cursor_area, cursor) = if source_active {
-            (source_input_area, source_cursor)
-        } else {
-            (target_input_area, target_cursor)
-        };
-        let cursor_x = cursor_area.x.saturating_add(cursor as u16);
-        frame.set_cursor_position(Position::new(cursor_x, cursor_area.y));
-    }
-
-    fn render_label(frame: &mut Frame, area: Rect, label: &str) {
-        frame.render_widget(
-            Paragraph::new(label).style(Style::default().fg(Color::White).bg(Color::DarkGray)),
-            area,
-        );
-    }
-
-    fn render_input(frame: &mut Frame, area: Rect, value: &str, active: bool) {
-        let style = if active {
-            Style::default().fg(Color::Black).bg(Color::White)
-        } else {
-            Style::default().fg(Color::DarkGray).bg(Color::Gray)
-        };
-        frame.render_widget(Paragraph::new(value.to_string()).style(style), area);
-    }
-
-    fn cleanup(&mut self) -> Result<()> {
-        if self.cleaned_up {
-            return Ok(());
-        }
-        self.cleaned_up = true;
-        disable_raw_mode()?;
-        execute!(
-            self.terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        )?;
-        self.terminal.show_cursor()?;
-        Ok(())
+    fn close_form(&mut self) {
+        self.modals.close(&mut self.focus);
+        self.source_input = InputState::default();
+        self.target_input = InputState::default();
     }
 }
 
-impl Drop for ReplaceView {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
+enum Msg {
+    Focus(FocusState),
+    Select(usize),
+    Source(InputState),
+    Target(InputState),
+    FormMoved(CellOffset),
+    Open,
+    Next,
+    Add,
+    Delete,
+    Dismiss,
+}
+
+fn runtime() -> Ratcn<State, Msg> {
+    Ratcn::new()
+        .focus(|state: &State| &state.focus, Msg::Focus)
+        .modals(|state| &state.modals)
+}
+
+/// Every return restores the terminal.
+fn run(config: OsttConfig) -> Result<()> {
+    let mut state = State::new(config);
+    let mut session = session::open()?;
+    let mut ratcn = runtime();
+    loop {
+        session::draw(
+            &mut session,
+            &mut ratcn,
+            &state,
+            chrome(&state),
+            |ctx, body| declare(ctx, body, &state),
+        )?;
+        let Some(event) = session::next_event(&mut session, None)? else {
+            continue;
+        };
+        let msg = match session::route(&mut session, &mut ratcn, &state, event)? {
+            Routed::Msg(msg) => msg,
+            Routed::Ignored(event) if session::is_cancel(&event) => break,
+            Routed::Ignored(Event::Key(key)) => match key.code {
+                KeyCode::Char('a') => Msg::Open,
+                KeyCode::Char('x') | KeyCode::Delete => Msg::Delete,
+                _ => continue,
+            },
+            Routed::Ignored(_) | Routed::Redraw => continue,
+            Routed::Quit => break,
+        };
+        if update(&mut state, msg)? {
+            save_replace_rules(&state.config.text.replace)?;
+        }
+    }
+    Ok(())
+}
+
+/// Returns whether the rules changed and need saving. Unlike keywords, which
+/// take their manager, saving here writes the real config path, so `run` does it.
+fn update(state: &mut State, msg: Msg) -> Result<bool> {
+    match msg {
+        Msg::Focus(focus) => state.focus = focus,
+        Msg::Select(index) => state.selected = Some(index),
+        Msg::Source(input) => state.source_input = input,
+        Msg::Target(input) => state.target_input = input,
+        Msg::FormMoved(offset) => state.form_offset = offset,
+        Msg::Open => {
+            state.form_offset = CellOffset::default();
+            state.modals.open(FORM, &mut state.focus)?;
+        }
+        Msg::Next => state.focus = FocusState::intent([FORM, "input-1"]),
+        Msg::Add => {
+            let source = state.source_input.value().trim();
+            if source.is_empty() {
+                return Ok(false);
+            }
+            let target = state.target_input.value().trim().to_string();
+            state.config.text.replace.insert(source.to_string(), target);
+            state.refresh_rules();
+            state.close_form();
+            return Ok(true);
+        }
+        Msg::Delete => {
+            if let Some(index) = state.selected {
+                state.config.text.replace.shift_remove_index(index);
+                state.refresh_rules();
+                return Ok(true);
+            }
+        }
+        Msg::Dismiss => state.close_form(),
+    }
+    Ok(false)
+}
+
+fn chrome(state: &State) -> Chrome<'static> {
+    Chrome {
+        title: Some("Replace"),
+        footer: if state.modals.is_open(FORM) {
+            "↵ next/add, tab switch, esc cancel"
+        } else {
+            "↑↓ select, x/del delete, a add, esc/q exit"
+        },
+        toasts: None,
+    }
+}
+
+fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect, state: &State) {
+    ctx.component(
+        "list",
+        selection_list(
+            &state.rules,
+            1,
+            |s: &State| s.selected,
+            Msg::Select,
+            Msg::Select,
+        ),
+        body,
+    );
+    if state.modals.is_open(FORM) {
+        let fields = vec![
+            (
+                "Find",
+                Input::new()
+                    .value(|s: &State| &s.source_input, Msg::Source)
+                    .on_submit(|| Msg::Next),
+            ),
+            (
+                "Replace",
+                Input::new()
+                    .value(|s: &State| &s.target_input, Msg::Target)
+                    .on_submit(|| Msg::Add),
+            ),
+        ];
+        let form = form_dialog("New replace", "", fields, "Add", || Msg::Add)
+            .offset(state.form_offset)
+            .on_offset_change(Msg::FormMoved)
+            .on_dismiss(|| Msg::Dismiss);
+        ctx.modal(FORM, form, ctx.area());
     }
 }
 
@@ -456,6 +293,7 @@ fn toml_basic_string(value: &str) -> String {
 mod tests {
     use super::*;
     use indexmap::IndexMap;
+    use ratcn::runtime::EventResult;
 
     fn replace_rules(entries: &[(&str, &str)]) -> IndexMap<String, String> {
         entries
@@ -513,5 +351,98 @@ width = 90
         assert!(!updated.contains("[text]"));
         assert!(!updated.contains("[text.replace]"));
         assert!(updated.contains("[popup]"));
+    }
+
+    /// Enter on Find moves to Replace instead of saving a rule with an empty
+    /// replacement; Enter there saves.
+    #[test]
+    fn enter_advances_from_find_to_replace_before_adding() {
+        let mut state = State::new(OsttConfig::default());
+        update(&mut state, Msg::Open).unwrap();
+        let mut ratcn = runtime();
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(100, 30)).unwrap();
+        let mut paint = |state: &State, ratcn: &mut Ratcn<State, Msg>| {
+            terminal
+                .draw(|frame| {
+                    session::render(
+                        frame,
+                        ratcn,
+                        state,
+                        &ratcn::Theme::default_dark(),
+                        chrome(state),
+                        |ctx, body| declare(ctx, body, state),
+                    )
+                })
+                .unwrap();
+        };
+        paint(&state, &mut ratcn);
+        assert!(matches!(
+            ratcn.handle_event(KeyCode::Enter, &state),
+            EventResult::Emit(Msg::Next)
+        ));
+        assert!(!update(&mut state, Msg::Next).unwrap());
+        paint(&state, &mut ratcn);
+        assert!(matches!(
+            ratcn.handle_event(KeyCode::Enter, &state),
+            EventResult::Emit(Msg::Add)
+        ));
+    }
+
+    /// A rule with a Find text is added, reported for saving, and the form closes.
+    #[test]
+    fn add_with_find_inserts_the_rule_and_closes_the_form() {
+        let mut state = State::new(OsttConfig::default());
+        update(&mut state, Msg::Open).unwrap();
+        update(&mut state, Msg::Source(InputState::new("api"))).unwrap();
+        update(&mut state, Msg::Target(InputState::new("API"))).unwrap();
+
+        assert!(update(&mut state, Msg::Add).unwrap());
+        assert_eq!(state.config.text.replace, replace_rules(&[("api", "API")]));
+        assert_eq!(state.rules, ["api → API"]);
+        assert!(!state.modals.is_open(FORM));
+    }
+
+    /// Delete must remove the selected rule and report it for saving, and the
+    /// selection must stay on an existing rule.
+    #[test]
+    fn delete_removes_the_selected_rule_and_keeps_selection_in_range() {
+        let mut config = OsttConfig::default();
+        config.text.replace = replace_rules(&[("api", "API"), ("ostt", "OSTT")]);
+        let mut state = State::new(config);
+        state.selected = Some(1);
+
+        assert!(update(&mut state, Msg::Delete).unwrap());
+        assert_eq!(state.config.text.replace, replace_rules(&[("api", "API")]));
+        assert_eq!(state.rules, ["api → API"]);
+        assert_eq!(state.selected, Some(0));
+    }
+
+    /// Cancelling the form closes it and forgets what was typed.
+    #[test]
+    fn dismiss_closes_the_form_and_clears_both_inputs() {
+        let mut state = State::new(OsttConfig::default());
+        update(&mut state, Msg::Open).unwrap();
+        update(&mut state, Msg::Source(InputState::new("api"))).unwrap();
+        update(&mut state, Msg::Target(InputState::new("API"))).unwrap();
+
+        assert!(!update(&mut state, Msg::Dismiss).unwrap());
+        assert!(!state.modals.is_open(FORM));
+        assert_eq!(state.source_input.value(), "");
+        assert_eq!(state.target_input.value(), "");
+    }
+
+    /// An empty Find adds nothing, so nothing is written to the config, and
+    /// the form stays open with the typed text so the user can finish it.
+    #[test]
+    fn add_without_find_changes_nothing_and_keeps_the_form() {
+        let mut state = State::new(OsttConfig::default());
+        update(&mut state, Msg::Open).unwrap();
+        update(&mut state, Msg::Target(InputState::new("API"))).unwrap();
+
+        assert!(!update(&mut state, Msg::Add).unwrap());
+        assert!(state.config.text.replace.is_empty());
+        assert!(state.modals.is_open(FORM));
+        assert_eq!(state.target_input.value(), "API");
     }
 }

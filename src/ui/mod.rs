@@ -4,13 +4,6 @@
 //! by multiple features throughout the application.
 
 pub mod components;
-pub(crate) mod scroll;
+pub(crate) mod session;
 
-pub(crate) use keys::{cancel_requested, is_cancel_key, is_ctrl_c};
-mod keys;
-
-pub use components::{
-    centered_fixed_rect, dialog_content_area, render_app_layout, render_dialog,
-    render_dialog_content, render_error_dialog, render_footer, render_title, render_toast,
-    AppLayout, DialogAction, Toast, ToastStyle,
-};
+pub use components::render_app_layout;

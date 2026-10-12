@@ -1,352 +1,254 @@
-//! Interactive terminal UI for managing keywords.
-//!
-//! Provides a scrollable list of keywords with keyboard navigation,
-//! mouse support, selection, and inline editing.
+//! Keyword management: one runtime for the list and the add form.
 
 use crate::keywords::KeywordsManager;
-use crate::ui::{render_app_layout, render_footer, render_title, scroll};
+use crate::ui::components::list::{clamp_selection, selection_list};
+use crate::ui::components::modal::form_dialog;
+use crate::ui::session::{self, Chrome, Routed};
 use anyhow::Result;
-use ratatui::crossterm::{
-    event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, MouseEventKind,
-    },
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+use ratatui::layout::Rect;
+use ratcn::{
+    runtime::{CellOffset, DeclareCtx, Event, FocusState, KeyCode, ModalState, Ratcn},
+    Input, InputState,
 };
-use ratatui::{
-    prelude::*,
-    widgets::{Block, List, ListItem, ListState, Paragraph},
-};
-use std::io::{self, Stdout};
-use tui_input::backend::crossterm::EventHandler;
-use tui_input::Input;
 
-/// Interactive keywords view for managing keywords.
-pub struct KeywordsView {
-    /// Terminal interface
-    terminal: Terminal<CrosstermBackend<Stdout>>,
-    /// List state for managing selection and scroll
-    list_state: ListState,
-    /// List of keywords
+const FORM: &str = "keyword";
+
+#[derive(Default)]
+struct State {
+    focus: FocusState,
+    modals: ModalState,
+    form_offset: CellOffset,
     keywords: Vec<String>,
-    /// Whether in input mode
-    input_mode: bool,
-    /// Text input widget
-    input: Input,
-    /// Whether cleanup has been performed
-    cleaned_up: bool,
+    selected: Option<usize>,
+    input: InputState,
 }
 
-impl KeywordsView {
-    /// Creates a new keywords view with the given keywords.
-    ///
-    /// # Arguments
-    /// * `keywords` - List of keywords to display
-    ///
-    /// # Errors
-    /// - If terminal cannot be initialized
-    pub fn new(keywords: Vec<String>) -> Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+enum Msg {
+    Focus(FocusState),
+    Select(usize),
+    Input(InputState),
+    FormMoved(CellOffset),
+    Open,
+    Add,
+    Delete,
+    Dismiss,
+}
 
-        let backend = CrosstermBackend::new(stdout);
-        let terminal = Terminal::new(backend)?;
+fn runtime() -> Ratcn<State, Msg> {
+    Ratcn::new()
+        .focus(|state: &State| &state.focus, Msg::Focus)
+        .modals(|state| &state.modals)
+}
 
-        let mut list_state = ListState::default();
-        if !keywords.is_empty() {
-            list_state.select(Some(0));
-        }
-
-        Ok(Self {
-            terminal,
-            list_state,
-            keywords,
-            input_mode: false,
-            input: Input::default(),
-            cleaned_up: false,
-        })
-    }
-
-    /// Runs the interactive keywords view loop.
-    pub fn run(&mut self, manager: &mut KeywordsManager) -> Result<()> {
-        loop {
-            self.draw()?;
-
-            match event::read()? {
-                Event::Key(key) => {
-                    if self.input_mode {
-                        if self.handle_input_mode_key(manager, key)? {
-                            break;
-                        }
-                    } else if self.handle_normal_mode_key(manager, key)? {
-                        break;
-                    }
-                }
-                Event::Mouse(mouse) => {
-                    if !self.input_mode {
-                        match mouse.kind {
-                            MouseEventKind::ScrollUp => {
-                                self.list_state.select_previous();
-                            }
-                            MouseEventKind::ScrollDown => {
-                                self.list_state.select_next();
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        self.cleanup()?;
-        Ok(())
-    }
-
-    /// Handle key events while *not* in input mode.
-    ///
-    /// Returns `Ok(true)` if the UI should quit.
-    fn handle_normal_mode_key(
-        &mut self,
-        manager: &mut KeywordsManager,
-        key: KeyEvent,
-    ) -> Result<bool> {
-        if crate::ui::is_ctrl_c(&key) {
-            return Ok(true);
-        }
-        match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return Ok(true),
-            KeyCode::Up => {
-                self.list_state.select_previous();
-            }
-            KeyCode::Down => {
-                self.list_state.select_next();
-            }
-            KeyCode::Char('x') | KeyCode::Delete => {
-                self.delete_selected_keyword(manager)?;
-            }
-            KeyCode::Char('a') => {
-                self.input_mode = true;
-            }
-            _ => {}
-        }
-        Ok(false)
-    }
-
-    /// Handle key events while in input mode.
-    ///
-    /// Returns `Ok(true)` if the UI should quit (never happens here, but
-    /// kept for symmetry with `handle_normal_mode_key`).
-    fn handle_input_mode_key(
-        &mut self,
-        manager: &mut KeywordsManager,
-        key: KeyEvent,
-    ) -> Result<bool> {
-        match key.code {
-            KeyCode::Enter => {
-                let value = self.input.value().trim();
-                if !value.is_empty() {
-                    manager.add_keyword(value.to_string())?;
-                    self.refresh_keywords(manager)?;
-                }
-                self.input_mode = false;
-                self.input = Input::default();
-            }
-            KeyCode::Esc => {
-                self.input_mode = false;
-                self.input = Input::default();
-            }
-            _ => {
-                // Handle all other keys with tui_input
-                let ev = Event::Key(key);
-                self.input.handle_event(&ev);
-            }
-        }
-        Ok(false)
-    }
-
-    /// Refreshes the local keywords list from the manager and adjusts selection.
-    fn refresh_keywords(&mut self, manager: &mut KeywordsManager) -> Result<()> {
-        self.keywords = manager.load_keywords()?;
-        if self.keywords.is_empty() {
-            self.list_state.select(None);
-        } else {
-            // Keep a valid selection (default to first item if none).
-            let idx = self
-                .list_state
-                .selected()
-                .unwrap_or(0)
-                .min(self.keywords.len().saturating_sub(1));
-            self.list_state.select(Some(idx));
-        }
-        Ok(())
-    }
-
-    /// Deletes the currently selected keyword and keeps selection in a valid state.
-    fn delete_selected_keyword(&mut self, manager: &mut KeywordsManager) -> Result<()> {
-        if self.keywords.is_empty() {
-            return Ok(());
-        }
-
-        if let Some(idx) = self.list_state.selected() {
-            manager.remove_keyword(idx)?;
-            self.keywords = manager.load_keywords()?;
-
-            if self.keywords.is_empty() {
-                self.list_state.select(None);
-            } else if idx >= self.keywords.len() && idx > 0 {
-                self.list_state.select(Some(idx - 1));
-            } else {
-                self.list_state
-                    .select(Some(idx.min(self.keywords.len() - 1)));
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Renders the current state of the keywords view.
-    fn draw(&mut self) -> Result<()> {
-        // Extract data before the closure to avoid borrow conflicts
-        let input_mode = self.input_mode;
-        let input_value = self.input.value().to_string();
-        let input_cursor = self.input.cursor();
-        let keywords = self.keywords.clone();
-        let list_state = &mut self.list_state;
-
-        self.terminal.draw(|frame| {
-            let layout = render_app_layout(frame, frame.area());
-            render_title(frame, layout.title, "Keywords");
-
-            if input_mode {
-                Self::draw_with_input(
-                    frame,
-                    layout.body,
-                    &keywords,
-                    &input_value,
-                    input_cursor,
-                    list_state,
-                );
-                render_footer(frame, layout.footer, "↵ add, esc cancel");
-            } else {
-                Self::draw_normal(frame, layout.body, &keywords, list_state);
-                render_footer(
-                    frame,
-                    layout.footer,
-                    "↑↓ select, x/del delete, a add, esc/q exit",
-                );
-            }
-        })?;
-
-        Ok(())
-    }
-
-    /// Draws the UI when *not* in input mode.
-    fn draw_normal(frame: &mut Frame, area: Rect, keywords: &[String], list_state: &mut ListState) {
-        Self::render_keywords_list(frame, area, keywords, list_state);
-    }
-
-    /// Draws the UI when in input mode.
-    fn draw_with_input(
-        frame: &mut Frame,
-        area: Rect,
-        keywords: &[String],
-        input_value: &str,
-        input_cursor: usize,
-        list_state: &mut ListState,
-    ) {
-        let layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([Constraint::Min(1), Constraint::Length(5)])
-            .split(area);
-
-        let list_area = layout[0];
-        let input_area = layout[1];
-
-        Self::render_keywords_list(frame, list_area, keywords, list_state);
-
-        frame.render_widget(
-            Block::default().style(Style::default().bg(Color::DarkGray)),
-            input_area,
-        );
-        let input_inner = Rect {
-            x: input_area.x.saturating_add(2),
-            y: input_area.y.saturating_add(1),
-            width: input_area.width.saturating_sub(4),
-            height: input_area.height.saturating_sub(2),
-        };
-
-        let title = "New Keyword";
-        let escape = "esc";
-        let spacer_width = input_inner
-            .width
-            .saturating_sub((title.len() + escape.len()) as u16);
-        frame.render_widget(
-            Paragraph::new(Line::from(vec![
-                Span::styled(title, Style::default().add_modifier(Modifier::UNDERLINED)),
-                Span::raw(" ".repeat(spacer_width as usize)),
-                Span::styled(escape, Style::default().fg(Color::White)),
-            ])),
-            input_inner,
-        );
-
-        let input_value_area = Rect {
-            y: input_inner.y.saturating_add(2),
-            height: 1,
-            ..input_inner
-        };
-        frame.render_widget(
-            Paragraph::new(input_value).style(Style::default().fg(Color::DarkGray).bg(Color::Gray)),
-            input_value_area,
-        );
-
-        // Cursor position based on tui_input cursor
-        let cursor_x = input_value_area.x + input_cursor as u16;
-        let cursor_y = input_value_area.y;
-        frame.set_cursor_position(Position::new(cursor_x, cursor_y));
-    }
-
-    /// Renders the keywords list with selection.
-    fn render_keywords_list(
-        frame: &mut Frame,
-        area: Rect,
-        keywords: &[String],
-        list_state: &mut ListState,
-    ) {
-        let items: Vec<ListItem> = keywords
-            .iter()
-            .map(|keyword| ListItem::new(keyword.clone()))
-            .collect();
-
-        let list =
-            List::new(items).highlight_style(Style::default().fg(Color::White).bg(Color::DarkGray));
-
-        scroll::keep_selected_in_view(list_state, area.height as usize, keywords.len());
-        frame.render_stateful_widget(list, area, list_state);
-    }
-
-    /// Cleans up terminal.
-    fn cleanup(&mut self) -> Result<()> {
-        if self.cleaned_up {
-            return Ok(());
-        }
-
-        self.cleaned_up = true;
-
-        disable_raw_mode()?;
-        execute!(
-            self.terminal.backend_mut(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
+/// Interactive keywords view for managing keywords. Every return restores the terminal.
+pub fn run(manager: &mut KeywordsManager) -> Result<()> {
+    let mut state = State {
+        keywords: manager.load_keywords()?,
+        ..State::default()
+    };
+    clamp_selection(&mut state.selected, state.keywords.len());
+    let mut session = session::open()?;
+    let mut ratcn = runtime();
+    loop {
+        session::draw(
+            &mut session,
+            &mut ratcn,
+            &state,
+            chrome(&state),
+            |ctx, body| declare(ctx, body, &state),
         )?;
-        self.terminal.show_cursor()?;
-        Ok(())
+        let Some(event) = session::next_event(&mut session, None)? else {
+            continue;
+        };
+        let msg = match session::route(&mut session, &mut ratcn, &state, event)? {
+            Routed::Msg(msg) => msg,
+            Routed::Ignored(event) if session::is_cancel(&event) => break,
+            Routed::Ignored(Event::Key(key)) => match key.code {
+                KeyCode::Char('a') => Msg::Open,
+                KeyCode::Char('x') | KeyCode::Delete => Msg::Delete,
+                _ => continue,
+            },
+            Routed::Ignored(_) | Routed::Redraw => continue,
+            Routed::Quit => break,
+        };
+        update(&mut state, manager, msg)?;
+    }
+    Ok(())
+}
+
+fn update(state: &mut State, manager: &mut KeywordsManager, msg: Msg) -> Result<()> {
+    match msg {
+        Msg::Focus(focus) => state.focus = focus,
+        Msg::Select(index) => state.selected = Some(index),
+        Msg::Input(input) => state.input = input,
+        Msg::FormMoved(offset) => state.form_offset = offset,
+        Msg::Open => {
+            state.form_offset = CellOffset::default();
+            state.modals.open(FORM, &mut state.focus)?;
+        }
+        Msg::Add => {
+            let value = state.input.value().trim();
+            if !value.is_empty() {
+                manager.add_keyword(value.to_string())?;
+                state.keywords = manager.load_keywords()?;
+            }
+            state.close_form();
+        }
+        Msg::Delete => {
+            if let Some(index) = state.selected {
+                manager.remove_keyword(index)?;
+                state.keywords = manager.load_keywords()?;
+            }
+        }
+        Msg::Dismiss => state.close_form(),
+    }
+    clamp_selection(&mut state.selected, state.keywords.len());
+    Ok(())
+}
+
+impl State {
+    fn close_form(&mut self) {
+        self.modals.close(&mut self.focus);
+        self.input = InputState::default();
     }
 }
 
-impl Drop for KeywordsView {
-    fn drop(&mut self) {
-        let _ = self.cleanup();
+fn chrome(state: &State) -> Chrome<'static> {
+    Chrome {
+        title: Some("Keywords"),
+        footer: if state.modals.is_open(FORM) {
+            "↵ add, esc cancel"
+        } else {
+            "↑↓ select, x/del delete, a add, esc/q exit"
+        },
+        toasts: None,
+    }
+}
+
+fn declare(ctx: &mut DeclareCtx<'_, State, Msg>, body: Rect, state: &State) {
+    ctx.component(
+        "list",
+        selection_list(
+            &state.keywords,
+            1,
+            |s: &State| s.selected,
+            Msg::Select,
+            Msg::Select,
+        ),
+        body,
+    );
+    if state.modals.is_open(FORM) {
+        let input = Input::new()
+            .value(|s: &State| &s.input, Msg::Input)
+            .on_submit(|| Msg::Add);
+        let form = form_dialog("New keyword", "", vec![("Keyword", input)], "Add", || {
+            Msg::Add
+        })
+        .offset(state.form_offset)
+        .on_offset_change(Msg::FormMoved)
+        .on_dismiss(|| Msg::Dismiss);
+        ctx.modal(FORM, form, ctx.area());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+    use ratcn::runtime::EventResult;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn with_manager(test: impl FnOnce(&mut KeywordsManager)) {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time before unix epoch")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ostt-keywords-view-test-{unique}"));
+        std::fs::create_dir_all(&dir).unwrap();
+        test(&mut KeywordsManager::new(&dir).unwrap());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Adding from the form must persist the keyword and leave a fresh, closed
+    /// form. Typed whitespace is trimmed, so re-adding a keyword never duplicates it.
+    #[test]
+    fn add_saves_the_keyword_and_closes_the_form() {
+        with_manager(|manager| {
+            manager.save_keywords(&["ostt".into()]).unwrap();
+            let mut state = State::default();
+            update(&mut state, manager, Msg::Open).unwrap();
+            update(&mut state, manager, Msg::Input(InputState::new(" ostt "))).unwrap();
+            update(&mut state, manager, Msg::Add).unwrap();
+            update(&mut state, manager, Msg::Open).unwrap();
+            update(&mut state, manager, Msg::Input(InputState::new("api"))).unwrap();
+            update(&mut state, manager, Msg::Add).unwrap();
+
+            assert_eq!(manager.load_keywords().unwrap(), ["ostt", "api"]);
+            assert_eq!(state.keywords, ["ostt", "api"]);
+            assert!(!state.modals.is_open(FORM));
+            assert_eq!(state.input.value(), "");
+        });
+    }
+
+    /// Deleting removes the selected keyword, and the selection must not point
+    /// past the shortened list or the next delete would miss.
+    #[test]
+    fn delete_removes_the_selected_keyword_and_keeps_selection_in_range() {
+        with_manager(|manager| {
+            manager
+                .save_keywords(&["one".into(), "two".into()])
+                .unwrap();
+            let mut state = State {
+                keywords: manager.load_keywords().unwrap(),
+                selected: Some(1),
+                ..State::default()
+            };
+            update(&mut state, manager, Msg::Delete).unwrap();
+
+            assert_eq!(manager.load_keywords().unwrap(), ["one"]);
+            assert_eq!(state.keywords, ["one"]);
+            assert_eq!(state.selected, Some(0));
+        });
+    }
+
+    /// Shortcut letters are text while the form is open, and closing it hands
+    /// the keys back to the list the user left.
+    #[test]
+    fn open_form_captures_shortcut_keys_and_returns_focus_to_the_list() {
+        let mut state = State {
+            keywords: vec!["one".into(), "two".into()],
+            selected: Some(1),
+            focus: FocusState::intent(["list"]),
+            ..State::default()
+        };
+        let mut ratcn = runtime();
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).unwrap();
+        let mut paint = |state: &State, ratcn: &mut Ratcn<State, Msg>| {
+            terminal
+                .draw(|frame| {
+                    session::render(
+                        frame,
+                        ratcn,
+                        state,
+                        &ratcn::Theme::default_dark(),
+                        chrome(state),
+                        |ctx, body| declare(ctx, body, state),
+                    )
+                })
+                .unwrap();
+        };
+        state.modals.open(FORM, &mut state.focus).unwrap();
+        paint(&state, &mut ratcn);
+        assert!(matches!(
+            ratcn.handle_event(KeyCode::Char('x'), &state),
+            EventResult::Emit(Msg::Input(_))
+        ));
+        with_manager(|manager| update(&mut state, manager, Msg::Dismiss).unwrap());
+        assert_eq!(state.input.value(), "");
+        paint(&state, &mut ratcn);
+        assert!(matches!(
+            ratcn.handle_event(KeyCode::Up, &state),
+            EventResult::Emit(Msg::Select(0))
+        ));
     }
 }

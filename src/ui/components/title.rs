@@ -1,14 +1,19 @@
 use ratatui::layout::Rect;
-use ratatui::style::{Color, Style};
+use ratatui::style::Style;
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 
-pub fn render_title(frame: &mut Frame<'_>, area: Rect, title: &str) {
+pub(crate) fn render_title(frame: &mut Frame<'_>, area: Rect, title: &str, theme: &ratcn::Theme) {
     let label = format!(" {title} ");
+    let width = label.len() as u16;
     frame.render_widget(
-        Paragraph::new(label.clone()).style(Style::default().fg(Color::Black).bg(Color::Cyan)),
+        Paragraph::new(label).style(
+            Style::default()
+                .fg(theme.primary_foreground)
+                .bg(theme.primary),
+        ),
         Rect {
-            width: label.len() as u16,
+            width,
             height: 1,
             ..area
         },

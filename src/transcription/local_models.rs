@@ -2,7 +2,6 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime};
 
@@ -132,9 +131,17 @@ pub struct InstalledModelView {
 
 pub type DownloadProgressCallback = Box<dyn Fn(u64, u64, f64) + Send + Sync + 'static>;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct DownloadHandle {
-    cancel_flag: Arc<AtomicBool>,
+    cancelled: Arc<tokio::sync::watch::Sender<bool>>,
+}
+
+impl Default for DownloadHandle {
+    fn default() -> Self {
+        Self {
+            cancelled: Arc::new(tokio::sync::watch::Sender::new(false)),
+        }
+    }
 }
 
 impl DownloadHandle {
@@ -143,11 +150,33 @@ impl DownloadHandle {
     }
 
     pub fn cancel(&self) {
-        self.cancel_flag.store(true, Ordering::SeqCst);
+        self.cancelled.send_replace(true);
     }
 
-    fn is_cancelled(&self) -> bool {
-        self.cancel_flag.load(Ordering::SeqCst)
+    /// Resolves once [`cancel`](Self::cancel) has been called.
+    async fn cancelled(&self) {
+        // The handle owns the sender, so the channel cannot close.
+        let _ = self
+            .cancelled
+            .subscribe()
+            .wait_for(|cancelled| *cancelled)
+            .await;
+    }
+}
+
+/// Await `future` unless the download is cancelled first, so a stalled
+/// request or stream cannot hold up a cancel.
+async fn unless_cancelled<T>(
+    handle: Option<&DownloadHandle>,
+    future: impl std::future::Future<Output = T>,
+) -> anyhow::Result<T> {
+    let Some(handle) = handle else {
+        return Ok(future.await);
+    };
+    tokio::select! {
+        biased;
+        () = handle.cancelled() => anyhow::bail!("model download cancelled"),
+        output = future => Ok(output),
     }
 }
 
@@ -321,8 +350,8 @@ pub async fn download_model_with_handle(
     progress: Option<DownloadProgressCallback>,
     handle: Option<DownloadHandle>,
 ) -> anyhow::Result<()> {
-    let response = reqwest::get(url)
-        .await
+    let response = unless_cancelled(handle.as_ref(), reqwest::get(url))
+        .await?
         .map_err(|error| anyhow::anyhow!("failed to start model download: {error}"))?;
 
     let status = response.status();
@@ -342,10 +371,7 @@ pub async fn download_model_with_handle(
     let mut stream = response.bytes_stream();
 
     let result = async {
-        while let Some(chunk) = stream.next().await {
-            if handle.as_ref().is_some_and(DownloadHandle::is_cancelled) {
-                anyhow::bail!("model download cancelled");
-            }
+        while let Some(chunk) = unless_cancelled(handle.as_ref(), stream.next()).await? {
             let chunk = chunk
                 .map_err(|error| anyhow::anyhow!("failed while downloading model: {error}"))?;
             file.write_all(&chunk)?;
@@ -359,10 +385,6 @@ pub async fn download_model_with_handle(
                     0.0
                 };
                 callback(downloaded_bytes, total_bytes, speed_mbps);
-            }
-
-            if handle.as_ref().is_some_and(DownloadHandle::is_cancelled) {
-                anyhow::bail!("model download cancelled");
             }
         }
 
@@ -1464,6 +1486,8 @@ mod tests {
         });
     }
 
+    // The guard serializes HOME/XDG mutation with the sync tests for the whole test.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn download_model_replaces_existing_file_without_activating() {
         let _guard = test_env_lock();
@@ -1560,6 +1584,8 @@ mod tests {
         assert!(error.to_string().contains("require a URL"));
     }
 
+    // The guard serializes HOME/XDG mutation with the sync tests for the whole test.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn direct_model_file_url_resolves_to_custom_entry() {
         let _guard = test_env_lock();
@@ -1591,6 +1617,8 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    // The guard serializes HOME/XDG mutation with the sync tests for the whole test.
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn hugging_face_page_resolution_selects_compatible_file() {
         let _guard = test_env_lock();
@@ -1652,6 +1680,57 @@ mod tests {
             fs::write(model_files_dir().join("custom.bin"), [1]).expect("write model file");
             register_custom_model(existing).expect("replacement of registered model");
         });
+    }
+
+    /// Accepts one request, optionally sends headers and the first KiB of a
+    /// larger body, then holds the connection open without sending more.
+    fn serve_and_stall(send_headers: bool) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let url = format!("http://{}", listener.local_addr().expect("server address"));
+        std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept request");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            if send_headers {
+                let _ = stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n\r\n");
+                let _ = stream.write_all(&[1_u8; 1024]);
+            }
+            std::thread::sleep(std::time::Duration::from_secs(30));
+        });
+        url
+    }
+
+    /// Ctrl+C in the model screen waits for the download to stop, so a cancel
+    /// must not wait on a server that has gone quiet, before or after headers.
+    #[tokio::test]
+    async fn cancel_interrupts_a_stalled_download() {
+        for send_headers in [false, true] {
+            let url = serve_and_stall(send_headers);
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("system time before unix epoch")
+                .as_nanos();
+            let dir = env::temp_dir().join(format!("ostt-stall-test-{unique}"));
+            let dest_path = dir.join("stalled.bin");
+            let handle = DownloadHandle::new();
+            let task = tokio::spawn({
+                let dest_path = dest_path.clone();
+                let handle = handle.clone();
+                async move { download_model_with_handle(&url, &dest_path, None, Some(handle)).await }
+            });
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+            handle.cancel();
+            let error = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+                .await
+                .expect("cancel must not wait for the stalled server")
+                .expect("download task")
+                .expect_err("download should be cancelled");
+
+            assert!(error.to_string().contains("cancelled"));
+            assert!(!dest_path.with_extension("tmp").exists());
+            let _ = fs::remove_dir_all(dir);
+        }
     }
 
     #[tokio::test]

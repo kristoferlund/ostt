@@ -7,7 +7,6 @@
 pub mod history_view;
 pub mod storage;
 
-pub use history_view::HistoryView;
 pub use storage::{HistoryManager, TranscriptionEntry};
 
 pub(crate) fn save_transcription(text: &str) -> anyhow::Result<()> {

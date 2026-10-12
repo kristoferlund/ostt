@@ -1,10 +1,9 @@
-use crate::model::ModelView;
 use crate::transcription::local_models;
 use crate::transcription::{self, TranscriptionProvider};
 use std::io::Write;
 
 pub async fn handle_model() -> anyhow::Result<()> {
-    ModelView::new()?.run().await
+    crate::model::run().await
 }
 
 pub async fn handle_model_list(

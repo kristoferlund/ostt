@@ -4,6 +4,17 @@ use crate::{config, transcription};
 use cliclack::{confirm, intro, note, outro, password, select};
 use console::style;
 use std::collections::HashSet;
+use std::sync::{atomic::AtomicBool, Arc};
+
+/// Ctrl-C must not kill the process mid-prompt: cliclack reads it as a key,
+/// cancels the prompt and restores the cursor itself.
+fn ignore_ctrl_c() -> std::io::Result<()> {
+    signal_hook::flag::register(
+        signal_hook::consts::SIGINT,
+        Arc::new(AtomicBool::new(false)),
+    )
+    .map(drop)
+}
 
 /// Handles cloud provider API key management.
 pub async fn handle_auth() -> Result<(), anyhow::Error> {
@@ -13,7 +24,7 @@ pub async fn handle_auth() -> Result<(), anyhow::Error> {
 pub async fn handle_auth_login(provider_id: Option<String>) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Authentication ===");
 
-    ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
+    ignore_ctrl_c()?;
 
     intro(style(" auth ").on_white().black())?;
 
@@ -72,7 +83,7 @@ pub async fn handle_logout(
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Logout ===");
 
-    ctrlc::set_handler(move || {}).expect("setting Ctrl-C handler");
+    ignore_ctrl_c()?;
 
     intro(style(" auth logout ").on_white().black())?;
 
