@@ -22,7 +22,7 @@
 
 ---
 
-OSTT is a terminal-native speech-to-text tool. Record from a hotkey, transcribe with local Whisper-compatible models or your chosen cloud provider, then send the result to your clipboard, a file, stdout, an AI prompt, or any shell command. Local transcription runs offline and supports GPU acceleration through Metal on macOS and CUDA or Vulkan on Linux.
+OSTT is a terminal-native speech-to-text tool. Record from a hotkey, transcribe with local Parakeet and Whisper models or your chosen cloud provider, then send the result to your clipboard, a file, stdout, an AI prompt, or any shell command. Local transcription runs offline and supports GPU acceleration through Metal on macOS and CUDA or Vulkan on Linux.
 
 OSTT is built for people who treat the terminal as a normal place for voice input to land. It does not assume one vendor, one subscription, or one app-specific workflow: use offline local models, bring your own API key for OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, or Mistral, and retry the same recording with another model when needed. Voice becomes text that can move through the same tools as everything else.
 
@@ -36,9 +36,9 @@ OSTT is built for people who treat the terminal as a normal place for voice inpu
 ## Features
 
 - **Linux-first voice input** - Global hotkey setup for Omarchy/Hyprland, GNOME, KDE, and other Linux desktops, with macOS support too.
-- **Provider choice** - Bring your own API key and switch between OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, Mistral, and local Whisper-compatible models.
+- **Provider choice** - Bring your own API key and switch between OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, Mistral, and local Parakeet and Whisper models.
 - **Model-scoped params** - Tune supported provider/model request params persistently or per run with `--param key=value`.
-- **Local transcription models** - Download curated local models or add custom Hugging Face/direct model files for offline transcription.
+- **Local transcription models** - Download curated Parakeet and Whisper models or add custom Hugging Face/direct model files for offline transcription.
 - **Terminal-native workflow** - Use stdout, clipboard, files, aliases, shell completions, logs, and pipes.
 - **Scriptable post-processing** - Transform transcripts with AI prompts or bash commands using `ostt -p` and `ostt process`.
 - **Retry without re-recording** - Save recordings locally, then re-transcribe them with a different provider or model.
@@ -79,6 +79,7 @@ ostt model          # Choose cloud or local transcription model
 ostt                # Record, transcribe, print to stdout
 ostt -c             # Record, transcribe, copy to clipboard
 ostt -m deepgram/nova-3 -c
+ostt -m parakeet/parakeet-ultra -c
 ostt -m whisper/turbo --param language=sv -c
 ostt launch -c      # Popup workflow for global hotkeys
 ```
@@ -133,7 +134,7 @@ OSTT is bring-your-own-API-key and currently supports OpenAI, Deepgram, DeepInfr
 
 Run `ostt auth` to select your provider/model and save credentials securely.
 
-Run `ostt model` to switch between authenticated cloud models and local models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs.
+Run `ostt model` to switch between authenticated cloud models and local models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs. See [Local Models](https://ostt.ai/guide/local-models) for the Parakeet and Whisper models.
 
 Per-provider and per-model params are configured under `[provider.params]` and `[provider."model".params]`, or passed per run with `--param key=value`. See [Providers and Models](https://ostt.ai/reference/providers) and [Configuration](https://ostt.ai/guide/configuration) for supported params.
 
