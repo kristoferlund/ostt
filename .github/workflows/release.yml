@@ -306,12 +306,12 @@ jobs:
             cuda_apt_version: "12-8"
             variant: cuda
             expect_sass: "86 89 120"
-            expect_ptx: "50 61 70 75 80"
+            expect_ptx: "50 61 70 75 80 90"
           - cuda_major: "13"
             cuda_apt_version: "13-0"
             variant: cuda13
             expect_sass: "86 89 120 121"
-            expect_ptx: "75 80"
+            expect_ptx: "75 80 90"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CUDA_VERSION: ${{ matrix.cuda_apt_version }}
