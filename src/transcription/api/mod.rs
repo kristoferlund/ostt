@@ -326,30 +326,6 @@ pub(super) fn validate_number_range(
     Ok(())
 }
 
-pub(super) fn validate_number_min(
-    full_model_id: &str,
-    options: &IndexMap<String, ModelOptionValue>,
-    option_name: &str,
-    min: f64,
-) -> anyhow::Result<()> {
-    let value = match options.get(option_name) {
-        Some(ModelOptionValue::Number(value)) => *value,
-        Some(ModelOptionValue::Integer(value)) => *value as f64,
-        _ => return Ok(()),
-    };
-
-    if value < min {
-        anyhow::bail!(
-            "Invalid value for param '{}' in '{}'. Expected >= {}.",
-            option_name,
-            full_model_id,
-            min
-        );
-    }
-
-    Ok(())
-}
-
 pub(crate) fn all_models() -> Vec<&'static ModelSpec> {
     [
         openai::MODELS,

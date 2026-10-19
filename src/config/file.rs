@@ -144,8 +144,6 @@ pub struct LocalTranscriptionConfig {
     pub no_context: bool,
     /// Sampling temperature (0.0 = greedy/deterministic)
     pub temperature: f32,
-    /// Entropy threshold for fallback (2.4 = default)
-    pub entropy_thold: f32,
     /// No-speech probability threshold (0.6 = default)
     pub no_speech_thold: f32,
 }
@@ -156,7 +154,6 @@ impl Default for LocalTranscriptionConfig {
             language: "auto".to_string(),
             no_context: true,
             temperature: 0.0,
-            entropy_thold: 2.4,
             no_speech_thold: 0.6,
         }
     }
@@ -164,22 +161,15 @@ impl Default for LocalTranscriptionConfig {
 
 impl LocalTranscriptionConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
-        validate_local_values(self.temperature, self.entropy_thold, self.no_speech_thold)?;
+        validate_local_values(self.temperature, self.no_speech_thold)?;
 
         Ok(())
     }
 }
 
-fn validate_local_values(
-    temperature: f32,
-    entropy_thold: f32,
-    no_speech_thold: f32,
-) -> anyhow::Result<()> {
+fn validate_local_values(temperature: f32, no_speech_thold: f32) -> anyhow::Result<()> {
     if !(0.0..=1.0).contains(&temperature) {
         anyhow::bail!("temperature must be between 0.0 and 1.0");
-    }
-    if entropy_thold < 0.0 {
-        anyhow::bail!("entropy_thold must be >= 0.0");
     }
     if !(0.0..=1.0).contains(&no_speech_thold) {
         anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
@@ -1656,7 +1646,6 @@ mod tests {
             language = "sv"
             no_context = false
             temperature = 0.2
-            entropy_thold = 3.0
             no_speech_thold = 0.4
         "#;
 
@@ -1668,7 +1657,6 @@ mod tests {
         );
         assert_eq!(params["no_context"], ModelOptionValue::Bool(false));
         assert_eq!(params["temperature"], ModelOptionValue::Number(0.2));
-        assert_eq!(params["entropy_thold"], ModelOptionValue::Number(3.0));
         assert_eq!(params["no_speech_thold"], ModelOptionValue::Number(0.4));
     }
 
@@ -1677,7 +1665,6 @@ mod tests {
         let cases = [
             ("temperature = 1.1", "temperature"),
             ("temperature = -0.1", "temperature"),
-            ("entropy_thold = -0.1", "entropy_thold"),
             ("no_speech_thold = 1.1", "no_speech_thold"),
         ];
 
@@ -1707,7 +1694,6 @@ mod tests {
 
             [whisper.params]
             temperature = 1.0
-            entropy_thold = 0.0
             no_speech_thold = 0.0
         "#;
 
@@ -1741,7 +1727,6 @@ mod tests {
             language = "sv"
             no_context = false
             temperature = 0.0
-            entropy_thold = 2.4
             no_speech_thold = 0.6
 
             [whisper.turbo.params]
@@ -1757,7 +1742,6 @@ mod tests {
     fn params_reject_invalid_whisper_values() {
         let cases = [
             ("temperature = 1.5", "Expected 0-1"),
-            ("entropy_thold = -1.0", "Expected >= 0"),
             ("no_speech_thold = 1.5", "Expected 0-1"),
         ];
 
@@ -1779,17 +1763,19 @@ mod tests {
 
     #[test]
     fn retired_whisper_params_do_not_stop_the_config_from_loading() {
-        // Older versions accepted no_timestamps. Rejecting it now would make an
-        // upgrade fail to load the whole config over a setting that did nothing.
+        // Older versions accepted these. Rejecting them now would make an upgrade
+        // fail to load the whole config over settings that have no effect.
         let toml_str = r#"
             [audio]
             device = "default"
 
             [whisper.params]
             no_timestamps = true
+            entropy_thold = 2.4
 
             [whisper.turbo.params]
             no_timestamps = false
+            entropy_thold = -1.0
             language = "sv"
         "#;
 

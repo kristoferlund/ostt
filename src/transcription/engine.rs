@@ -112,13 +112,6 @@ pub(crate) fn backend_details(model: &Model) -> String {
 }
 
 fn run_options(arch: &str, config: &LocalTranscriptionConfig) -> RunOptions {
-    // whisper.cpp fell back to higher temperatures when segment entropy was
-    // *below* this threshold. transcribe.cpp has no entropy check, and its
-    // compression-ratio check runs the opposite way, so the value cannot be
-    // mapped. transcribe.cpp's own fallback defaults apply instead.
-    if config.entropy_thold != LocalTranscriptionConfig::default().entropy_thold {
-        tracing::warn!("entropy_thold is not supported by the local engine and is ignored");
-    }
     RunOptions {
         language: (config.language != "auto").then(|| config.language.clone()),
         // Other model families reject or ignore Whisper decode settings.
@@ -178,19 +171,6 @@ mod tests {
         assert_eq!(whisper.condition_on_prev_tokens, Some(false));
         assert_eq!(whisper.temperature, Some(0.3));
         assert_eq!(whisper.no_speech_thold, Some(0.5));
-    }
-
-    #[test]
-    fn entropy_threshold_is_not_reinterpreted_as_an_inverted_threshold() {
-        // The compression-ratio check falls back when the ratio is *above* its
-        // threshold; feeding it entropy_thold (fallback when *below*) would make
-        // stricter settings more lenient and 0.0 force fallback on every segment.
-        let config = LocalTranscriptionConfig {
-            entropy_thold: 0.0,
-            ..Default::default()
-        };
-        let options = run_options("whisper", &config);
-        assert_eq!(whisper_options(&options).compression_ratio_thold, None);
     }
 
     #[test]

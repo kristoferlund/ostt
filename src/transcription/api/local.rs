@@ -11,13 +11,9 @@ use indexmap::IndexMap;
 
 /// Params older versions accepted that no longer have any effect. Configs that
 /// still set them keep loading; they are ignored rather than rejected.
-pub(super) const RETIRED_OPTIONS: &[&str] = &["no_timestamps"];
+pub(super) const RETIRED_OPTIONS: &[&str] = &["entropy_thold", "no_timestamps"];
 
 const OPTIONS: &[ModelOptionSpec] = &[
-    ModelOptionSpec {
-        name: "entropy_thold",
-        kind: ModelOptionKind::Number,
-    },
     ModelOptionSpec {
         name: "language",
         kind: ModelOptionKind::String,
@@ -44,7 +40,6 @@ pub(super) fn validate_options(
     full_model_id: &str,
     options: &IndexMap<String, ModelOptionValue>,
 ) -> anyhow::Result<()> {
-    super::validate_number_min(full_model_id, options, "entropy_thold", 0.0)?;
     super::validate_number_range(full_model_id, options, "no_speech_thold", 0.0..=1.0)?;
     super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
 
@@ -94,9 +89,6 @@ fn apply_params(config: &TranscriptionConfig, local_config: &mut LocalTranscript
     }
     if let Some(temperature) = config.option_number("temperature") {
         local_config.temperature = temperature as f32;
-    }
-    if let Some(entropy_thold) = config.option_number("entropy_thold") {
-        local_config.entropy_thold = entropy_thold as f32;
     }
     if let Some(no_speech_thold) = config.option_number("no_speech_thold") {
         local_config.no_speech_thold = no_speech_thold as f32;
@@ -210,10 +202,11 @@ mod tests {
 
         assert!(schema.option("language").is_some());
         assert!(schema.option("temperature").is_some());
-        assert!(schema.option("entropy_thold").is_some());
         assert!(schema.option("no_speech_thold").is_some());
         assert!(schema.option("no_context").is_some());
-        // It only ever changed whisper.cpp's console printing, never the text.
+        // no_timestamps only changed whisper.cpp's console printing; the engine
+        // has no entropy check for entropy_thold to control.
         assert!(schema.option("no_timestamps").is_none());
+        assert!(schema.option("entropy_thold").is_none());
     }
 }
