@@ -194,6 +194,11 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
     Ok(result)
 }
 
+/// Whether a param was accepted by an earlier version but is now ignored.
+pub(crate) fn is_retired_param(provider_id: &str, option_name: &str) -> bool {
+    provider_id == "whisper" && local::RETIRED_OPTIONS.contains(&option_name)
+}
+
 pub(crate) fn option_schema(provider_id: &str, model_id: &str) -> Option<ModelOptionSchema> {
     match provider_id {
         "openai" => openai::option_schema(model_id),

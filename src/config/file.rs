@@ -1255,6 +1255,12 @@ pub fn validate_params_for_model(
     };
 
     for (option_name, value) in params {
+        if api::is_retired_param(provider_id, option_name) {
+            tracing::warn!(
+                "Ignoring param '{option_name}' for '{full_model_id}': it no longer has any effect and can be removed from the config."
+            );
+            continue;
+        }
         let Some(spec) = schema.option(option_name) else {
             anyhow::bail!(
                 "Invalid param '{}' for '{}'. Supported params: {}.",
@@ -1769,6 +1775,26 @@ mod tests {
             let err = parse_ostt_config(&toml_str).unwrap_err().to_string();
             assert!(err.contains(expected), "{err}");
         }
+    }
+
+    #[test]
+    fn retired_whisper_params_do_not_stop_the_config_from_loading() {
+        // Older versions accepted no_timestamps. Rejecting it now would make an
+        // upgrade fail to load the whole config over a setting that did nothing.
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [whisper.params]
+            no_timestamps = true
+
+            [whisper.turbo.params]
+            no_timestamps = false
+            language = "sv"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
     }
 
     #[test]

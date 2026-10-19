@@ -9,6 +9,10 @@ use crate::transcription::{
 };
 use indexmap::IndexMap;
 
+/// Params older versions accepted that no longer have any effect. Configs that
+/// still set them keep loading; they are ignored rather than rejected.
+pub(super) const RETIRED_OPTIONS: &[&str] = &["no_timestamps"];
+
 const OPTIONS: &[ModelOptionSpec] = &[
     ModelOptionSpec {
         name: "entropy_thold",
