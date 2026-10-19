@@ -81,7 +81,7 @@ For code changes, run from the repository root:
     cargo build --profile dist --locked
 
 Test affected optional backends separately using the relevant feature:
-`whisper-cuda` or `whisper-vulkan`.
+`cuda` or `vulkan`.
 
 Do not use `--all-features` as the standard contributor check. GPU features
 require different native toolchains and runtimes; contributors are not expected

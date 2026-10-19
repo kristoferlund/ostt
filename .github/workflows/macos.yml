@@ -1,0 +1,53 @@
+name: macOS checks
+
+# Release builds for macOS only run when publishing, so pull requests would not
+# otherwise compile the Metal backend or the Intel build at all.
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    name: ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The same runners the release uses for these targets.
+          - target: aarch64-apple-darwin
+            runner: macos-14
+          - target: x86_64-apple-darwin
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test
+        run: cargo test --release --locked
+      - name: Build
+        run: cargo build --release --locked
+      - name: Transcribe speech with a local Parakeet model
+        env:
+          XDG_CONFIG_HOME: ${{ runner.temp }}/config
+          XDG_DATA_HOME: ${{ runner.temp }}/data
+          XDG_STATE_HOME: ${{ runner.temp }}/state
+        run: |
+          set -euo pipefail
+          ostt=./target/release/ostt
+          say -o "$RUNNER_TEMP/speech.aiff" "The quick brown fox jumps over the lazy dog."
+          afconvert -f WAVE -d LEI16@16000 -c 1 "$RUNNER_TEMP/speech.aiff" "$RUNNER_TEMP/speech.wav"
+          $ostt model local download parakeet/parakeet-tdt_ctc-110m
+          $ostt model select parakeet/parakeet-tdt_ctc-110m
+          text="$($ostt transcribe "$RUNNER_TEMP/speech.wav")"
+          echo "Transcript: $text"
+          grep -qi "brown fox" <<<"$text"
+          # Report which backend actually ran; Apple Silicon must use Metal.
+          grep -h "backend active" "$XDG_STATE_HOME"/ostt/*.log*
+          if [ "${{ matrix.target }}" = aarch64-apple-darwin ]; then
+            grep -qi "parakeet model on metal" "$XDG_STATE_HOME"/ostt/*.log*
+          fi

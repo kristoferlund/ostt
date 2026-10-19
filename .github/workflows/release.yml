@@ -358,7 +358,7 @@ jobs:
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install cargo-deb cargo-generate-rpm
       - name: Build CUDA release binary
-        run: cargo build --profile dist --locked --features whisper-cuda
+        run: cargo build --profile dist --locked --features cuda
       - name: Generate shell completions
         # The CUDA stubs ship libcuda.so (unversioned); the binary needs libcuda.so.1.
         # Symlink the stub so the dynamic linker finds it without real NVIDIA drivers.
@@ -552,7 +552,7 @@ jobs:
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install cargo-deb cargo-generate-rpm
       - name: Build Vulkan release binary
-        run: cargo build --profile dist --locked --features whisper-vulkan
+        run: cargo build --profile dist --locked --features vulkan
       - name: Generate shell completions
         # libvulkan.so.1 is present from libvulkan1 (pulled in by libvulkan-dev).
         # The completions subcommand does not invoke any Vulkan API.
