@@ -46,8 +46,8 @@ jobs:
           text="$($ostt transcribe "$RUNNER_TEMP/speech.wav")"
           echo "Transcript: $text"
           grep -qi "brown fox" <<<"$text"
-          # Report which backend actually ran; Apple Silicon must use Metal.
-          grep -h "backend active" "$XDG_STATE_HOME"/ostt/*.log*
-          if [ "${{ matrix.target }}" = aarch64-apple-darwin ]; then
-            grep -qi "parakeet model on metal" "$XDG_STATE_HOME"/ostt/*.log*
-          fi
+          grep -hE "inference devices|backend active" "$XDG_STATE_HOME"/ostt/*.log*
+      - name: Check Metal support is compiled in
+        # Hosted runners are VMs without a GPU, so inference above runs on CPU.
+        # Real Metal execution has to be verified on a physical Mac.
+        run: otool -L target/release/ostt | grep Metal.framework
