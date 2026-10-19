@@ -75,9 +75,15 @@ pub async fn handle_model_list(
         }
     }
 
-    if provider.as_deref().is_none_or(|id| id == "whisper") {
+    if provider
+        .as_deref()
+        .is_none_or(crate::transcription::TranscriptionProvider::is_local_id)
+    {
         let state = local_models::load_state();
-        let registry = local_models::fetch_registry().await.unwrap_or_default();
+        let registry = match local_models::fetch_registry().await {
+            Ok(registry) => registry,
+            Err(_) => local_models::load_registry_entries().unwrap_or_default(),
+        };
         for entry in registry.iter().chain(state.custom_models.iter()) {
             if provider
                 .as_deref()
@@ -184,7 +190,7 @@ pub fn handle_model_params(model: Option<String>, json: bool) -> anyhow::Result<
 
 pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
     let selected = crate::config::parse_provider_model(&model)?;
-    if selected.provider_id == "whisper" {
+    if crate::transcription::TranscriptionProvider::is_local_id(&selected.provider_id) {
         let activated =
             local_models::activate_model_for_provider(&selected.provider_id, &selected.model_id)?;
         reload_daemon_if_running(&selected.model_id).await?;
@@ -268,10 +274,7 @@ pub async fn handle_model_local_remove(model_id: String) -> anyhow::Result<()> {
     if loaded_model_id.as_deref() == Some(requested.model_id.as_str()) {
         crate::transcription::daemon_client::shutdown_daemon().await?;
     }
-    println!(
-        "Removed local model: {}/{}",
-        requested.provider_id, requested.model_id
-    );
+    println!("Removed local model: {}", requested.label());
     Ok(())
 }
 
@@ -284,8 +287,26 @@ struct ModelListRow {
 }
 
 struct LocalModelArg {
-    provider_id: String,
+    /// `None` for a bare model id: any local provider with that model matches.
+    provider_id: Option<String>,
     model_id: String,
+}
+
+impl LocalModelArg {
+    fn matches(&self, entry: &local_models::RegistryEntry) -> bool {
+        entry.id == self.model_id
+            && self
+                .provider_id
+                .as_deref()
+                .is_none_or(|provider_id| provider_id == entry.provider_id)
+    }
+
+    fn label(&self) -> String {
+        match &self.provider_id {
+            Some(provider_id) => format!("{provider_id}/{}", self.model_id),
+            None => self.model_id.clone(),
+        }
+    }
 }
 
 fn parse_local_model_arg(value: &str) -> anyhow::Result<LocalModelArg> {
@@ -295,13 +316,13 @@ fn parse_local_model_arg(value: &str) -> anyhow::Result<LocalModelArg> {
         .transpose()?
     {
         return Ok(LocalModelArg {
-            provider_id: selected.provider_id,
+            provider_id: Some(selected.provider_id),
             model_id: selected.model_id,
         });
     }
 
     Ok(LocalModelArg {
-        provider_id: "whisper".to_string(),
+        provider_id: None,
         model_id: value.to_string(),
     })
 }
@@ -313,23 +334,20 @@ async fn find_local_model_entry(
     if let Some(entry) = state
         .custom_models
         .iter()
-        .find(|entry| entry.provider_id == requested.provider_id && entry.id == requested.model_id)
+        .find(|entry| requested.matches(entry))
         .cloned()
     {
         return Ok(entry);
     }
 
-    let registry = local_models::fetch_registry().await?;
+    let registry = match local_models::fetch_registry().await {
+        Ok(registry) => registry,
+        Err(error) => local_models::load_registry_entries().map_err(|_| error)?,
+    };
     registry
         .into_iter()
-        .find(|entry| entry.provider_id == requested.provider_id && entry.id == requested.model_id)
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Unknown local model: {}/{}",
-                requested.provider_id,
-                requested.model_id
-            )
-        })
+        .find(|entry| requested.matches(entry))
+        .ok_or_else(|| anyhow::anyhow!("Unknown local model: {}", requested.label()))
 }
 
 async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
@@ -373,18 +391,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parse_local_model_arg_accepts_short_id() {
-        let parsed = parse_local_model_arg("turbo").unwrap();
+    fn parse_local_model_arg_accepts_short_id_for_any_local_provider() {
+        // A bare id must not assume Whisper, or `ostt model download
+        // parakeet-ultra` would look for a Whisper model of that name.
+        let parsed = parse_local_model_arg("parakeet-ultra").unwrap();
+        let mut entry = local_models::RegistryEntry {
+            id: "parakeet-ultra".to_string(),
+            provider_id: "parakeet".to_string(),
+            name: String::new(),
+            description: String::new(),
+            languages: Vec::new(),
+            size_mb: 0,
+            url: String::new(),
+            recommended_hardware: None,
+            sha256: None,
+            category: None,
+            group_id: None,
+        };
 
-        assert_eq!(parsed.provider_id, "whisper");
-        assert_eq!(parsed.model_id, "turbo");
+        assert_eq!(parsed.provider_id, None);
+        assert!(parsed.matches(&entry));
+        entry.id = "turbo".to_string();
+        assert!(!parsed.matches(&entry));
     }
 
     #[test]
     fn parse_local_model_arg_accepts_full_id() {
         let parsed = parse_local_model_arg("whisper/turbo").unwrap();
 
-        assert_eq!(parsed.provider_id, "whisper");
+        assert_eq!(parsed.provider_id.as_deref(), Some("whisper"));
         assert_eq!(parsed.model_id, "turbo");
     }
 }

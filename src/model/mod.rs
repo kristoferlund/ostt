@@ -49,7 +49,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
     let authorized_provider_ids = config::get_authorized_providers()?;
     let registry = fetch_registry().await.unwrap_or_else(|error| {
         tracing::error!("Failed to fetch local model registry: {}", error);
-        Vec::new()
+        crate::transcription::local_models::load_registry_entries().unwrap_or_default()
     });
     let selected_model = config::get_selected_model_entry()?;
     let daemon_model_id = transcription::daemon_client::probe_daemon()
@@ -210,7 +210,9 @@ impl ModelsView {
         };
         tracing::debug!("Selected local model '{}'", entry.id);
 
-        if entry.provider_id == "whisper" && !entry.is_downloaded {
+        if crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id)
+            && !entry.is_downloaded
+        {
             if entry.is_available_in_registry {
                 self.state.set_mode(Mode::ConfirmDownload { entry });
             } else {
@@ -406,7 +408,7 @@ fn shortcut(mode: &Mode, event: &Event) -> Option<Msg> {
 }
 
 async fn activate_entry(entry: &ModelEntry) -> anyhow::Result<()> {
-    if entry.provider_id != "whisper" {
+    if !crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id) {
         config::save_selected_model(&entry.provider_id, &entry.id)?;
         return Ok(());
     }
@@ -637,6 +639,7 @@ fn spawn_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
         is_custom,
     }));
     let progress_state = state.clone();
+    let status_state = state.clone();
     let handle = DownloadHandle::new();
     let task_handle = handle.clone();
     let task_entry = entry.clone();
@@ -674,9 +677,33 @@ fn spawn_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
             );
             return Err(error);
         }
-        validate_downloaded_model(&task_entry)?;
+        if let Ok(mut state) = status_state.lock() {
+            state.status = "Verifying".to_string();
+        }
+        // Hashing and loading a model take seconds; keep them off the async workers.
+        let verify_entry = task_entry.clone();
+        tokio::task::spawn_blocking(move || validate_downloaded_model(&verify_entry)).await??;
         if is_custom {
-            tracing::info!("Registered downloaded custom model '{}'", task_entry.id);
+            // Custom URLs do not say which engine family they hold.
+            let path = destination.clone();
+            let provider = tokio::task::spawn_blocking(move || {
+                crate::transcription::engine::provider_for_model_file(&path)
+            })
+            .await?;
+            let provider = match provider {
+                Ok(provider) => provider,
+                Err(error) => {
+                    let _ = std::fs::remove_file(&destination);
+                    return Err(error);
+                }
+            };
+            let mut task_entry = task_entry;
+            task_entry.provider_id = provider.to_string();
+            tracing::info!(
+                "Registered downloaded custom model '{}/{}'",
+                task_entry.provider_id,
+                task_entry.id
+            );
             register_downloaded_custom_model(task_entry)?;
         } else {
             tracing::info!("Marked registry model '{}' as downloaded", task_entry.id);

@@ -156,7 +156,10 @@ impl State {
     pub(crate) fn confirm_delete(&mut self) {
         if let Some(entry) = self
             .selected_entry()
-            .filter(|entry| entry.provider_id == "whisper" && entry.is_downloaded)
+            .filter(|entry| {
+                crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id)
+                    && entry.is_downloaded
+            })
             .cloned()
         {
             self.set_mode(Mode::ConfirmDelete { entry });

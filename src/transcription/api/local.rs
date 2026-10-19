@@ -78,7 +78,7 @@ pub(super) async fn transcribe(
     .await
     .map_err(|err| anyhow::anyhow!("Local transcription runtime task failed: {err}"))??;
 
-    Ok(filter_obvious_hallucination(&text).unwrap_or_default())
+    Ok(text)
 }
 
 fn apply_params(config: &TranscriptionConfig, local_config: &mut LocalTranscriptionConfig) {
@@ -174,7 +174,7 @@ pub(crate) fn load_audio_for_whisper(audio_path: &Path) -> anyhow::Result<Vec<f3
 pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<()> {
     let reader = hound::WavReader::open(audio_path).map_err(|err| {
         anyhow::anyhow!(
-            "Whisper transcription requires WAV audio: {err}. Configure [whisper] with output_format = \"pcm_s16le -ar 16000\"."
+            "Local transcription requires WAV audio: {err}. Set output_format = \"pcm_s16le -ar 16000\" in the [whisper] or [parakeet] section."
         )
     })?;
     let spec = reader.spec();
@@ -185,7 +185,7 @@ pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<(
         || spec.channels != 1
     {
         anyhow::bail!(
-            "Whisper transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Configure [whisper] with output_format = \"pcm_s16le -ar 16000\". Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
+            "Local transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Set output_format = \"pcm_s16le -ar 16000\" in the [whisper] or [parakeet] section. Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
             spec.sample_format,
             spec.bits_per_sample,
             spec.sample_rate,

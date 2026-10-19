@@ -34,8 +34,9 @@ pub fn config_for_selected_model(
             )
         })?;
 
-    if provider == TranscriptionProvider::Whisper {
+    if provider.is_local() {
         return Ok(TranscriptionConfig::new_local(
+            provider,
             selected_model.model_id.clone(),
             keywords,
             params,

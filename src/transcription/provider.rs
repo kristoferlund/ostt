@@ -16,6 +16,7 @@ pub enum TranscriptionProvider {
     Berget,
     ElevenLabs,
     Whisper,
+    Parakeet,
     Mistral,
     Command,
     Http,
@@ -32,6 +33,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Berget => "berget",
             TranscriptionProvider::ElevenLabs => "elevenlabs",
             TranscriptionProvider::Whisper => "whisper",
+            TranscriptionProvider::Parakeet => "parakeet",
             TranscriptionProvider::Mistral => "mistral",
             TranscriptionProvider::Command => "command",
             TranscriptionProvider::Http => "http",
@@ -47,7 +49,8 @@ impl TranscriptionProvider {
             TranscriptionProvider::AssemblyAI => "AssemblyAI",
             TranscriptionProvider::Berget => "Berget",
             TranscriptionProvider::ElevenLabs => "ElevenLabs",
-            TranscriptionProvider::Whisper => "Whisper (local whisper.cpp)",
+            TranscriptionProvider::Whisper => "Whisper (local)",
+            TranscriptionProvider::Parakeet => "Parakeet (local)",
             TranscriptionProvider::Mistral => "Mistral",
             TranscriptionProvider::Command => "External command",
             TranscriptionProvider::Http => "OpenAI-compatible HTTP",
@@ -64,6 +67,7 @@ impl TranscriptionProvider {
             "berget" => Some(TranscriptionProvider::Berget),
             "elevenlabs" => Some(TranscriptionProvider::ElevenLabs),
             "whisper" => Some(TranscriptionProvider::Whisper),
+            "parakeet" => Some(TranscriptionProvider::Parakeet),
             "mistral" => Some(TranscriptionProvider::Mistral),
             "command" => Some(TranscriptionProvider::Command),
             "http" => Some(TranscriptionProvider::Http),
@@ -81,6 +85,7 @@ impl TranscriptionProvider {
             TranscriptionProvider::Berget,
             TranscriptionProvider::ElevenLabs,
             TranscriptionProvider::Whisper,
+            TranscriptionProvider::Parakeet,
             TranscriptionProvider::Mistral,
             TranscriptionProvider::Command,
             TranscriptionProvider::Http,
@@ -95,8 +100,22 @@ impl TranscriptionProvider {
         !matches!(
             self,
             TranscriptionProvider::Whisper
+                | TranscriptionProvider::Parakeet
                 | TranscriptionProvider::Command
                 | TranscriptionProvider::Http
         )
+    }
+
+    /// Whether models for this provider are downloaded and run on this machine.
+    pub fn is_local(&self) -> bool {
+        matches!(
+            self,
+            TranscriptionProvider::Whisper | TranscriptionProvider::Parakeet
+        )
+    }
+
+    /// [`Self::is_local`] for a provider id, `false` for unknown ids.
+    pub fn is_local_id(id: &str) -> bool {
+        Self::from_id(id).is_some_and(|provider| provider.is_local())
     }
 }

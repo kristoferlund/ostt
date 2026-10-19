@@ -92,12 +92,13 @@ impl TranscriptionConfig {
 
     /// Creates a local transcription configuration with a registry-backed model ID.
     pub fn new_local(
+        provider: TranscriptionProvider,
         model_id: String,
         keywords: Vec<String>,
         params: IndexMap<String, ModelOptionValue>,
     ) -> Self {
         Self {
-            provider: TranscriptionProvider::Whisper,
+            provider,
             model_id,
             endpoint: String::new(),
             api_key: String::new(),
@@ -182,7 +183,9 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::AssemblyAI => assemblyai::transcribe(config, audio_path).await,
         TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
         TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
-        TranscriptionProvider::Whisper => local::transcribe(config, audio_path).await,
+        TranscriptionProvider::Whisper | TranscriptionProvider::Parakeet => {
+            local::transcribe(config, audio_path).await
+        }
         TranscriptionProvider::Mistral => mistral::transcribe(config, audio_path).await,
         TranscriptionProvider::Command => command::transcribe(config, audio_path).await,
         TranscriptionProvider::Http => http::transcribe(config, audio_path).await,

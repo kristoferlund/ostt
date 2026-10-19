@@ -1177,7 +1177,7 @@ pub fn resolve_output_format(
         return output_format.to_string();
     }
 
-    if selected_model.provider_id == "whisper" {
+    if crate::transcription::TranscriptionProvider::is_local_id(&selected_model.provider_id) {
         return LOCAL_TRANSCRIPTION_OUTPUT_FORMAT.to_string();
     }
 
@@ -1215,7 +1215,9 @@ pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()
         return Ok(());
     }
 
-    if provider_id != "whisper" && model::find_model(provider_id, model_id).is_none() {
+    if !crate::transcription::TranscriptionProvider::is_local_id(provider_id)
+        && model::find_model(provider_id, model_id).is_none()
+    {
         anyhow::bail!(
             "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
             model_id,
@@ -1223,9 +1225,11 @@ pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()
         );
     }
 
-    if provider_id == "whisper" && !crate::transcription::local_models::is_safe_model_id(model_id) {
+    if crate::transcription::TranscriptionProvider::is_local_id(provider_id)
+        && !crate::transcription::local_models::is_safe_model_id(model_id)
+    {
         anyhow::bail!(
-            "Whisper model id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
+            "Local model id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
             model_id
         );
     }
@@ -1778,7 +1782,7 @@ mod tests {
         "#;
 
         let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Whisper model id"));
+        assert!(err.contains("Local model id"));
     }
 
     #[test]
