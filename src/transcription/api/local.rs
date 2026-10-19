@@ -27,10 +27,6 @@ const OPTIONS: &[ModelOptionSpec] = &[
         kind: ModelOptionKind::Number,
     },
     ModelOptionSpec {
-        name: "no_timestamps",
-        kind: ModelOptionKind::Bool,
-    },
-    ModelOptionSpec {
         name: "temperature",
         kind: ModelOptionKind::Number,
     },
@@ -88,9 +84,6 @@ pub(super) async fn transcribe(
 fn apply_params(config: &TranscriptionConfig, local_config: &mut LocalTranscriptionConfig) {
     if let Some(language) = config.option_string("language") {
         local_config.language = language.to_string();
-    }
-    if let Some(no_timestamps) = config.option_bool("no_timestamps") {
-        local_config.no_timestamps = no_timestamps;
     }
     if let Some(no_context) = config.option_bool("no_context") {
         local_config.no_context = no_context;
@@ -216,6 +209,7 @@ mod tests {
         assert!(schema.option("entropy_thold").is_some());
         assert!(schema.option("no_speech_thold").is_some());
         assert!(schema.option("no_context").is_some());
-        assert!(schema.option("no_timestamps").is_some());
+        // It only ever changed whisper.cpp's console printing, never the text.
+        assert!(schema.option("no_timestamps").is_none());
     }
 }

@@ -140,8 +140,6 @@ fn default_true() -> bool {
 pub struct LocalTranscriptionConfig {
     /// Language hint: "auto" or ISO code (e.g. "sv", "en")
     pub language: String,
-    /// Suppress timestamp output
-    pub no_timestamps: bool,
     /// Suppress text context from previous segments
     pub no_context: bool,
     /// Sampling temperature (0.0 = greedy/deterministic)
@@ -156,7 +154,6 @@ impl Default for LocalTranscriptionConfig {
     fn default() -> Self {
         Self {
             language: "auto".to_string(),
-            no_timestamps: true,
             no_context: true,
             temperature: 0.0,
             entropy_thold: 2.4,
@@ -1647,7 +1644,6 @@ mod tests {
 
             [whisper.params]
             language = "sv"
-            no_timestamps = false
             no_context = false
             temperature = 0.2
             entropy_thold = 3.0
@@ -1660,7 +1656,6 @@ mod tests {
             params["language"],
             ModelOptionValue::String("sv".to_string())
         );
-        assert_eq!(params["no_timestamps"], ModelOptionValue::Bool(false));
         assert_eq!(params["no_context"], ModelOptionValue::Bool(false));
         assert_eq!(params["temperature"], ModelOptionValue::Number(0.2));
         assert_eq!(params["entropy_thold"], ModelOptionValue::Number(3.0));
@@ -1734,7 +1729,6 @@ mod tests {
 
             [whisper.tiny.params]
             language = "sv"
-            no_timestamps = true
             no_context = false
             temperature = 0.0
             entropy_thold = 2.4

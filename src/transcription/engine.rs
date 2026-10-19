@@ -82,8 +82,6 @@ fn run_options(arch: &str, config: &LocalTranscriptionConfig) -> RunOptions {
     }
     RunOptions {
         language: (config.language != "auto").then(|| config.language.clone()),
-        // `no_timestamps` only controlled whisper.cpp's console printing; the
-        // returned text never contained timestamps, so it needs no mapping.
         // Other model families reject or ignore Whisper decode settings.
         family: (arch == "whisper").then(|| {
             RunExtension::Whisper(WhisperRunOptions {
