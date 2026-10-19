@@ -44,6 +44,12 @@ on:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
+# A new push to a pull request supersedes its running checks; release (tag)
+# runs each get their own group and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
@@ -237,6 +243,13 @@ jobs:
           submodules: recursive
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+      # Restores the compiled dependencies, above all the native ggml build in
+      # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
+      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: packages-${{ matrix.deb_arch }}
+          save-if: ${{ github.event_name == 'pull_request' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install cargo-deb
@@ -332,6 +345,13 @@ jobs:
           submodules: recursive
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+      # Restores the compiled dependencies, above all the native ggml build in
+      # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
+      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.variant }}
+          save-if: ${{ github.event_name == 'pull_request' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install CUDA toolkit
@@ -544,6 +564,13 @@ jobs:
           submodules: recursive
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+      # Restores the compiled dependencies, above all the native ggml build in
+      # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
+      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: vulkan
+          save-if: ${{ github.event_name == 'pull_request' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install Vulkan SDK
