@@ -17,7 +17,7 @@ homepage = "https://github.com/kristoferlund/ostt"
 # (libcublas.so.12 vs libcublas.so.13) and are not interchangeable.
 whisper-cuda = ["transcribe-cpp/cuda"]
 # Enable Vulkan GPU acceleration for local transcription (AMD, Intel, NVIDIA).
-# Requires Vulkan SDK (libvulkan-dev, glslang-tools) at build time. The resulting
+# Requires Vulkan SDK (libvulkan-dev, glslang-tools, spirv-headers) at build time. The resulting
 # binary dynamically links libvulkan.so.1 (from Mesa or the NVIDIA ICD) at runtime.
 # Used to produce the ostt-vulkan release artifacts.
 whisper-vulkan = ["transcribe-cpp/vulkan"]
