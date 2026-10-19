@@ -9,12 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cloud models: OpenAI `gpt-transcribe`, AssemblyAI `universal-3-5-pro` and `universal-2`, Deepgram `nova-3-medical` and `nova-3-pharma`, ElevenLabs `scribe_v2_medical`, and DeepInfra Qwen3 ASR 0.6B/1.7B and Nemotron 3.5 ASR Multilingual.
+- OpenAI GPT Transcribe supports native `keywords` and `languages` lists. Saved OSTT keywords use the native keyword field; an explicit list overrides them.
 - Local Parakeet models: `parakeet/parakeet-ultra` (25 European languages), `parakeet/parakeet-tdt-0.6b-v3` (25 European languages), `parakeet/parakeet-tdt-0.6b-v2` (English) and `parakeet/parakeet-tdt_ctc-110m` (English). They run offline with the same GPU support and daemon as Whisper, detect the language themselves and take no params.
 - Custom Parakeet `.gguf` models can be added from the model picker. OSTT detects whether a custom model is Whisper or Parakeet from the file.
 - The last downloaded model registry is cached, so downloaded models keep working offline.
 
 ### Changed
 
+- Refreshed cloud model descriptions and parameter schemas against provider documentation. AssemblyAI Universal 3.5 Pro includes Universal 2 as a language fallback; an explicit `language_code` disables automatic language detection unless overridden.
+- The downloadable model catalog adds English Whisper, Distil-Whisper v3.5 and selected quantized models. All curated downloads are revision-pinned and have SHA-256 checksums; the legacy Whisper-only list remains synchronized.
 - Local transcription now runs on [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) instead of whisper-rs. Existing Whisper models keep working without a new download, and CPU transcription is considerably faster.
 - The model registry moved to `models-v2.json`. Older OSTT versions keep reading `models.json`, which stays Whisper-only.
 - Downloads with a published checksum are verified, and the model picker shows "Verifying" while the check runs.
@@ -23,7 +27,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- Retired cloud choices: AssemblyAI `universal-3-pro` (select `universal-3-5-pro`) and DeepInfra's unavailable Whisper Large/Medium/Small/Base/Timestamped Medium entries (select Large v3, Turbo or Qwen3 ASR). Existing selections/config sections using these IDs must be updated.
+- Unsupported `prompt` on OpenAI's diarization model and legacy `keywords` boosting on Deepgram Nova 3. Use Nova 3 `keyterm` instead.
 - The Whisper params `no_timestamps` and `entropy_thold`, which had no effect with the new engine. Configs that still set them keep loading; the params are ignored and noted in the log.
+
+### Fixed
+
+- OpenAI diarization no longer receives saved keywords as an unsupported prompt, and defaults to automatic chunking so recordings over 30 seconds work.
 
 ## 0.0.28 - 2026-10-12
 

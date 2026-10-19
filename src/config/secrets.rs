@@ -323,9 +323,10 @@ mod tests {
         assert_eq!(selected.provider_id, "berget");
         assert_eq!(selected.model_id, "openai/whisper-large-v3");
 
-        let selected = parse_provider_model("deepinfra/openai/whisper-base").expect("parse model");
+        let selected =
+            parse_provider_model("deepinfra/openai/whisper-large-v3").expect("parse model");
         assert_eq!(selected.provider_id, "deepinfra");
-        assert_eq!(selected.model_id, "openai/whisper-base");
+        assert_eq!(selected.model_id, "openai/whisper-large-v3");
     }
 
     #[test]

@@ -341,3 +341,6 @@ pub(crate) fn all_models() -> Vec<&'static ModelSpec> {
     .flatten()
     .collect()
 }
+
+#[cfg(test)]
+mod test_support;

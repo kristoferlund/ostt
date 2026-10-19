@@ -1962,6 +1962,80 @@ mod tests {
     }
 
     #[test]
+    fn refreshed_models_accept_only_their_documented_controls() {
+        for (provider, model, param, accepted) in [
+            (
+                "openai",
+                "gpt-transcribe",
+                "languages = [\"en\", \"fr\"]",
+                true,
+            ),
+            ("openai", "gpt-transcribe", "keywords = [\"OSTT\"]", true),
+            ("openai", "gpt-transcribe", "language = \"en\"", false),
+            (
+                "openai",
+                "gpt-transcribe",
+                "include = [\"logprobs\"]",
+                false,
+            ),
+            ("openai", "gpt-transcribe", "keywords = [\"<OSTT>\"]", false),
+            (
+                "openai",
+                "gpt-4o-transcribe-diarize",
+                "prompt = \"OSTT\"",
+                false,
+            ),
+            (
+                "assemblyai",
+                "universal-3-5-pro",
+                "prompt = \"Technical dictation\"",
+                true,
+            ),
+            (
+                "assemblyai",
+                "universal-2",
+                "prompt = \"Technical dictation\"",
+                false,
+            ),
+            (
+                "assemblyai",
+                "universal-2",
+                "keyterms_prompt = [\"OSTT\"]",
+                true,
+            ),
+            ("elevenlabs", "scribe_v2_medical", "diarize = true", true),
+            (
+                "deepgram",
+                "nova-3-medical",
+                "keyterm = [\"metformin\"]",
+                true,
+            ),
+            (
+                "deepgram",
+                "nova-3-pharma",
+                "keywords = [\"metformin\"]",
+                false,
+            ),
+            (
+                "deepinfra",
+                "Qwen/Qwen3-ASR-1.7B",
+                "chunk_level = \"word\"",
+                true,
+            ),
+        ] {
+            let toml = format!(
+                "[audio]\ndevice = \"default\"\n[{provider}.\"{model}\".params]\n{param}\n"
+            );
+            let result = parse_ostt_config(&toml);
+            assert_eq!(
+                result.is_ok(),
+                accepted,
+                "{provider}/{model}: {param}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
     fn deprecated_providers_section_fails_deserialization() {
         let toml_str = r#"
             [audio]

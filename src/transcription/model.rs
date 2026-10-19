@@ -131,6 +131,31 @@ mod tests {
     }
 
     #[test]
+    fn selectable_cloud_models_have_parameter_schemas() {
+        for model in all_models() {
+            assert!(
+                super::super::api::option_schema(model.provider_id, model.model_id).is_some(),
+                "{}",
+                model.full_id()
+            );
+        }
+    }
+
+    #[test]
+    fn retired_provider_models_are_not_offered_as_working_choices() {
+        assert!(find_model("assemblyai", "universal-3-pro").is_none());
+        for model in [
+            "openai/whisper-large",
+            "openai/whisper-medium",
+            "openai/whisper-small",
+            "openai/whisper-base",
+            "openai/whisper-timestamped-medium",
+        ] {
+            assert!(find_model("deepinfra", model).is_none());
+        }
+    }
+
+    #[test]
     fn old_ostt_invented_ids_are_not_accepted() {
         assert!(find_model("deepinfra", "deepinfra-whisper-large-v3").is_none());
         assert!(find_model("groq", "groq-whisper-large-v3").is_none());

@@ -15,9 +15,25 @@ pub(super) const MODELS: &[ModelSpec] = &[
         provider_id: "deepgram",
         model_id: "nova-3",
         endpoint: "https://api.deepgram.com/v1/listen",
-        display_name: "Nova 3 (latest, fastest)",
+        display_name: "Nova 3 (general purpose)",
         description: "Deepgram's highest-performing general-purpose ASR model for batch or streaming use cases including meetings, event captioning, multi-speaker audio, noisy audio, far-field audio, and multilingual transcription.",
         languages: &["Multilingual", "Swedish", "Norwegian", "English"],
+    },
+    ModelSpec {
+        provider_id: "deepgram",
+        model_id: "nova-3-medical",
+        endpoint: "https://api.deepgram.com/v1/listen",
+        display_name: "Nova 3 Medical",
+        description: "Nova 3 specialized for medical terminology. Supports English and multilingual code-switching.",
+        languages: &["English", "Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "deepgram",
+        model_id: "nova-3-pharma",
+        endpoint: "https://api.deepgram.com/v1/listen",
+        display_name: "Nova 3 Pharma (English)",
+        description: "Nova 3 specialized for English pharmaceutical terminology.",
+        languages: &["English"],
     },
     ModelSpec {
         provider_id: "deepgram",
@@ -48,7 +64,6 @@ const NOVA_3_OPTIONS: &[ModelOptionSpec] = &[
     option("filler_words", ModelOptionKind::Bool),
     option("intents", ModelOptionKind::Bool),
     option("keyterm", ModelOptionKind::StringList),
-    option("keywords", ModelOptionKind::StringList),
     option("language", ModelOptionKind::String),
     option("measurements", ModelOptionKind::Bool),
     option("mip_opt_out", ModelOptionKind::Bool),
@@ -108,7 +123,9 @@ const NOVA_2_OPTIONS: &[ModelOptionSpec] = &[
 
 pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
     match model_id {
-        "nova-3" => Some(ModelOptionSchema::new(NOVA_3_OPTIONS)),
+        "nova-3" | "nova-3-medical" | "nova-3-pharma" => {
+            Some(ModelOptionSchema::new(NOVA_3_OPTIONS))
+        }
         "nova-2" => Some(ModelOptionSchema::new(NOVA_2_OPTIONS)),
         _ => None,
     }
@@ -255,7 +272,7 @@ pub(super) async fn transcribe(
 
     // Add keywords/keyterms if any (nova-3 uses keyterms, nova-2 uses keywords)
     if !config.keywords.is_empty() {
-        let param_name = if config.model_id == "nova-3" {
+        let param_name = if config.model_id.starts_with("nova-3") {
             "keyterm"
         } else {
             "keywords"
@@ -326,4 +343,31 @@ pub(super) async fn transcribe(
         .ok_or_else(|| anyhow::anyhow!("No transcript found in Deepgram response"))?;
 
     Ok(transcript.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::api::test_support::mock_server;
+    use crate::transcription::provider::TranscriptionProvider;
+
+    #[tokio::test]
+    async fn specialized_nova_3_models_use_keyterms_not_legacy_keyword_boosting() {
+        for model in ["nova-3-medical", "nova-3-pharma"] {
+            let mut server = mock_server(TranscriptionProvider::Deepgram, model, &[(200, r#"{"results":{"channels":[{"alternatives":[{"transcript":" Clinical note. "}]}]}}"#)]).await;
+            server.config.keywords = vec!["medical term".into()];
+            assert_eq!(
+                transcribe(&server.config, &server.audio_path)
+                    .await
+                    .unwrap(),
+                "Clinical note."
+            );
+            let requests = (&mut server.task).await.unwrap();
+            assert!(requests[0].starts_with(&format!(
+                "POST /?model={model}&keyterm=medical%20term HTTP/1.1\r\n"
+            )));
+            assert!(!requests[0].contains("&keywords="));
+            assert!(option_schema(model).unwrap().option("keywords").is_none());
+        }
+    }
 }

@@ -29,43 +29,27 @@ pub(super) const MODELS: &[ModelSpec] = &[
     },
     ModelSpec {
         provider_id: "deepinfra",
-        model_id: "openai/whisper-large",
+        model_id: "Qwen/Qwen3-ASR-0.6B",
         endpoint: "https://api.deepinfra.com/v1/inference",
-        display_name: "OpenAI Whisper Large (best accuracy)",
-        description: "OpenAI Whisper Large hosted through DeepInfra. DeepInfra documents this as the best-accuracy Whisper option in its speech recognition API.",
-        languages: &["Multilingual"],
+        display_name: "Qwen3 ASR 0.6B (compact)",
+        description: "Compact Qwen3 speech recognition model hosted through DeepInfra. Supports language identification and transcription across 30 languages and 22 Chinese dialects.",
+        languages: &["Multilingual", "30 languages"],
     },
     ModelSpec {
         provider_id: "deepinfra",
-        model_id: "openai/whisper-medium",
+        model_id: "Qwen/Qwen3-ASR-1.7B",
         endpoint: "https://api.deepinfra.com/v1/inference",
-        display_name: "OpenAI Whisper Medium",
-        description: "OpenAI Whisper Medium hosted through DeepInfra. A lighter Whisper model for faster multilingual transcription than Whisper Large.",
-        languages: &["Multilingual"],
+        display_name: "Qwen3 ASR 1.7B",
+        description: "Qwen3's larger speech recognition model hosted through DeepInfra, with multilingual transcription and optional word timestamps.",
+        languages: &["Multilingual", "30 languages"],
     },
     ModelSpec {
         provider_id: "deepinfra",
-        model_id: "openai/whisper-small",
+        model_id: "nvidia/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b",
         endpoint: "https://api.deepinfra.com/v1/inference",
-        display_name: "OpenAI Whisper Small",
-        description: "OpenAI Whisper Small hosted through DeepInfra. A smaller Whisper model for lightweight multilingual transcription workloads.",
-        languages: &["Multilingual"],
-    },
-    ModelSpec {
-        provider_id: "deepinfra",
-        model_id: "openai/whisper-base",
-        endpoint: "https://api.deepinfra.com/v1/inference",
-        display_name: "OpenAI Whisper Base (fast, lightweight)",
-        description: "OpenAI Whisper Base hosted through DeepInfra. A smaller Whisper model option for lighter and faster multilingual transcription workloads.",
-        languages: &["Multilingual"],
-    },
-    ModelSpec {
-        provider_id: "deepinfra",
-        model_id: "openai/whisper-timestamped-medium",
-        endpoint: "https://api.deepinfra.com/v1/inference",
-        display_name: "OpenAI Whisper Timestamped Medium",
-        description: "OpenAI Whisper Timestamped Medium hosted through DeepInfra. DeepInfra documents this model for per-word timestamp segmentation.",
-        languages: &["Multilingual"],
+        display_name: "Nemotron 3.5 ASR Multilingual",
+        description: "NVIDIA's 0.6B multilingual ASR model. DeepInfra exposes completed-file transcription through its standard inference endpoint despite the model's streaming name.",
+        languages: &["Multilingual", "40+ languages"],
     },
     ModelSpec {
         provider_id: "deepinfra",
@@ -274,4 +258,44 @@ pub(super) async fn transcribe(
     );
 
     Ok(deepinfra_response.text.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::api::test_support::mock_server;
+    use crate::transcription::provider::TranscriptionProvider;
+
+    #[tokio::test]
+    async fn new_asr_models_use_the_documented_file_inference_contract() {
+        for model in [
+            "Qwen/Qwen3-ASR-0.6B",
+            "Qwen/Qwen3-ASR-1.7B",
+            "nvidia/Nemotron-3.5-ASR-Streaming-Multilingual-0.6b",
+        ] {
+            let mut server = mock_server(
+                TranscriptionProvider::DeepInfra,
+                model,
+                &[(200, r#"{"text":" Hello! ","language":"en","segments":[]}"#)],
+            )
+            .await;
+            server.config.endpoint.push_str("/v1/inference");
+            server.config.keywords = vec!["OSTT".into()];
+            server.config.params.insert(
+                "chunk_level".into(),
+                ModelOptionValue::String("word".into()),
+            );
+            assert_eq!(
+                transcribe(&server.config, &server.audio_path)
+                    .await
+                    .unwrap(),
+                "Hello!"
+            );
+            let requests = (&mut server.task).await.unwrap();
+            assert!(requests[0].starts_with(&format!("POST /v1/inference/{model} HTTP/1.1\r\n")));
+            assert!(requests[0].contains("name=\"audio\"; filename="));
+            assert!(requests[0].contains("name=\"initial_prompt\"\r\n\r\nOSTT\r\n"));
+            assert!(requests[0].contains("name=\"chunk_level\"\r\n\r\nword\r\n"));
+        }
+    }
 }
