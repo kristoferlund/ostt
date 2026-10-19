@@ -1,6 +1,6 @@
 //! Local model daemon server.
 //!
-//! Loads a `WhisperContext` once and serves transcription requests over a Unix
+//! Loads a local model once and serves transcription requests over a Unix
 //! domain socket until the idle timeout expires. Each message is framed with a
 //! 4-byte little-endian length prefix followed by UTF-8 JSON.
 //!
@@ -13,7 +13,6 @@
 //! both the socket and PID files on exit.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -29,7 +28,7 @@ use crate::transcription::api::local::{
 use crate::transcription::local_models::{
     daemon_pid_path, daemon_socket_path, resolve_installed_model_path,
 };
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+use transcribe_cpp::Model;
 
 // ── Protocol types ────────────────────────────────────────────────────────────
 
@@ -89,30 +88,16 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
     }
 
     // Load the model (expensive — this is the whole point of the daemon).
-    whisper_rs::install_logging_hooks();
-    tracing::info!(
-        "daemon: loading model '{}' with {}",
-        model_id,
-        crate::transcription::local_inference_backend()
-    );
+    tracing::info!("daemon: loading model '{}'", model_id);
     let model_path = resolve_installed_model_path(model_id)?;
-    let model_path_str = model_path
-        .to_str()
-        .ok_or_else(|| anyhow::anyhow!("model path is not valid UTF-8"))?
-        .to_string();
-
-    let ctx = tokio::task::spawn_blocking(move || {
-        WhisperContext::new_with_params(&model_path_str, WhisperContextParameters::default())
-            .map_err(|e| anyhow::anyhow!("Failed to load model: {e}"))
-    })
-    .await??;
+    let model =
+        tokio::task::spawn_blocking(move || crate::transcription::engine::load_model(&model_path))
+            .await??;
 
     tracing::info!(
         "daemon: backend active: {}",
-        crate::transcription::local_inference_backend_details()
+        crate::transcription::engine::backend_details(&model)
     );
-
-    let ctx = Arc::new(ctx);
 
     // Bind socket.
     let listener = UnixListener::bind(&socket_path).context("Failed to bind daemon socket")?;
@@ -153,8 +138,8 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
             }
             Ok(Ok((stream, _addr))) => {
                 let model_id_owned = model_id.to_string();
-                let ctx_clone = Arc::clone(&ctx);
-                match handle_connection(stream, &model_id_owned, ctx_clone).await {
+                let model_clone = model.clone();
+                match handle_connection(stream, &model_id_owned, model_clone).await {
                     Ok(true) => {
                         tracing::info!("daemon: shutdown requested");
                         break;
@@ -177,7 +162,7 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
 async fn handle_connection(
     mut stream: UnixStream,
     model_id: &str,
-    ctx: Arc<WhisperContext>,
+    model: Model,
 ) -> anyhow::Result<bool> {
     let raw = read_framed(&mut stream).await?;
     let request: Request = serde_json::from_slice(&raw)?;
@@ -214,7 +199,7 @@ async fn handle_connection(
                 "daemon: transcription request received (model: {model_id}, audio: {audio_path})"
             );
             let path = PathBuf::from(&audio_path);
-            let resp = match run_inference(&path, ctx, config).await {
+            let resp = match run_inference(&path, model, config).await {
                 Ok(text) => {
                     tracing::info!("daemon: transcription request completed (model: {model_id})");
                     Response {
@@ -244,44 +229,14 @@ async fn handle_connection(
 
 async fn run_inference(
     audio_path: &std::path::Path,
-    ctx: Arc<WhisperContext>,
+    model: Model,
     local_config: LocalTranscriptionConfig,
 ) -> anyhow::Result<String> {
     validate_local_audio_format(audio_path)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
 
     let raw = tokio::task::spawn_blocking(move || {
-        let mut state = ctx
-            .create_state()
-            .map_err(|e| anyhow::anyhow!("Failed to create whisper state: {e}"))?;
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        let language = if local_config.language == "auto" {
-            None
-        } else {
-            Some(local_config.language.as_str())
-        };
-        params.set_language(language);
-        params.set_print_timestamps(!local_config.no_timestamps);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_special(false);
-        params.set_no_context(local_config.no_context);
-        params.set_temperature(local_config.temperature);
-        params.set_entropy_thold(local_config.entropy_thold);
-        params.set_no_speech_thold(local_config.no_speech_thold);
-        state
-            .full(params, &audio_samples)
-            .map_err(|e| anyhow::anyhow!("Transcription failed: {e}"))?;
-        let n = state.full_n_segments();
-        let mut text = String::new();
-        for i in 0..n {
-            let seg = state
-                .get_segment(i)
-                .ok_or_else(|| anyhow::anyhow!("Failed to get segment {i}"))?;
-            text.push_str(&seg.to_string());
-            text.push(' ');
-        }
-        Ok::<String, anyhow::Error>(text.trim().to_string())
+        crate::transcription::engine::transcribe(&model, &audio_samples, &local_config)
     })
     .await
     .map_err(|e| anyhow::anyhow!("Blocking task panicked: {e}"))??;

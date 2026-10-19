@@ -4,11 +4,10 @@ use super::TranscriptionConfig;
 use crate::config::{LocalTranscriptionConfig, ModelOptionValue};
 use crate::transcription::{
     daemon_client::{probe_daemon, request_transcription},
-    local_models::{resolve_installed_model_path, ModelError},
+    local_models::resolve_installed_model_path,
     model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec},
 };
 use indexmap::IndexMap;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
 const OPTIONS: &[ModelOptionSpec] = &[
     ModelOptionSpec {
@@ -71,59 +70,17 @@ pub(super) async fn transcribe(
     );
     let model_path = resolve_installed_model_path(&config.model_id)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
-    whisper_rs::install_logging_hooks();
-    tracing::info!(
-        "local transcription: loading model with {}",
-        crate::transcription::local_inference_backend()
-    );
 
     let text = tokio::task::spawn_blocking(move || {
-        let model_path = model_path.to_string_lossy().into_owned();
-        // WhisperContextParameters::default() sets use_gpu: cfg!(feature = "_gpu").
-        // On macOS the binary is built with the metal feature, so GPU is used automatically.
-        let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
-            .map_err(|err| ModelError::LoadFailed(err.to_string()))?;
+        let model = crate::transcription::engine::load_model(&model_path)?;
         tracing::info!(
             "local transcription: backend active: {}",
-            crate::transcription::local_inference_backend_details()
+            crate::transcription::engine::backend_details(&model)
         );
-        let mut state = ctx
-            .create_state()
-            .map_err(|err| anyhow::anyhow!("Failed to create whisper state: {err}"))?;
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        let language = if local_config.language == "auto" {
-            None
-        } else {
-            Some(local_config.language.as_str())
-        };
-        params.set_language(language);
-        params.set_print_timestamps(!local_config.no_timestamps);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_special(false);
-        params.set_no_context(local_config.no_context);
-        params.set_temperature(local_config.temperature);
-        params.set_entropy_thold(local_config.entropy_thold);
-        params.set_no_speech_thold(local_config.no_speech_thold);
-
-        state
-            .full(params, &audio_samples)
-            .map_err(|err| anyhow::anyhow!("Transcription failed: {err}"))?;
-
-        let num_segments = state.full_n_segments();
-        let mut text = String::new();
-        for i in 0..num_segments {
-            let segment = state
-                .get_segment(i)
-                .ok_or_else(|| anyhow::anyhow!("Failed to get whisper segment {i}"))?;
-            text.push_str(&segment.to_string());
-            text.push(' ');
-        }
-
-        Ok::<String, anyhow::Error>(text.trim().to_string())
+        crate::transcription::engine::transcribe(&model, &audio_samples, &local_config)
     })
     .await
-    .map_err(|err| anyhow::anyhow!("Local whisper runtime task failed: {err}"))??;
+    .map_err(|err| anyhow::anyhow!("Local transcription runtime task failed: {err}"))??;
 
     Ok(filter_obvious_hallucination(&text).unwrap_or_default())
 }

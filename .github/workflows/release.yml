@@ -319,14 +319,12 @@ jobs:
       # Read by build.rs: the two CUDA majors share one Cargo feature, so the
       # `ostt --version` suffix (0.0.x-cuda13) has to come from here.
       OSTT_BUILD_VARIANT: ${{ matrix.variant }}
-      # ggml defaults GGML_NATIVE to ON, which tunes the build for whatever
-      # machine happens to compile it. On a GitHub runner that is actively
-      # wrong twice over: CMAKE_CUDA_ARCHITECTURES becomes "native", which
-      # cannot resolve without a GPU and silently collapses to nvcc's single
-      # default architecture, and ggml-cpu picks up -march=native, so the CPU
-      # ISA baseline of a release depends on which host the job landed on.
-      # whisper-rs-sys forwards every GGML_* variable through to CMake.
-      GGML_NATIVE: "OFF"
+      # GGML_NATIVE=OFF and the CPU baseline come from .cargo/config.toml.
+      # Native tuning would tune the build for the runner:
+      # CMAKE_CUDA_ARCHITECTURES becomes "native", which cannot resolve without
+      # a GPU and collapses to nvcc's single default architecture, and ggml-cpu
+      # picks up -march=native, so the CPU ISA baseline of a release depends on
+      # which host the job landed on.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -349,10 +347,10 @@ jobs:
             libcublas-${CUDA_VERSION}
           # /usr/local/cuda does exist here -- cuda-toolkit-<ver>-config-common
           # comes in transitively and points it at the versioned prefix through
-          # update-alternatives -- and whisper-rs-sys hardcodes -L/usr/local/cuda/lib64,
-          # so the build depends on it. Pin the versioned prefix anyway, so that
-          # a second toolkit on the runner cannot silently redirect the symlink
-          # and build the other major under this leg's name (12-8 -> 12.8).
+          # update-alternatives. CMake finds the toolkit through the nvcc on PATH,
+          # so pin the versioned prefix there: a second toolkit on the runner
+          # must not silently redirect the symlink and build the other major
+          # under this leg's name (12-8 -> 12.8).
           CUDA_HOME="/usr/local/cuda-${CUDA_VERSION/-/.}"
           test -d "$CUDA_HOME" || { echo "CUDA toolkit not at $CUDA_HOME"; exit 1; }
           echo "CUDA_HOME=$CUDA_HOME" >> $GITHUB_ENV
@@ -539,9 +537,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # See the CUDA job: -march=native would otherwise bake the build runner's
-      # CPU ISA into the release.
-      GGML_NATIVE: "OFF"
     steps:
       - uses: actions/checkout@v4
         with:
