@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.29 - 2026-10-20
+
 ### Added
 
 - Cloud models: OpenAI `gpt-transcribe`, AssemblyAI `universal-3-5-pro` and `universal-2`, Deepgram `nova-3-medical` and `nova-3-pharma`, ElevenLabs `scribe_v2_medical`, and DeepInfra Qwen3 ASR 0.6B/1.7B and Nemotron 3.5 ASR Multilingual.
@@ -24,12 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Downloads with a published checksum are verified, and the model picker shows "Verifying" while the check runs.
 - The logs list the available inference devices and report which backend each model actually runs on.
 - Cargo features `whisper-cuda` and `whisper-vulkan` are now `cuda` and `vulkan`; the old names still work. Vulkan builds need SPIRV-Headers.
-
 - Unknown config contents no longer stop OSTT from starting. Sections for unknown providers or models no longer offered, unknown settings and params, and deprecated sections are ignored and noted in the log. Broken TOML and invalid values for known settings are still errors.
 
 ### Removed
 
-- Retired cloud choices: AssemblyAI `universal-3-pro` (select `universal-3-5-pro`) and DeepInfra's unavailable Whisper Large/Medium/Small/Base/Timestamped Medium entries (select Large v3, Turbo or Qwen3 ASR). Existing selections/config sections using these IDs must be updated.
+- Retired cloud choices: AssemblyAI `universal-3-pro` (select `universal-3-5-pro`) and DeepInfra's unavailable Whisper Large/Medium/Small/Base/Timestamped Medium entries (select Large v3, Turbo or Qwen3 ASR). Config sections for these IDs are ignored; a selected one must be replaced with `ostt model`.
 - Unsupported `prompt` on OpenAI's diarization model and legacy `keywords` boosting on Deepgram Nova 3. Use Nova 3 `keyterm` instead.
 - The Whisper params `no_timestamps` and `entropy_thold`, which had no effect with the new engine. Configs that still set them keep loading; the params are ignored and noted in the log.
 
