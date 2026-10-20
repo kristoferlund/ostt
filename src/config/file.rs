@@ -736,8 +736,7 @@ impl OsttConfig {
 }
 
 fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
-    reject_deprecated_top_level_sections(table)?;
-    reject_deprecated_section_keys(table)?;
+    drop_deprecated_content(table);
 
     let config_version = match table.remove("config_version") {
         Some(value) => value.try_into()?,
@@ -758,11 +757,12 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
             anyhow::bail!("duplicate top-level section '{provider_id}'");
         }
         if crate::transcription::TranscriptionProvider::from_id(&provider_id).is_none() {
-            anyhow::bail!(
-                "Unknown top-level config section '{}'. Expected one of: audio, transcription, text, output, process, popup, {}.",
+            tracing::warn!(
+                "Ignoring unknown top-level config section '{}'. Expected one of: audio, transcription, text, output, process, popup, {}.",
                 provider_id,
                 crate::transcription::TranscriptionProvider::supported_ids().join(", ")
             );
+            continue;
         }
         let toml::Value::Table(provider_table) = value else {
             anyhow::bail!("Provider config '{provider_id}' must be a table");
@@ -787,41 +787,33 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
     Ok(config)
 }
 
-fn reject_deprecated_top_level_sections(table: &toml::Table) -> anyhow::Result<()> {
+/// Removes config content that older OSTT versions used, so an upgrade never
+/// stops the config from loading. The file itself is left untouched.
+fn drop_deprecated_content(table: &mut toml::Table) {
     for section in DEPRECATED_TOP_LEVEL_SECTIONS {
-        if table.contains_key(*section) {
-            anyhow::bail!(
-                "Deprecated config section '[{}]' is no longer supported. Use top-level provider sections with '.params', for example '[whisper.params]' or '[openai.gpt-4o-transcribe.params]'.",
-                section
+        if table.remove(*section).is_some() {
+            tracing::warn!(
+                "Ignoring deprecated config section '[{section}]'. Use top-level provider sections with '.params', for example '[whisper.params]' or '[openai.gpt-4o-transcribe.params]'."
             );
         }
     }
-    Ok(())
-}
 
-fn reject_deprecated_section_keys(table: &toml::Table) -> anyhow::Result<()> {
-    if table
-        .get("audio")
-        .and_then(toml::Value::as_table)
-        .is_some_and(|audio| audio.contains_key("sample_rate"))
-    {
-        anyhow::bail!(
-            "Deprecated config key '[audio].sample_rate' is no longer supported. Use '[audio].output_format' instead, for example output_format = \"mp3 -ab 16k -ar 12000\"."
-        );
+    if let Some(audio) = table.get_mut("audio").and_then(toml::Value::as_table_mut) {
+        if audio.remove("sample_rate").is_some() {
+            tracing::warn!(
+                "Ignoring deprecated config key '[audio].sample_rate'. Use '[audio].output_format' instead, for example output_format = \"mp3 -ab 16k -ar 12000\"."
+            );
+        }
     }
 
-    if table
-        .get("process")
-        .and_then(toml::Value::as_table)
-        .and_then(|process| process.get("actions"))
-        .is_some_and(toml::Value::is_array)
-    {
-        anyhow::bail!(
-            "Deprecated config table '[[process.actions]]' is no longer supported. Use named action tables instead, for example '[process.actions.clean]'."
-        );
+    if let Some(process) = table.get_mut("process").and_then(toml::Value::as_table_mut) {
+        if process.get("actions").is_some_and(toml::Value::is_array) {
+            process.remove("actions");
+            tracing::warn!(
+                "Ignoring deprecated config table '[[process.actions]]'. Use named action tables instead, for example '[process.actions.clean]'."
+            );
+        }
     }
-
-    Ok(())
 }
 
 fn take_required_section<T>(table: &mut toml::Table, name: &str) -> anyhow::Result<T>
@@ -859,12 +851,15 @@ fn parse_provider_config(provider_id: &str, table: toml::Table) -> anyhow::Resul
         }
 
         let toml::Value::Table(model_table) = value else {
-            anyhow::bail!(
-                "Unknown setting '{}' in provider config '[{}]'",
-                key,
-                provider_id
-            );
+            tracing::warn!("Ignoring unknown setting '{key}' in provider config '[{provider_id}]'");
+            continue;
         };
+        // A model OSTT no longer offers must not stop the rest of the config
+        // from loading.
+        if let Err(error) = validate_model_id(provider_id, &key) {
+            tracing::warn!("Ignoring config section '[{provider_id}.{key}]': {error}");
+            continue;
+        }
         config.models.insert(
             key.clone(),
             parse_provider_model_config(provider_id, &key, model_table)?,
@@ -892,11 +887,8 @@ fn parse_provider_model_config(
             continue;
         }
 
-        anyhow::bail!(
-            "Unknown setting '{}' in provider model config '[{}.{}]'",
-            key,
-            provider_id,
-            model_id
+        tracing::warn!(
+            "Ignoring unknown setting '{key}' in provider model config '[{provider_id}.{model_id}]'"
         );
     }
 
@@ -911,11 +903,35 @@ fn parse_params_table(
     let toml::Value::Table(table) = value else {
         anyhow::bail!("Params for provider '{}' must be a table", provider_id);
     };
-    let params: ParamsConfig = toml::Value::Table(table).try_into()?;
+    let mut params: ParamsConfig = toml::Value::Table(table).try_into()?;
     if let Some(model_id) = model_id {
+        drop_unknown_params(provider_id, model_id, &mut params);
         validate_params_for_model(provider_id, model_id, &params)?;
     }
     Ok(params)
+}
+
+/// Drops params the model does not support, so a param OSTT stopped accepting
+/// never stops the config from loading. Values of supported params are still
+/// validated by the caller.
+fn drop_unknown_params(provider_id: &str, model_id: &str, params: &mut ParamsConfig) {
+    let full_model_id = format!("{provider_id}/{model_id}");
+    let schema = api::option_schema(provider_id, model_id);
+    params.retain(|option_name, _| {
+        if api::is_retired_param(provider_id, option_name) {
+            tracing::warn!(
+                "Ignoring param '{option_name}' for '{full_model_id}': it no longer has any effect and can be removed from the config."
+            );
+            return false;
+        }
+        let supported = schema
+            .as_ref()
+            .is_some_and(|schema| schema.option(option_name).is_some());
+        if !supported {
+            tracing::warn!("Ignoring unsupported param '{option_name}' for '{full_model_id}'.");
+        }
+        supported
+    });
 }
 
 fn is_provider_setting_key(key: &str) -> bool {
@@ -1042,7 +1058,9 @@ pub fn validate_config(config: &OsttConfig) -> anyhow::Result<()> {
     }
 
     if config.transcription.provider.as_deref() == Some("local") {
-        anyhow::bail!("Provider 'local' is no longer supported. Use provider = \"whisper\".");
+        tracing::warn!(
+            "Provider 'local' is no longer supported. Run 'ostt model' or set provider = \"whisper\"."
+        );
     }
 
     for source in config.text.replace.keys() {
@@ -1784,7 +1802,7 @@ mod tests {
     }
 
     #[test]
-    fn params_reject_unsafe_whisper_model_id() {
+    fn unsafe_whisper_model_id_section_is_ignored() {
         let toml_str = r#"
             [audio]
             device = "default"
@@ -1793,8 +1811,10 @@ mod tests {
             language = "en"
         "#;
 
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Local model id"));
+        let config = parse_ostt_config(toml_str).unwrap();
+        assert!(!config.provider_configs["whisper"]
+            .models
+            .contains_key("Turbo"));
     }
 
     #[test]
@@ -1948,95 +1968,178 @@ mod tests {
     }
 
     #[test]
-    fn params_reject_unknown_param_for_model() {
+    fn unknown_param_is_dropped_and_supported_params_kept() {
         let toml_str = r#"
             [audio]
             device = "default"
 
             [openai.gpt-4o-transcribe.params]
             smart_format = true
+            temperature = 0.2
         "#;
 
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Invalid param 'smart_format'"));
+        let config = parse_ostt_config(toml_str).unwrap();
+        let params = &config.provider_configs["openai"].models["gpt-4o-transcribe"].params;
+        assert!(!params.contains_key("smart_format"));
+        assert!(params.contains_key("temperature"));
+    }
+
+    // A model removed from the catalog must not lock users with params for it
+    // out of OSTT: the rest of the config still loads and applies.
+    #[test]
+    fn section_for_removed_cloud_model_is_ignored() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [assemblyai."universal-3-pro".params]
+            language_code = "en"
+
+            [assemblyai."universal-3-5-pro".params]
+            language_code = "sv"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let models = &config.provider_configs["assemblyai"].models;
+        assert!(!models.contains_key("universal-3-pro"));
+        assert!(models["universal-3-5-pro"]
+            .params
+            .contains_key("language_code"));
     }
 
     #[test]
-    fn refreshed_models_accept_only_their_documented_controls() {
-        for (provider, model, param, accepted) in [
+    fn unknown_sections_and_settings_are_ignored() {
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [future_provider]
+            api_key = "x"
+
+            [openai]
+            future_setting = 1
+
+            [openai.gpt-4o-transcribe]
+            future_setting = 1
+
+            [openai.gpt-4o-transcribe.params]
+            temperature = 0.2
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        assert!(!config.provider_configs.contains_key("future_provider"));
+        assert!(
+            config.provider_configs["openai"].models["gpt-4o-transcribe"]
+                .params
+                .contains_key("temperature")
+        );
+    }
+
+    #[test]
+    fn broken_toml_still_fails_to_load() {
+        let toml_str = "[audio\ndevice = \"default\"\n";
+        assert!(parse_ostt_config(toml_str).is_err());
+    }
+
+    #[test]
+    fn refreshed_models_keep_only_their_documented_controls() {
+        #[derive(Debug, PartialEq)]
+        enum Outcome {
+            Kept,
+            Dropped,
+            Rejected,
+        }
+        use Outcome::*;
+
+        // Undocumented controls are dropped rather than sent to the provider;
+        // they never stop the config from loading. Bad values of documented
+        // controls are still rejected.
+        for (provider, model, param, expected) in [
             (
                 "openai",
                 "gpt-transcribe",
                 "languages = [\"en\", \"fr\"]",
-                true,
+                Kept,
             ),
-            ("openai", "gpt-transcribe", "keywords = [\"OSTT\"]", true),
-            ("openai", "gpt-transcribe", "language = \"en\"", false),
+            ("openai", "gpt-transcribe", "keywords = [\"OSTT\"]", Kept),
+            ("openai", "gpt-transcribe", "language = \"en\"", Dropped),
             (
                 "openai",
                 "gpt-transcribe",
                 "include = [\"logprobs\"]",
-                false,
+                Dropped,
             ),
-            ("openai", "gpt-transcribe", "keywords = [\"<OSTT>\"]", false),
+            (
+                "openai",
+                "gpt-transcribe",
+                "keywords = [\"<OSTT>\"]",
+                Rejected,
+            ),
             (
                 "openai",
                 "gpt-4o-transcribe-diarize",
                 "prompt = \"OSTT\"",
-                false,
+                Dropped,
             ),
             (
                 "assemblyai",
                 "universal-3-5-pro",
                 "prompt = \"Technical dictation\"",
-                true,
+                Kept,
             ),
             (
                 "assemblyai",
                 "universal-2",
                 "prompt = \"Technical dictation\"",
-                false,
+                Dropped,
             ),
             (
                 "assemblyai",
                 "universal-2",
                 "keyterms_prompt = [\"OSTT\"]",
-                true,
+                Kept,
             ),
-            ("elevenlabs", "scribe_v2_medical", "diarize = true", true),
+            ("elevenlabs", "scribe_v2_medical", "diarize = true", Kept),
             (
                 "deepgram",
                 "nova-3-medical",
                 "keyterm = [\"metformin\"]",
-                true,
+                Kept,
             ),
             (
                 "deepgram",
                 "nova-3-pharma",
                 "keywords = [\"metformin\"]",
-                false,
+                Dropped,
             ),
             (
                 "deepinfra",
                 "Qwen/Qwen3-ASR-1.7B",
                 "chunk_level = \"word\"",
-                true,
+                Kept,
             ),
         ] {
             let toml = format!(
                 "[audio]\ndevice = \"default\"\n[{provider}.\"{model}\".params]\n{param}\n"
             );
-            let result = parse_ostt_config(&toml);
-            assert_eq!(
-                result.is_ok(),
-                accepted,
-                "{provider}/{model}: {param}: {result:?}"
-            );
+            let name = param.split(" =").next().unwrap();
+            let outcome = match parse_ostt_config(&toml) {
+                Err(_) => Rejected,
+                Ok(config)
+                    if config.provider_configs[provider].models[model]
+                        .params
+                        .contains_key(name) =>
+                {
+                    Kept
+                }
+                Ok(_) => Dropped,
+            };
+            assert_eq!(outcome, expected, "{provider}/{model}: {param}");
         }
     }
 
     #[test]
-    fn deprecated_providers_section_fails_deserialization() {
+    fn deprecated_providers_section_is_ignored() {
         let toml_str = r#"
             [audio]
             device = "default"
@@ -2044,12 +2147,11 @@ mod tests {
             [providers]
         "#;
 
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Deprecated config section '[providers]'"));
+        assert!(parse_ostt_config(toml_str).is_ok());
     }
 
     #[test]
-    fn deprecated_model_options_section_fails_deserialization() {
+    fn deprecated_model_options_section_is_ignored() {
         let toml_str = r#"
             [audio]
             device = "default"
@@ -2057,24 +2159,22 @@ mod tests {
             [model_options]
         "#;
 
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Deprecated config section '[model_options]'"));
+        assert!(parse_ostt_config(toml_str).is_ok());
     }
 
     #[test]
-    fn deprecated_audio_sample_rate_fails_deserialization() {
+    fn deprecated_audio_sample_rate_is_ignored() {
         let toml_str = r#"
             [audio]
             device = "default"
             sample_rate = 16000
         "#;
 
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Deprecated config key '[audio].sample_rate'"));
+        assert!(parse_ostt_config(toml_str).is_ok());
     }
 
     #[test]
-    fn deprecated_process_actions_array_fails_deserialization() {
+    fn deprecated_process_actions_array_is_ignored() {
         let toml_str = r#"
             [audio]
             device = "default"
@@ -2086,12 +2186,12 @@ mod tests {
             command = "cat"
         "#;
 
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Deprecated config table '[[process.actions]]'"));
+        let config = parse_ostt_config(toml_str).unwrap();
+        assert!(config.process.actions.is_empty());
     }
 
     #[test]
-    fn deprecated_local_provider_selection_fails_validation() {
+    fn deprecated_local_provider_selection_still_loads() {
         let toml_str = r#"
             [audio]
             device = "default"
@@ -2101,8 +2201,7 @@ mod tests {
             model = "turbo"
         "#;
 
-        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Provider 'local' is no longer supported"));
+        assert!(parse_ostt_config(toml_str).is_ok());
     }
 
     #[test]

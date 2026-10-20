@@ -165,7 +165,7 @@ language = "sv"
 chunk_seconds = 3
 ```
 
-Pianissimo does not support keyword boosting, prompts, or temperature. OSTT does not send saved keywords to it and rejects unsupported params. Keep Whisper-specific params in model-specific sections rather than `[berget.params]` when switching between these models.
+Pianissimo does not support keyword boosting, prompts, or temperature. OSTT does not send saved keywords to it. Unsupported params in its own config section are ignored with a log warning; in `[berget.params]` or `--param` they are rejected. Keep Whisper-specific params in model-specific sections rather than `[berget.params]` when switching between these models.
 
 Deprecated config shapes such as `[providers]`, `[model_options]`, `[audio].sample_rate`, `[[process.actions]]`, and `provider = "local"` fail loudly. Update local model IDs from `local/<model>` to `whisper/<model>`.
 

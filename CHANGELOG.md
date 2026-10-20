@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The logs list the available inference devices and report which backend each model actually runs on.
 - Cargo features `whisper-cuda` and `whisper-vulkan` are now `cuda` and `vulkan`; the old names still work. Vulkan builds need SPIRV-Headers.
 
+- Unknown config contents no longer stop OSTT from starting. Sections for unknown providers or models no longer offered, unknown settings and params, and deprecated sections are ignored and noted in the log. Broken TOML and invalid values for known settings are still errors.
+
 ### Removed
 
 - Retired cloud choices: AssemblyAI `universal-3-pro` (select `universal-3-5-pro`) and DeepInfra's unavailable Whisper Large/Medium/Small/Base/Timestamped Medium entries (select Large v3, Turbo or Qwen3 ASR). Existing selections/config sections using these IDs must be updated.
