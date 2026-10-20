@@ -1,7 +1,7 @@
 //! ElevenLabs Scribe API implementation.
 //!
 //! Handles transcription requests to ElevenLabs' speech-to-text API using
-//! multipart form data. Supports the Scribe v2 and Scribe v1 models.
+//! multipart form data. Supports the Scribe v2, Medical and legacy v1 models.
 
 use serde::Deserialize;
 use std::path::Path;
@@ -16,17 +16,25 @@ pub(super) const MODELS: &[ModelSpec] = &[
         provider_id: "elevenlabs",
         model_id: "scribe_v2",
         endpoint: "https://api.elevenlabs.io/v1/speech-to-text",
-        display_name: "Scribe v2 (highest accuracy, 99 languages)",
+        display_name: "Scribe v2 (general purpose)",
         description: "ElevenLabs' latest Scribe speech-to-text model for high-accuracy transcription with broad multilingual support, including support for many languages beyond English.",
-        languages: &["Multilingual", "99 languages"],
+        languages: &["Multilingual", "90+ languages"],
+    },
+    ModelSpec {
+        provider_id: "elevenlabs",
+        model_id: "scribe_v2_medical",
+        endpoint: "https://api.elevenlabs.io/v1/speech-to-text",
+        display_name: "Scribe v2 Medical",
+        description: "Scribe v2 specialized for clinical audio and medical terminology, with the same multilingual coverage and API as Scribe v2.",
+        languages: &["Multilingual", "90+ languages"],
     },
     ModelSpec {
         provider_id: "elevenlabs",
         model_id: "scribe_v1",
         endpoint: "https://api.elevenlabs.io/v1/speech-to-text",
-        display_name: "Scribe v1 (previous generation)",
+        display_name: "Scribe v1 (legacy)",
         description: "ElevenLabs' previous-generation Scribe speech-to-text model for multilingual transcription workloads.",
-        languages: &["Multilingual", "99 languages"],
+        languages: &["Multilingual", "90+ languages"],
     },
 ];
 
@@ -146,7 +154,7 @@ const SCRIBE_V2_OPTIONS: &[ModelOptionSpec] = &[
 
 pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
     match model_id {
-        "scribe_v2" => Some(ModelOptionSchema::new(SCRIBE_V2_OPTIONS)),
+        "scribe_v2" | "scribe_v2_medical" => Some(ModelOptionSchema::new(SCRIBE_V2_OPTIONS)),
         "scribe_v1" => Some(ModelOptionSchema::new(SCRIBE_V1_OPTIONS)),
         _ => None,
     }
@@ -392,4 +400,43 @@ fn add_string_or_string_list_fields(
     }
 
     form
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::api::test_support::mock_server;
+    use crate::transcription::provider::TranscriptionProvider;
+
+    #[tokio::test]
+    async fn medical_model_uses_scribe_file_endpoint_and_v2_controls() {
+        let mut server = mock_server(
+            TranscriptionProvider::ElevenLabs,
+            "scribe_v2_medical",
+            &[(200, r#"{"text":" Clinical note. "}"#)],
+        )
+        .await;
+        server.config.keywords = vec!["metformin".into()];
+        server
+            .config
+            .params
+            .insert("diarize".into(), ModelOptionValue::Bool(true));
+        assert_eq!(
+            transcribe(&server.config, &server.audio_path)
+                .await
+                .unwrap(),
+            "Clinical note."
+        );
+        let requests = (&mut server.task).await.unwrap();
+        assert!(requests[0].contains("name=\"model_id\"\r\n\r\nscribe_v2_medical\r\n"));
+        assert!(requests[0].contains("name=\"diarize\"\r\n\r\ntrue\r\n"));
+        assert!(requests[0].contains("name=\"keyterms\"\r\n\r\nmetformin\r\n"));
+        assert!(requests[0]
+            .to_ascii_lowercase()
+            .contains("xi-api-key: test-key\r\n"));
+        assert_eq!(
+            option_schema("scribe_v2"),
+            option_schema("scribe_v2_medical")
+        );
+    }
 }

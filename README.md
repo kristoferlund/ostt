@@ -138,6 +138,13 @@ Run `ostt model` to switch between authenticated cloud models and local models. 
 
 Per-provider and per-model params are configured under `[provider.params]` and `[provider."model".params]`, or passed per run with `--param key=value`. See [Providers and Models](https://ostt.ai/reference/providers) and [Configuration](https://ostt.ai/guide/configuration) for supported params.
 
+The [October 2026 model audit](specs/model-catalog-audit-2026-10.md) records current cloud models, downloadable-model decisions, sources and migration notes. For example, OpenAI's recommended file-transcription model takes plural language hints and native keywords:
+
+```sh
+ostt transcribe audio.wav -m openai/gpt-transcribe --param languages=en,fr --param keywords=OSTT,OpenCode
+ostt model params openai/gpt-transcribe
+```
+
 ### Berget Pianissimo (Swedish)
 
 Select `berget/klang/pianissimo` with `ostt model`, or transcribe a file:
@@ -158,7 +165,7 @@ language = "sv"
 chunk_seconds = 3
 ```
 
-Pianissimo does not support keyword boosting, prompts, or temperature. OSTT does not send saved keywords to it and rejects unsupported params. Keep Whisper-specific params in model-specific sections rather than `[berget.params]` when switching between these models.
+Pianissimo does not support keyword boosting, prompts, or temperature. OSTT does not send saved keywords to it. Unsupported params in its own config section are ignored with a log warning; in `[berget.params]` or `--param` they are rejected. Keep Whisper-specific params in model-specific sections rather than `[berget.params]` when switching between these models.
 
 Deprecated config shapes such as `[providers]`, `[model_options]`, `[audio].sample_rate`, `[[process.actions]]`, and `provider = "local"` fail loudly. Update local model IDs from `local/<model>` to `whisper/<model>`.
 

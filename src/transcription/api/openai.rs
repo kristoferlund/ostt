@@ -13,9 +13,17 @@ use indexmap::IndexMap;
 pub(super) const MODELS: &[ModelSpec] = &[
     ModelSpec {
         provider_id: "openai",
+        model_id: "gpt-transcribe",
+        endpoint: "https://api.openai.com/v1/audio/transcriptions",
+        display_name: "GPT Transcribe (recommended)",
+        description: "OpenAI's recommended file-transcription model. Supports contextual prompts, keyword hints and multiple language hints for multilingual audio and code-switching.",
+        languages: &["Multilingual"],
+    },
+    ModelSpec {
+        provider_id: "openai",
         model_id: "gpt-4o-transcribe",
         endpoint: "https://api.openai.com/v1/audio/transcriptions",
-        display_name: "GPT-4o Transcribe (latest, best accuracy)",
+        display_name: "GPT-4o Transcribe",
         description: "OpenAI's higher-quality speech-to-text model for transcribing audio in the source language. Supports prompting for domain terms, names, and preferred writing style.",
         languages: &["Multilingual"],
     },
@@ -24,7 +32,7 @@ pub(super) const MODELS: &[ModelSpec] = &[
         model_id: "gpt-4o-mini-transcribe",
         endpoint: "https://api.openai.com/v1/audio/transcriptions",
         display_name: "GPT-4o Mini Transcribe (faster, lighter)",
-        description: "OpenAI's smaller GPT-4o transcription model, intended for faster and lower-cost speech-to-text while retaining support for prompts and plain text or JSON output.",
+        description: "OpenAI's smaller GPT-4o transcription model for lower-cost speech-to-text with contextual prompts and JSON output.",
         languages: &["Multilingual"],
     },
     ModelSpec {
@@ -40,8 +48,23 @@ pub(super) const MODELS: &[ModelSpec] = &[
         model_id: "whisper-1",
         endpoint: "https://api.openai.com/v1/audio/transcriptions",
         display_name: "Whisper (legacy)",
-        description: "OpenAI's hosted Whisper model. Supports transcription in the source language, translation to English, verbose JSON, SRT/VTT output, and segment or word timestamps.",
-        languages: &["Multilingual", "translation to English"],
+        description: "OpenAI's hosted Whisper model for multilingual transcription with optional segment or word timestamps. OSTT requests JSON output and transcribes in the source language.",
+        languages: &["Multilingual"],
+    },
+];
+
+const TRANSCRIBE_OPTIONS: &[ModelOptionSpec] = &[
+    ModelOptionSpec {
+        name: "languages",
+        kind: ModelOptionKind::StringList,
+    },
+    ModelOptionSpec {
+        name: "keywords",
+        kind: ModelOptionKind::StringList,
+    },
+    ModelOptionSpec {
+        name: "prompt",
+        kind: ModelOptionKind::String,
     },
 ];
 
@@ -67,10 +90,6 @@ const GPT_4O_OPTIONS: &[ModelOptionSpec] = &[
 const DIARIZE_OPTIONS: &[ModelOptionSpec] = &[
     ModelOptionSpec {
         name: "language",
-        kind: ModelOptionKind::String,
-    },
-    ModelOptionSpec {
-        name: "prompt",
         kind: ModelOptionKind::String,
     },
     ModelOptionSpec {
@@ -120,6 +139,7 @@ const WHISPER_OPTIONS: &[ModelOptionSpec] = &[
 
 pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
     match model_id {
+        "gpt-transcribe" => Some(ModelOptionSchema::new(TRANSCRIBE_OPTIONS)),
         "gpt-4o-transcribe" | "gpt-4o-mini-transcribe" => {
             Some(ModelOptionSchema::new(GPT_4O_OPTIONS))
         }
@@ -134,6 +154,10 @@ pub(super) fn validate_options(
     options: &IndexMap<String, ModelOptionValue>,
 ) -> anyhow::Result<()> {
     super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
+
+    if let Some(ModelOptionValue::StringList(keywords)) = options.get("keywords") {
+        validate_keywords(keywords)?;
+    }
 
     if let Some(value) = options.get("include") {
         super::validate_string_list_values(full_model_id, "include", value, &["logprobs"])?;
@@ -226,14 +250,33 @@ pub(super) async fn transcribe(
         debug_params.push(format!("temperature={temperature}"));
     }
 
+    // Diarization does not support prompts; GPT Transcribe has a dedicated
+    // keyword field instead of folding saved keywords into contextual prose.
     let prompt = config
         .option_string("prompt")
         .map(ToString::to_string)
-        .or_else(|| (!config.keywords.is_empty()).then(|| config.keywords.join(", ")));
+        .or_else(|| {
+            (!matches!(
+                config.model_id.as_str(),
+                "gpt-transcribe" | "gpt-4o-transcribe-diarize"
+            ) && !config.keywords.is_empty())
+            .then(|| config.keywords.join(", "))
+        });
     if let Some(prompt) = prompt {
         form = form.text("prompt", prompt.clone());
         debug_params.push(format!("prompt={prompt}"));
         tracing::debug!("Prompt used for OpenAI model: {prompt}");
+    }
+
+    if config.model_id == "gpt-transcribe" {
+        let keywords = config
+            .option_string_list("keywords")
+            .unwrap_or(&config.keywords);
+        validate_keywords(keywords)?;
+        form = add_string_list(form, &mut debug_params, "keywords[]", keywords);
+        if let Some(languages) = config.option_string_list("languages") {
+            form = add_string_list(form, &mut debug_params, "languages[]", languages);
+        }
     }
 
     if let Some(response_format) = response_format(config) {
@@ -254,7 +297,10 @@ pub(super) async fn transcribe(
         );
     }
 
-    if let Some(chunking_strategy) = config.option_string("chunking_strategy") {
+    let chunking_strategy = config
+        .option_string("chunking_strategy")
+        .or_else(|| (config.model_id == "gpt-4o-transcribe-diarize").then_some("auto"));
+    if let Some(chunking_strategy) = chunking_strategy {
         form = form.text("chunking_strategy", chunking_strategy.to_string());
         debug_params.push(format!("chunking_strategy={chunking_strategy}"));
     }
@@ -347,6 +393,12 @@ fn response_format(config: &TranscriptionConfig) -> Option<&str> {
         return Some("diarized_json");
     }
 
+    // Use GPT Transcribe's default JSON response; only send its documented
+    // context fields, rather than assuming GPT-4o's optional controls apply.
+    if config.model_id == "gpt-transcribe" {
+        return None;
+    }
+
     if config.model_id == "whisper-1"
         && config
             .option_string_list("timestamp_granularities")
@@ -356,6 +408,16 @@ fn response_format(config: &TranscriptionConfig) -> Option<&str> {
     }
 
     Some("json")
+}
+
+fn validate_keywords(keywords: &[String]) -> anyhow::Result<()> {
+    if keywords
+        .iter()
+        .any(|keyword| keyword.contains(['<', '>', '\r', '\n']))
+    {
+        anyhow::bail!("OpenAI GPT Transcribe keywords cannot contain <, > or line breaks.");
+    }
+    Ok(())
 }
 
 fn add_string_list(
@@ -370,4 +432,120 @@ fn add_string_list(
     }
 
     form
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::api::test_support::mock_server;
+    use crate::transcription::provider::TranscriptionProvider;
+
+    #[tokio::test]
+    async fn gpt_transcribe_sends_native_context_fields_and_reads_language_response() {
+        for explicit_keywords in [false, true] {
+            let mut server = mock_server(
+                TranscriptionProvider::OpenAI,
+                "gpt-transcribe",
+                &[(200, r#"{"text":" Bonjour! ","languages":[{"code":"fr"}]}"#)],
+            )
+            .await;
+            server.config.keywords = vec!["saved keyword".into()];
+            server.config.params.insert(
+                "languages".into(),
+                ModelOptionValue::StringList(vec!["en".into(), "fr".into()]),
+            );
+            server.config.params.insert(
+                "prompt".into(),
+                ModelOptionValue::String("A support call".into()),
+            );
+            if explicit_keywords {
+                server.config.params.insert(
+                    "keywords".into(),
+                    ModelOptionValue::StringList(vec!["AC-42".into()]),
+                );
+            }
+            assert_eq!(
+                transcribe(&server.config, &server.audio_path)
+                    .await
+                    .unwrap(),
+                "Bonjour!"
+            );
+            let requests = (&mut server.task).await.unwrap();
+            let request = &requests[0];
+            assert!(request.contains("name=\"model\"\r\n\r\ngpt-transcribe\r\n"));
+            assert!(request.contains("name=\"languages[]\"\r\n\r\nfr\r\n"));
+            assert!(request.contains("name=\"prompt\"\r\n\r\nA support call\r\n"));
+            let keyword = if explicit_keywords {
+                "AC-42"
+            } else {
+                "saved keyword"
+            };
+            assert!(request.contains(&format!("name=\"keywords[]\"\r\n\r\n{keyword}\r\n")));
+            assert_eq!(request.matches("name=\"keywords[]\"").count(), 1);
+            assert!(!request.contains("name=\"language\""));
+            assert!(!request.contains("name=\"response_format\""));
+        }
+    }
+
+    #[tokio::test]
+    async fn diarization_never_receives_saved_keywords_and_chunks_long_audio() {
+        let mut server = mock_server(
+            TranscriptionProvider::OpenAI,
+            "gpt-4o-transcribe-diarize",
+            &[(
+                200,
+                r#"{"text":" Hello ","segments":[{"speaker":"A","text":"Hello"}]}"#,
+            )],
+        )
+        .await;
+        server.config.keywords = vec!["OSTT".into()];
+        assert_eq!(
+            transcribe(&server.config, &server.audio_path)
+                .await
+                .unwrap(),
+            "Hello"
+        );
+        let requests = (&mut server.task).await.unwrap();
+        assert!(!requests[0].contains("name=\"prompt\""));
+        assert!(!requests[0].contains("name=\"keywords[]\""));
+        assert!(requests[0].contains("name=\"chunking_strategy\"\r\n\r\nauto\r\n"));
+        assert!(requests[0].contains("name=\"response_format\"\r\n\r\ndiarized_json\r\n"));
+        assert!(option_schema("gpt-4o-transcribe-diarize")
+            .unwrap()
+            .option("prompt")
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn gpt_transcribe_rejects_invalid_saved_keywords_before_upload() {
+        let mut server = mock_server(TranscriptionProvider::OpenAI, "gpt-transcribe", &[]).await;
+        for keyword in ["<term>", "two\nlines", "two\rlines"] {
+            server.config.keywords = vec![keyword.into()];
+            assert!(transcribe(&server.config, &server.audio_path)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("keywords cannot contain"));
+        }
+    }
+
+    #[tokio::test]
+    async fn new_model_preserves_provider_errors_and_rejects_malformed_responses() {
+        for (status, body, expected) in [
+            (400, "invalid languages", "invalid languages"),
+            (200, "{}", "Failed to parse OpenAI response"),
+        ] {
+            let server = mock_server(
+                TranscriptionProvider::OpenAI,
+                "gpt-transcribe",
+                &[(status, body)],
+            )
+            .await;
+            assert!(transcribe(&server.config, &server.audio_path)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains(expected));
+        }
+    }
 }

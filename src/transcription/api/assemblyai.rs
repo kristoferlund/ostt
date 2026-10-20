@@ -20,14 +20,24 @@ use crate::config::ModelOptionValue;
 use crate::transcription::model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec, ModelSpec};
 use indexmap::IndexMap;
 
-pub(super) const MODELS: &[ModelSpec] = &[ModelSpec {
-    provider_id: "assemblyai",
-    model_id: "universal-3-pro",
-    endpoint: "https://api.assemblyai.com/v2",
-    display_name: "Universal 3 Pro (best accuracy)",
-    description: "AssemblyAI's Universal-3 Pro speech-to-text model for high-accuracy transcription and audio understanding in cloud workflows.",
-    languages: &["Multilingual"],
-}];
+pub(super) const MODELS: &[ModelSpec] = &[
+    ModelSpec {
+        provider_id: "assemblyai",
+        model_id: "universal-3-5-pro",
+        endpoint: "https://api.assemblyai.com/v2",
+        display_name: "Universal 3.5 Pro (recommended)",
+        description: "AssemblyAI's recommended file-transcription model with native code-switching and contextual prompting in 18 languages. Falls back to Universal 2 for other languages.",
+        languages: &["Multilingual", "99 languages with Universal 2 fallback"],
+    },
+    ModelSpec {
+        provider_id: "assemblyai",
+        model_id: "universal-2",
+        endpoint: "https://api.assemblyai.com/v2",
+        display_name: "Universal 2 (99 languages)",
+        description: "AssemblyAI's multilingual file-transcription model with keyterms prompting and broad language coverage.",
+        languages: &["Multilingual", "99 languages"],
+    },
+];
 
 const OPTIONS: &[ModelOptionSpec] = &[
     ModelOptionSpec {
@@ -59,10 +69,6 @@ const OPTIONS: &[ModelOptionSpec] = &[
         kind: ModelOptionKind::StringList,
     },
     ModelOptionSpec {
-        name: "prompt",
-        kind: ModelOptionKind::String,
-    },
-    ModelOptionSpec {
         name: "punctuate",
         kind: ModelOptionKind::Bool,
     },
@@ -79,17 +85,26 @@ const OPTIONS: &[ModelOptionSpec] = &[
         kind: ModelOptionKind::Number,
     },
     ModelOptionSpec {
-        name: "temperature",
-        kind: ModelOptionKind::Number,
-    },
-    ModelOptionSpec {
         name: "word_boost",
         kind: ModelOptionKind::StringList,
     },
+    // Contextual prompting is specific to Universal 3.5 Pro.
+    ModelOptionSpec {
+        name: "prompt",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "temperature",
+        kind: ModelOptionKind::Number,
+    },
 ];
 
-pub(super) fn option_schema(_model_id: &str) -> Option<ModelOptionSchema> {
-    Some(ModelOptionSchema::new(OPTIONS))
+pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
+    match model_id {
+        "universal-3-5-pro" => Some(ModelOptionSchema::new(OPTIONS)),
+        "universal-2" => Some(ModelOptionSchema::new(&OPTIONS[..OPTIONS.len() - 2])),
+        _ => None,
+    }
 }
 
 pub(super) fn validate_options(
@@ -213,11 +228,19 @@ pub(super) async fn transcribe(
 
     let mut request = TranscriptRequest {
         audio_url: upload_url,
-        speech_models: Some(vec![config.model_id.clone()]),
+        speech_models: Some(if config.model_id == "universal-3-5-pro" {
+            vec![config.model_id.clone(), "universal-2".into()]
+        } else {
+            vec![config.model_id.clone()]
+        }),
         format_text: Some(config.option_bool("format_text").unwrap_or(true)),
         disfluencies: Some(config.option_bool("disfluencies").unwrap_or(false)),
         filter_profanity: Some(config.option_bool("filter_profanity").unwrap_or(false)),
-        language_detection: Some(config.option_bool("language_detection").unwrap_or(true)),
+        language_detection: Some(
+            config
+                .option_bool("language_detection")
+                .unwrap_or_else(|| config.option_string("language_code").is_none()),
+        ),
         language_detection_options,
         punctuate: Some(config.option_bool("punctuate").unwrap_or(true)),
         keyterms_prompt: config
@@ -462,5 +485,56 @@ fn format_error(status: u16, error_body: &str) -> String {
         429 => "Too many requests to AssemblyAI. You've hit the API rate limit. Please wait and try again.".to_string(),
         500 | 502 | 503 | 504 => "AssemblyAI API server is experiencing issues. Please try again later.".to_string(),
         _ => format!("AssemblyAI API error (status {status}): {error_body}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcription::api::test_support::mock_server;
+    use crate::transcription::provider::TranscriptionProvider;
+
+    #[tokio::test]
+    async fn model_choice_preserves_language_coverage_and_explicit_language() {
+        for model in ["universal-3-5-pro", "universal-2"] {
+            let mut server = mock_server(
+                TranscriptionProvider::AssemblyAI,
+                model,
+                &[
+                    (200, r#"{"upload_url":"https://fixture.invalid/audio"}"#),
+                    (200, r#"{"id":"fixture","status":"queued"}"#),
+                    (
+                        200,
+                        r#"{"id":"fixture","status":"completed","text":" Hej! "}"#,
+                    ),
+                ],
+            )
+            .await;
+            server.config.keywords = vec!["OSTT".into()];
+            server.config.params.insert(
+                "language_code".into(),
+                ModelOptionValue::String("sv".into()),
+            );
+            assert_eq!(
+                transcribe(&server.config, &server.audio_path)
+                    .await
+                    .unwrap(),
+                "Hej!"
+            );
+            let requests = (&mut server.task).await.unwrap();
+            assert!(requests[0].starts_with("POST /upload HTTP/1.1\r\n"));
+            assert!(requests[2].starts_with("GET /transcript/fixture HTTP/1.1\r\n"));
+            let body: serde_json::Value =
+                serde_json::from_str(requests[1].split_once("\r\n\r\n").unwrap().1).unwrap();
+            let expected = if model == "universal-3-5-pro" {
+                vec![model, "universal-2"]
+            } else {
+                vec![model]
+            };
+            assert_eq!(body["speech_models"], serde_json::json!(expected));
+            assert_eq!(body["language_detection"], false);
+            assert_eq!(body["language_code"], "sv");
+            assert_eq!(body["keyterms_prompt"], serde_json::json!(["OSTT"]));
+        }
     }
 }

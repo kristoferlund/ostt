@@ -16,17 +16,17 @@ pub(super) const MODELS: &[ModelSpec] = &[
         provider_id: "mistral",
         model_id: "voxtral-mini-latest",
         endpoint: "https://api.mistral.ai/v1/audio/transcriptions",
-        display_name: "Voxtral Mini Transcribe (fast, efficient, 13 languages)",
-        description: "Mistral's Voxtral Mini transcription model for fast, efficient multilingual speech-to-text via the Mistral API.",
-        languages: &["Multilingual"],
+        display_name: "Voxtral Mini Transcribe V2 (latest alias)",
+        description: "Mistral's Voxtral Mini Transcribe V2 for batch transcription, diarization, context biasing and word timestamps in 13 languages.",
+        languages: &["Multilingual", "13 languages"],
     },
     ModelSpec {
         provider_id: "mistral",
         model_id: "voxtral-mini-2602",
         endpoint: "https://api.mistral.ai/v1/audio/transcriptions",
-        display_name: "Voxtral Mini 2602 (newer version, improved accuracy)",
+        display_name: "Voxtral Mini Transcribe V2 (pinned 2602)",
         description: "Pinned Voxtral Mini 2602 transcription model for stable Mistral speech-to-text behavior.",
-        languages: &["Multilingual"],
+        languages: &["Multilingual", "13 languages"],
     },
 ];
 
