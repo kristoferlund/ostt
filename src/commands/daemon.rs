@@ -226,7 +226,7 @@ fn active_local_model() -> Option<String> {
     crate::config::get_selected_model_entry()
         .ok()
         .flatten()
-        .filter(|m| m.provider_id == "whisper")
+        .filter(|m| crate::transcription::TranscriptionProvider::is_local_id(&m.provider_id))
         .map(|m| m.model_id)
 }
 
@@ -235,7 +235,7 @@ fn active_local_model_from_config(config: &OsttConfig) -> Option<String> {
         config.transcription.provider.as_deref(),
         config.transcription.model.as_deref(),
     ) {
-        (Some("whisper") | Some("local"), Some(model_id)) => Some(model_id.to_string()),
+        (Some("whisper" | "parakeet" | "local"), Some(model_id)) => Some(model_id.to_string()),
         _ => None,
     }
 }

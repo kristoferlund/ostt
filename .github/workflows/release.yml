@@ -44,6 +44,12 @@ on:
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
+# A new push to a pull request supersedes its running checks; release (tag)
+# runs each get their own group and are never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
   plan:
@@ -237,6 +243,13 @@ jobs:
           submodules: recursive
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+      # Restores the compiled dependencies, above all the native ggml build in
+      # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
+      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: packages-${{ matrix.deb_arch }}
+          save-if: ${{ github.event_name == 'pull_request' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install cargo-deb
@@ -306,12 +319,12 @@ jobs:
             cuda_apt_version: "12-8"
             variant: cuda
             expect_sass: "86 89 120"
-            expect_ptx: "50 61 70 75 80"
+            expect_ptx: "50 61 70 75 80 90"
           - cuda_major: "13"
             cuda_apt_version: "13-0"
             variant: cuda13
             expect_sass: "86 89 120 121"
-            expect_ptx: "75 80"
+            expect_ptx: "75 80 90"
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       CUDA_VERSION: ${{ matrix.cuda_apt_version }}
@@ -319,14 +332,12 @@ jobs:
       # Read by build.rs: the two CUDA majors share one Cargo feature, so the
       # `ostt --version` suffix (0.0.x-cuda13) has to come from here.
       OSTT_BUILD_VARIANT: ${{ matrix.variant }}
-      # ggml defaults GGML_NATIVE to ON, which tunes the build for whatever
-      # machine happens to compile it. On a GitHub runner that is actively
-      # wrong twice over: CMAKE_CUDA_ARCHITECTURES becomes "native", which
-      # cannot resolve without a GPU and silently collapses to nvcc's single
-      # default architecture, and ggml-cpu picks up -march=native, so the CPU
-      # ISA baseline of a release depends on which host the job landed on.
-      # whisper-rs-sys forwards every GGML_* variable through to CMake.
-      GGML_NATIVE: "OFF"
+      # GGML_NATIVE=OFF and the CPU baseline come from .cargo/config.toml.
+      # Native tuning would tune the build for the runner:
+      # CMAKE_CUDA_ARCHITECTURES becomes "native", which cannot resolve without
+      # a GPU and collapses to nvcc's single default architecture, and ggml-cpu
+      # picks up -march=native, so the CPU ISA baseline of a release depends on
+      # which host the job landed on.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -334,6 +345,13 @@ jobs:
           submodules: recursive
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+      # Restores the compiled dependencies, above all the native ggml build in
+      # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
+      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.variant }}
+          save-if: ${{ github.event_name == 'pull_request' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install CUDA toolkit
@@ -349,10 +367,10 @@ jobs:
             libcublas-${CUDA_VERSION}
           # /usr/local/cuda does exist here -- cuda-toolkit-<ver>-config-common
           # comes in transitively and points it at the versioned prefix through
-          # update-alternatives -- and whisper-rs-sys hardcodes -L/usr/local/cuda/lib64,
-          # so the build depends on it. Pin the versioned prefix anyway, so that
-          # a second toolkit on the runner cannot silently redirect the symlink
-          # and build the other major under this leg's name (12-8 -> 12.8).
+          # update-alternatives. CMake finds the toolkit through the nvcc on PATH,
+          # so pin the versioned prefix there: a second toolkit on the runner
+          # must not silently redirect the symlink and build the other major
+          # under this leg's name (12-8 -> 12.8).
           CUDA_HOME="/usr/local/cuda-${CUDA_VERSION/-/.}"
           test -d "$CUDA_HOME" || { echo "CUDA toolkit not at $CUDA_HOME"; exit 1; }
           echo "CUDA_HOME=$CUDA_HOME" >> $GITHUB_ENV
@@ -360,7 +378,7 @@ jobs:
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install cargo-deb cargo-generate-rpm
       - name: Build CUDA release binary
-        run: cargo build --profile dist --locked --features whisper-cuda
+        run: cargo build --profile dist --locked --features cuda
       - name: Generate shell completions
         # The CUDA stubs ship libcuda.so (unversioned); the binary needs libcuda.so.1.
         # Symlink the stub so the dynamic linker finds it without real NVIDIA drivers.
@@ -539,9 +557,6 @@ jobs:
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # See the CUDA job: -march=native would otherwise bake the build runner's
-      # CPU ISA into the release.
-      GGML_NATIVE: "OFF"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -549,15 +564,22 @@ jobs:
           submodules: recursive
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+      # Restores the compiled dependencies, above all the native ggml build in
+      # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
+      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: vulkan
+          save-if: ${{ github.event_name == 'pull_request' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install Vulkan SDK
         run: |
-          sudo apt-get install -y libvulkan-dev glslang-tools glslc
+          sudo apt-get install -y libvulkan-dev glslang-tools glslc spirv-headers
       - name: Install cargo-deb and cargo-generate-rpm
         run: cargo install cargo-deb cargo-generate-rpm
       - name: Build Vulkan release binary
-        run: cargo build --profile dist --locked --features whisper-vulkan
+        run: cargo build --profile dist --locked --features vulkan
       - name: Generate shell completions
         # libvulkan.so.1 is present from libvulkan1 (pulled in by libvulkan-dev).
         # The completions subcommand does not invoke any Vulkan API.

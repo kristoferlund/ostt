@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Local Parakeet models: `parakeet/parakeet-ultra` (25 European languages), `parakeet/parakeet-tdt-0.6b-v3` (25 European languages), `parakeet/parakeet-tdt-0.6b-v2` (English) and `parakeet/parakeet-tdt_ctc-110m` (English). They run offline with the same GPU support and daemon as Whisper, detect the language themselves and take no params.
+- Custom Parakeet `.gguf` models can be added from the model picker. OSTT detects whether a custom model is Whisper or Parakeet from the file.
+- The last downloaded model registry is cached, so downloaded models keep working offline.
+
+### Changed
+
+- Local transcription now runs on [transcribe.cpp](https://github.com/handy-computer/transcribe.cpp) instead of whisper-rs. Existing Whisper models keep working without a new download, and CPU transcription is considerably faster.
+- The model registry moved to `models-v2.json`. Older OSTT versions keep reading `models.json`, which stays Whisper-only.
+- Downloads with a published checksum are verified, and the model picker shows "Verifying" while the check runs.
+- The logs list the available inference devices and report which backend each model actually runs on.
+- Cargo features `whisper-cuda` and `whisper-vulkan` are now `cuda` and `vulkan`; the old names still work. Vulkan builds need SPIRV-Headers.
+
+### Removed
+
+- The Whisper params `no_timestamps` and `entropy_thold`, which had no effect with the new engine. Configs that still set them keep loading; the params are ignored and noted in the log.
+
 ## 0.0.28 - 2026-10-12
 
 ### Changed

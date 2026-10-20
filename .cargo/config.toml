@@ -1,2 +1,12 @@
 [env]
-WHISPER_DONT_GENERATE_BINDINGS = "1"
+# Native library build flags for transcribe.cpp, applied to every build:
+# - No system BLAS: it adds a runtime dependency and fails to link where libblas
+#   lacks the CBLAS interface. ggml's own CPU kernels are used instead.
+# - A fixed x86-64 CPU baseline (AVX2/FMA/F16C/BMI2, no AVX-512) instead of
+#   GGML_NATIVE. Native tuning makes release binaries crash on older CPUs and
+#   collapses CUDA to one GPU architecture. ggml also silently drops every SIMD
+#   tier when it detects cross-compilation or SOURCE_DATE_EPOCH (set by makepkg),
+#   making inference ~20x slower, so the tiers are explicit. Ignored on ARM.
+# Forced so a caller cannot drop these by accident. Add more flags through
+# CMAKE_ARGS, which transcribe-cpp-sys applies after these, so later values win.
+TRANSCRIBE_CMAKE_ARGS = { value = "-DTRANSCRIBE_USE_SYSTEM_BLAS=OFF -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_BMI2=ON -DGGML_FMA=ON -DGGML_F16C=ON", force = true }

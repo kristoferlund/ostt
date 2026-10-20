@@ -110,7 +110,9 @@ fn model_row(entry: &ModelEntry, is_selected: bool) -> Text<'static> {
 
     let mut spans = vec![Span::raw(format!(" {active_marker} "))];
 
-    if entry.is_downloaded && entry.provider_id == "whisper" {
+    if entry.is_downloaded
+        && crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id)
+    {
         let (pill_fg, pill_bg) = if is_selected {
             (Color::Black, Color::LightGreen)
         } else {
@@ -136,7 +138,7 @@ fn model_row(entry: &ModelEntry, is_selected: bool) -> Text<'static> {
         spans.push(Span::raw(" "));
     }
 
-    let details = if entry.provider_id == "whisper" {
+    let details = if crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id) {
         let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
         if description.is_empty() {
             format!(
@@ -166,7 +168,7 @@ fn model_row(entry: &ModelEntry, is_selected: bool) -> Text<'static> {
 fn section_label(entry: &ModelEntry) -> &'static str {
     if entry.group_id.as_deref() == Some("Custom models") {
         "Custom models"
-    } else if entry.provider_id == "whisper" {
+    } else if crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id) {
         "Local models"
     } else {
         "Cloud models"

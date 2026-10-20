@@ -15,8 +15,8 @@ pub(super) fn dialog(state: &State) -> Option<Dialog<State, Msg>> {
     let dialog = match &state.mode {
         Mode::Browse | Mode::Info { .. } => return None,
         Mode::CustomUrl => form_dialog(
-            "Download Custom Whisper Model 1/3",
-            "Paste a Hugging Face model page or a direct model file URL.\nSupported files: .gguf and ggml-*.bin.",
+            "Download Custom Local Model 1/3",
+            "Paste a Hugging Face model page or a direct model file URL.\nSupported: Whisper (.gguf, ggml-*.bin) and Parakeet (.gguf).",
             vec![(
                 "",
                 Input::new()
@@ -28,7 +28,7 @@ pub(super) fn dialog(state: &State) -> Option<Dialog<State, Msg>> {
             || Msg::Accept,
         ),
         Mode::CustomDetails { .. } => form_dialog(
-            "Download Custom Whisper Model 2/3",
+            "Download Custom Local Model 2/3",
             "Choose how this custom model should appear in OSTT.",
             vec![
                 (
@@ -110,7 +110,7 @@ fn progress(download: &DownloadState) -> Dialog<State, Msg> {
     );
     let progress = download.progress;
     let title = if download.is_custom {
-        "Download Custom Whisper Model 3/3"
+        "Download Custom Local Model 3/3"
     } else {
         download.status.as_str()
     };

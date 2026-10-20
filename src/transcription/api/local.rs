@@ -4,17 +4,16 @@ use super::TranscriptionConfig;
 use crate::config::{LocalTranscriptionConfig, ModelOptionValue};
 use crate::transcription::{
     daemon_client::{probe_daemon, request_transcription},
-    local_models::{resolve_installed_model_path, ModelError},
+    local_models::resolve_installed_model_path,
     model::{ModelOptionKind, ModelOptionSchema, ModelOptionSpec},
 };
 use indexmap::IndexMap;
-use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
+
+/// Params older versions accepted that no longer have any effect. Configs that
+/// still set them keep loading; they are ignored rather than rejected.
+pub(super) const RETIRED_OPTIONS: &[&str] = &["entropy_thold", "no_timestamps"];
 
 const OPTIONS: &[ModelOptionSpec] = &[
-    ModelOptionSpec {
-        name: "entropy_thold",
-        kind: ModelOptionKind::Number,
-    },
     ModelOptionSpec {
         name: "language",
         kind: ModelOptionKind::String,
@@ -26,10 +25,6 @@ const OPTIONS: &[ModelOptionSpec] = &[
     ModelOptionSpec {
         name: "no_speech_thold",
         kind: ModelOptionKind::Number,
-    },
-    ModelOptionSpec {
-        name: "no_timestamps",
-        kind: ModelOptionKind::Bool,
     },
     ModelOptionSpec {
         name: "temperature",
@@ -45,7 +40,6 @@ pub(super) fn validate_options(
     full_model_id: &str,
     options: &IndexMap<String, ModelOptionValue>,
 ) -> anyhow::Result<()> {
-    super::validate_number_min(full_model_id, options, "entropy_thold", 0.0)?;
     super::validate_number_range(full_model_id, options, "no_speech_thold", 0.0..=1.0)?;
     super::validate_number_range(full_model_id, options, "temperature", 0.0..=1.0)?;
 
@@ -71,78 +65,30 @@ pub(super) async fn transcribe(
     );
     let model_path = resolve_installed_model_path(&config.model_id)?;
     let audio_samples = load_audio_for_whisper(audio_path)?;
-    whisper_rs::install_logging_hooks();
-    tracing::info!(
-        "local transcription: loading model with {}",
-        crate::transcription::local_inference_backend()
-    );
 
     let text = tokio::task::spawn_blocking(move || {
-        let model_path = model_path.to_string_lossy().into_owned();
-        // WhisperContextParameters::default() sets use_gpu: cfg!(feature = "_gpu").
-        // On macOS the binary is built with the metal feature, so GPU is used automatically.
-        let ctx = WhisperContext::new_with_params(&model_path, WhisperContextParameters::default())
-            .map_err(|err| ModelError::LoadFailed(err.to_string()))?;
+        let model = crate::transcription::engine::load_model(&model_path)?;
         tracing::info!(
             "local transcription: backend active: {}",
-            crate::transcription::local_inference_backend_details()
+            crate::transcription::engine::backend_details(&model)
         );
-        let mut state = ctx
-            .create_state()
-            .map_err(|err| anyhow::anyhow!("Failed to create whisper state: {err}"))?;
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
-        let language = if local_config.language == "auto" {
-            None
-        } else {
-            Some(local_config.language.as_str())
-        };
-        params.set_language(language);
-        params.set_print_timestamps(!local_config.no_timestamps);
-        params.set_print_progress(false);
-        params.set_print_realtime(false);
-        params.set_print_special(false);
-        params.set_no_context(local_config.no_context);
-        params.set_temperature(local_config.temperature);
-        params.set_entropy_thold(local_config.entropy_thold);
-        params.set_no_speech_thold(local_config.no_speech_thold);
-
-        state
-            .full(params, &audio_samples)
-            .map_err(|err| anyhow::anyhow!("Transcription failed: {err}"))?;
-
-        let num_segments = state.full_n_segments();
-        let mut text = String::new();
-        for i in 0..num_segments {
-            let segment = state
-                .get_segment(i)
-                .ok_or_else(|| anyhow::anyhow!("Failed to get whisper segment {i}"))?;
-            text.push_str(&segment.to_string());
-            text.push(' ');
-        }
-
-        Ok::<String, anyhow::Error>(text.trim().to_string())
+        crate::transcription::engine::transcribe(&model, &audio_samples, &local_config)
     })
     .await
-    .map_err(|err| anyhow::anyhow!("Local whisper runtime task failed: {err}"))??;
+    .map_err(|err| anyhow::anyhow!("Local transcription runtime task failed: {err}"))??;
 
-    Ok(filter_obvious_hallucination(&text).unwrap_or_default())
+    Ok(text)
 }
 
 fn apply_params(config: &TranscriptionConfig, local_config: &mut LocalTranscriptionConfig) {
     if let Some(language) = config.option_string("language") {
         local_config.language = language.to_string();
     }
-    if let Some(no_timestamps) = config.option_bool("no_timestamps") {
-        local_config.no_timestamps = no_timestamps;
-    }
     if let Some(no_context) = config.option_bool("no_context") {
         local_config.no_context = no_context;
     }
     if let Some(temperature) = config.option_number("temperature") {
         local_config.temperature = temperature as f32;
-    }
-    if let Some(entropy_thold) = config.option_number("entropy_thold") {
-        local_config.entropy_thold = entropy_thold as f32;
     }
     if let Some(no_speech_thold) = config.option_number("no_speech_thold") {
         local_config.no_speech_thold = no_speech_thold as f32;
@@ -224,7 +170,7 @@ pub(crate) fn load_audio_for_whisper(audio_path: &Path) -> anyhow::Result<Vec<f3
 pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<()> {
     let reader = hound::WavReader::open(audio_path).map_err(|err| {
         anyhow::anyhow!(
-            "Whisper transcription requires WAV audio: {err}. Configure [whisper] with output_format = \"pcm_s16le -ar 16000\"."
+            "Local transcription requires WAV audio: {err}. Set output_format = \"pcm_s16le -ar 16000\" in the [whisper] or [parakeet] section."
         )
     })?;
     let spec = reader.spec();
@@ -235,7 +181,7 @@ pub(crate) fn validate_local_audio_format(audio_path: &Path) -> anyhow::Result<(
         || spec.channels != 1
     {
         anyhow::bail!(
-            "Whisper transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Configure [whisper] with output_format = \"pcm_s16le -ar 16000\". Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
+            "Local transcription requires WAV signed 16-bit PCM, 16 kHz, mono audio. Set output_format = \"pcm_s16le -ar 16000\" in the [whisper] or [parakeet] section. Current file has format {:?}, {} bits, {} Hz, {} channel(s).",
             spec.sample_format,
             spec.bits_per_sample,
             spec.sample_rate,
@@ -256,9 +202,11 @@ mod tests {
 
         assert!(schema.option("language").is_some());
         assert!(schema.option("temperature").is_some());
-        assert!(schema.option("entropy_thold").is_some());
         assert!(schema.option("no_speech_thold").is_some());
         assert!(schema.option("no_context").is_some());
-        assert!(schema.option("no_timestamps").is_some());
+        // no_timestamps only changed whisper.cpp's console printing; the engine
+        // has no entropy check for entropy_thold to control.
+        assert!(schema.option("no_timestamps").is_none());
+        assert!(schema.option("entropy_thold").is_none());
     }
 }

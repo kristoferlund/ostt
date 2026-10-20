@@ -25,8 +25,10 @@ use sha2::{Digest, Sha256};
 
 use crate::config::{self, SelectedModel};
 
+// Version 1 clients reject the whole of models.json if any entry has a provider
+// they do not know, so models for newer providers are published in this file.
 pub const REMOTE_REGISTRY_URL: &str =
-    "https://raw.githubusercontent.com/kristoferlund/ostt-models/main/models.json";
+    "https://raw.githubusercontent.com/kristoferlund/ostt-models/main/models-v2.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegistryEntry {
@@ -89,6 +91,12 @@ fn state_path() -> PathBuf {
     models_dir().join("models.json")
 }
 
+/// The last successfully fetched remote registry, so downloaded models keep
+/// their provider and checksum when the registry cannot be reached.
+fn registry_cache_path() -> PathBuf {
+    models_dir().join("registry.json")
+}
+
 /// Returns the path of the Unix socket used by the local model daemon.
 pub fn daemon_socket_path() -> PathBuf {
     crate::app_dirs::data_dir().join("ostt-daemon.sock")
@@ -106,11 +114,9 @@ pub fn model_files_dir() -> PathBuf {
 /// Error type for local model-related failures.
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
-    #[error(
-        "Local model 'whisper/{0}' was not found in the local model registry or custom models."
-    )]
+    #[error("Local model '{0}' was not found in the local model registry or custom models.")]
     NotFound(String),
-    #[error("Local model 'whisper/{0}' is not downloaded. Run `ostt model` to download it.")]
+    #[error("Local model '{0}' is not downloaded. Run `ostt model` to download it.")]
     NotDownloaded(String),
     #[error("Model file not found at {0}")]
     FileNotFound(PathBuf),
@@ -245,8 +251,10 @@ pub fn validate_downloaded_model(entry: &RegistryEntry) -> anyhow::Result<()> {
     })?;
 
     if let Some(expected_sha256) = entry.sha256.as_deref().filter(|sha| !sha.is_empty()) {
-        let bytes = fs::read(&path)?;
-        let actual_sha256 = format!("{:x}", Sha256::digest(&bytes));
+        // Streamed: models are hundreds of MB to several GB.
+        let mut hasher = Sha256::new();
+        std::io::copy(&mut fs::File::open(&path)?, &mut hasher)?;
+        let actual_sha256 = format!("{:x}", hasher.finalize());
         if !actual_sha256.eq_ignore_ascii_case(expected_sha256) {
             anyhow::bail!(
                 "downloaded model checksum mismatch for {}: expected {}, got {}",
@@ -299,11 +307,25 @@ pub fn installed_models(
 }
 
 pub fn load_registry_entries() -> Result<Vec<RegistryEntry>, ModelError> {
-    Err(ModelError::RegistryUnavailable)
+    let bytes = fs::read(registry_cache_path()).map_err(|_| ModelError::RegistryUnavailable)?;
+    serde_json::from_slice(&bytes).map_err(|_| ModelError::RegistryUnavailable)
 }
 
 pub async fn fetch_registry() -> anyhow::Result<Vec<RegistryEntry>> {
-    fetch_remote_registry().await
+    let entries = fetch_remote_registry().await?;
+    if let Err(error) = save_registry_cache(&entries) {
+        tracing::warn!("Failed to cache the local model registry: {error}");
+    }
+    Ok(entries)
+}
+
+fn save_registry_cache(entries: &[RegistryEntry]) -> anyhow::Result<()> {
+    fs::create_dir_all(models_dir())?;
+    let path = registry_cache_path();
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, serde_json::to_vec_pretty(entries)?)?;
+    fs::rename(temp, path)?;
+    Ok(())
 }
 
 async fn fetch_remote_registry() -> anyhow::Result<Vec<RegistryEntry>> {
@@ -330,10 +352,19 @@ async fn fetch_registry_from_url(url: &str) -> anyhow::Result<Vec<RegistryEntry>
             document.version
         );
     }
-    for entry in &document.models {
-        validate_model_provider(entry)?;
-    }
-    Ok(document.models)
+    // Skip entries for providers this version does not support, so a registry
+    // that adds a provider keeps working for older clients.
+    Ok(document
+        .models
+        .into_iter()
+        .filter(|entry| match validate_model_provider(entry) {
+            Ok(()) => true,
+            Err(error) => {
+                tracing::warn!("Skipping registry entry: {error}");
+                false
+            }
+        })
+        .collect())
 }
 
 pub async fn download_model(
@@ -604,9 +635,9 @@ fn validate_custom_model_id(entry: &RegistryEntry) -> anyhow::Result<()> {
 }
 
 fn validate_model_provider(entry: &RegistryEntry) -> anyhow::Result<()> {
-    if entry.provider_id != "whisper" {
+    if !crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id) {
         anyhow::bail!(
-            "local model '{}' uses unsupported provider_id '{}'. Supported local providers: whisper.",
+            "local model '{}' uses unsupported provider_id '{}'. Supported local providers: whisper, parakeet.",
             entry.id,
             entry.provider_id
         );
@@ -722,7 +753,9 @@ pub fn resolve_installed_model_path(model_id: &str) -> Result<PathBuf, ModelErro
     if path.exists() {
         Ok(path)
     } else {
-        Err(ModelError::NotDownloaded(model_id.to_string()))
+        // The entry's URL may name another extension than the file on disk,
+        // e.g. after a registry model moved from ggml .bin to .gguf.
+        find_installed_file_by_id(model_id)
     }
 }
 
@@ -754,8 +787,16 @@ pub fn activate_model_for_provider(
     if !path.exists() {
         return Err(ModelError::NotDownloaded(model_id.to_string()).into());
     }
-    if provider_id != "whisper" {
-        find_model_entry_for_provider(provider_id, model_id)?;
+    match find_model_entry(model_id) {
+        Ok(entry) if entry.provider_id != provider_id => anyhow::bail!(
+            "Local model '{model_id}' is a {0} model. Select it as {0}/{model_id}.",
+            entry.provider_id
+        ),
+        // Whisper files placed in the models directory by hand have no entry.
+        Err(_) if provider_id != "whisper" => {
+            find_model_entry_for_provider(provider_id, model_id)?;
+        }
+        _ => {}
     }
     config::save_selected_model(provider_id, model_id)?;
     Ok(SelectedModel {
@@ -1296,21 +1337,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fetch_registry_from_url_rejects_unsupported_provider_id() {
-        let mut entry = registry_entry("small");
-        entry.provider_id = "parakeet".to_string();
+    async fn fetch_registry_from_url_skips_unsupported_providers_but_keeps_the_rest() {
+        // A registry that adds a provider must not hide every model from
+        // clients that predate it.
+        let mut future = registry_entry("future-model");
+        future.provider_id = "not-a-provider".to_string();
+        let mut parakeet = registry_entry("parakeet-ultra");
+        parakeet.provider_id = "parakeet".to_string();
         let body = serde_json::to_vec(&serde_json::json!({
             "version": 1,
-            "models": [entry]
+            "models": [registry_entry("small"), future, parakeet]
         }))
         .expect("serialize registry");
         let url = serve_once("200 OK", "application/json", body);
 
-        let error = fetch_registry_from_url(&url)
-            .await
-            .expect_err("unsupported provider should fail");
+        let entries = fetch_registry_from_url(&url).await.expect("registry");
 
-        assert!(error.to_string().contains("unsupported provider_id"));
+        let ids: Vec<_> = entries.iter().map(|entry| entry.id.as_str()).collect();
+        assert_eq!(ids, ["small", "parakeet-ultra"]);
     }
 
     #[tokio::test]
@@ -1472,6 +1516,78 @@ mod tests {
             fs::write(model_destination(&entry), b"model bytes").expect("write model file");
 
             validate_downloaded_model(&entry).expect("validate checksum");
+        });
+    }
+
+    #[test]
+    fn validate_downloaded_model_rejects_a_corrupted_download() {
+        // Registry models carry a checksum so a truncated or tampered file is
+        // never loaded into the native engine.
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("custom");
+            entry.sha256 = Some(format!("{:x}", Sha256::digest(b"model bytes")));
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), b"model bytez").expect("write model file");
+
+            let error = validate_downloaded_model(&entry).expect_err("corrupted file");
+            assert!(error.to_string().contains("checksum mismatch"));
+        });
+    }
+
+    #[test]
+    fn downloaded_parakeet_models_stay_selectable_offline_from_the_registry_cache() {
+        // Non-Whisper selection must confirm the provider from a registry entry;
+        // without the cached registry, an offline user could not reselect it.
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("parakeet-ultra");
+            entry.provider_id = "parakeet".to_string();
+            entry.url = "https://example.com/parakeet-ultra-Q8_0.gguf".to_string();
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), [1]).expect("write model");
+
+            assert!(activate_model_for_provider("parakeet", "parakeet-ultra").is_err());
+
+            save_registry_cache(std::slice::from_ref(&entry)).expect("cache registry");
+            let selected =
+                activate_model_for_provider("parakeet", "parakeet-ultra").expect("activate");
+            assert_eq!(selected.provider_id, "parakeet");
+            assert_eq!(
+                resolve_installed_model_path("parakeet-ultra").expect("path"),
+                model_destination(&entry)
+            );
+        });
+    }
+
+    #[test]
+    fn a_model_cannot_be_selected_under_another_providers_name() {
+        // Selecting a Parakeet model as whisper/<id> would apply Whisper
+        // settings and output handling to the wrong engine.
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("parakeet-ultra");
+            entry.provider_id = "parakeet".to_string();
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            fs::write(model_destination(&entry), [1]).expect("write model");
+            save_registry_cache(std::slice::from_ref(&entry)).expect("cache registry");
+
+            let error = activate_model_for_provider("whisper", "parakeet-ultra")
+                .expect_err("provider mismatch");
+            assert!(error.to_string().contains("parakeet/parakeet-ultra"));
+        });
+    }
+
+    #[test]
+    fn cached_entries_still_find_a_model_saved_under_another_extension() {
+        // A registry model that moved from ggml .bin to .gguf must keep
+        // working for users who downloaded the old file.
+        with_isolated_data_dir(|_| {
+            let mut entry = registry_entry("turbo");
+            entry.url = "https://example.com/turbo.gguf".to_string();
+            save_registry_cache(std::slice::from_ref(&entry)).expect("cache registry");
+            fs::create_dir_all(model_files_dir()).expect("create files dir");
+            let legacy = model_files_dir().join("turbo.bin");
+            fs::write(&legacy, [1]).expect("write model");
+
+            assert_eq!(resolve_installed_model_path("turbo").expect("path"), legacy);
         });
     }
 

@@ -3,18 +3,12 @@
 //! This module provides support for multiple transcription providers and models through a
 //! unified interface. Each provider has its own API endpoint and authentication method.
 
-#[cfg(any(
-    target_os = "macos",
-    feature = "whisper-cuda",
-    feature = "whisper-vulkan"
-))]
-use std::ffi::CStr;
-
 pub mod animation;
 pub mod api;
 pub(crate) mod context;
 pub mod daemon;
 pub mod daemon_client;
+pub(crate) mod engine;
 pub mod local_models;
 pub mod model;
 pub mod provider;
@@ -40,8 +34,9 @@ pub fn config_for_selected_model(
             )
         })?;
 
-    if provider == TranscriptionProvider::Whisper {
+    if provider.is_local() {
         return Ok(TranscriptionConfig::new_local(
+            provider,
             selected_model.model_id.clone(),
             keywords,
             params,
@@ -116,105 +111,6 @@ fn missing_api_key_guidance(provider_name: &str) -> String {
     format!(
         "No API key for {provider_name}. Run 'ostt auth' to add an API key, then 'ostt model' to confirm or choose a model."
     )
-}
-
-pub(crate) fn local_inference_backend() -> &'static str {
-    #[cfg(feature = "whisper-cuda")]
-    {
-        "CUDA GPU acceleration"
-    }
-    #[cfg(all(not(feature = "whisper-cuda"), feature = "whisper-vulkan"))]
-    {
-        "Vulkan GPU acceleration"
-    }
-    #[cfg(all(
-        not(feature = "whisper-cuda"),
-        not(feature = "whisper-vulkan"),
-        target_os = "macos"
-    ))]
-    {
-        "Metal GPU acceleration"
-    }
-    #[cfg(not(any(
-        target_os = "macos",
-        feature = "whisper-cuda",
-        feature = "whisper-vulkan"
-    )))]
-    {
-        "CPU inference"
-    }
-}
-
-pub(crate) fn local_inference_backend_details() -> String {
-    #[cfg(any(
-        target_os = "macos",
-        feature = "whisper-cuda",
-        feature = "whisper-vulkan"
-    ))]
-    {
-        let devices = local_gpu_devices();
-        if devices.is_empty() {
-            return format!(
-                "{} requested, but no GPU devices were reported by ggml",
-                local_inference_backend()
-            );
-        }
-        let devices = devices
-            .iter()
-            .enumerate()
-            .map(|(index, device)| format!("{index}: {device}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("{} using device(s): {devices}", local_inference_backend())
-    }
-
-    #[cfg(not(any(
-        target_os = "macos",
-        feature = "whisper-cuda",
-        feature = "whisper-vulkan"
-    )))]
-    {
-        local_inference_backend().to_string()
-    }
-}
-
-#[cfg(any(
-    target_os = "macos",
-    feature = "whisper-cuda",
-    feature = "whisper-vulkan"
-))]
-fn local_gpu_devices() -> Vec<String> {
-    unsafe {
-        let count = whisper_rs_sys::ggml_backend_dev_count();
-        let mut devices = Vec::new();
-
-        for index in 0..count {
-            let device = whisper_rs_sys::ggml_backend_dev_get(index);
-            let device_type = whisper_rs_sys::ggml_backend_dev_type(device);
-            if device_type != whisper_rs_sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_GPU
-                && device_type
-                    != whisper_rs_sys::ggml_backend_dev_type_GGML_BACKEND_DEVICE_TYPE_IGPU
-            {
-                continue;
-            }
-
-            let name = {
-                let ptr = whisper_rs_sys::ggml_backend_dev_description(device);
-                if ptr.is_null() {
-                    "unknown GPU".to_string()
-                } else {
-                    CStr::from_ptr(ptr).to_string_lossy().into_owned()
-                }
-            };
-            let mut vram_free: usize = 0;
-            let mut vram_total: usize = 0;
-            whisper_rs_sys::ggml_backend_dev_memory(device, &mut vram_free, &mut vram_total);
-            let vram_mb = vram_total / (1024 * 1024);
-            devices.push(format!("{name} ({vram_mb} MB VRAM)"));
-        }
-
-        devices
-    }
 }
 
 #[cfg(test)]

@@ -92,12 +92,13 @@ impl TranscriptionConfig {
 
     /// Creates a local transcription configuration with a registry-backed model ID.
     pub fn new_local(
+        provider: TranscriptionProvider,
         model_id: String,
         keywords: Vec<String>,
         params: IndexMap<String, ModelOptionValue>,
     ) -> Self {
         Self {
-            provider: TranscriptionProvider::Whisper,
+            provider,
             model_id,
             endpoint: String::new(),
             api_key: String::new(),
@@ -182,13 +183,20 @@ pub async fn transcribe(config: &TranscriptionConfig, audio_path: &Path) -> anyh
         TranscriptionProvider::AssemblyAI => assemblyai::transcribe(config, audio_path).await,
         TranscriptionProvider::Berget => berget::transcribe(config, audio_path).await,
         TranscriptionProvider::ElevenLabs => elevenlabs::transcribe(config, audio_path).await,
-        TranscriptionProvider::Whisper => local::transcribe(config, audio_path).await,
+        TranscriptionProvider::Whisper | TranscriptionProvider::Parakeet => {
+            local::transcribe(config, audio_path).await
+        }
         TranscriptionProvider::Mistral => mistral::transcribe(config, audio_path).await,
         TranscriptionProvider::Command => command::transcribe(config, audio_path).await,
         TranscriptionProvider::Http => http::transcribe(config, audio_path).await,
     }?;
 
     Ok(result)
+}
+
+/// Whether a param was accepted by an earlier version but is now ignored.
+pub(crate) fn is_retired_param(provider_id: &str, option_name: &str) -> bool {
+    provider_id == "whisper" && local::RETIRED_OPTIONS.contains(&option_name)
 }
 
 pub(crate) fn option_schema(provider_id: &str, model_id: &str) -> Option<ModelOptionSchema> {
@@ -312,30 +320,6 @@ pub(super) fn validate_number_range(
             full_model_id,
             range.start(),
             range.end()
-        );
-    }
-
-    Ok(())
-}
-
-pub(super) fn validate_number_min(
-    full_model_id: &str,
-    options: &IndexMap<String, ModelOptionValue>,
-    option_name: &str,
-    min: f64,
-) -> anyhow::Result<()> {
-    let value = match options.get(option_name) {
-        Some(ModelOptionValue::Number(value)) => *value,
-        Some(ModelOptionValue::Integer(value)) => *value as f64,
-        _ => return Ok(()),
-    };
-
-    if value < min {
-        anyhow::bail!(
-            "Invalid value for param '{}' in '{}'. Expected >= {}.",
-            option_name,
-            full_model_id,
-            min
         );
     }
 

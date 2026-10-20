@@ -140,14 +140,10 @@ fn default_true() -> bool {
 pub struct LocalTranscriptionConfig {
     /// Language hint: "auto" or ISO code (e.g. "sv", "en")
     pub language: String,
-    /// Suppress timestamp output
-    pub no_timestamps: bool,
     /// Suppress text context from previous segments
     pub no_context: bool,
     /// Sampling temperature (0.0 = greedy/deterministic)
     pub temperature: f32,
-    /// Entropy threshold for fallback (2.4 = default)
-    pub entropy_thold: f32,
     /// No-speech probability threshold (0.6 = default)
     pub no_speech_thold: f32,
 }
@@ -156,10 +152,8 @@ impl Default for LocalTranscriptionConfig {
     fn default() -> Self {
         Self {
             language: "auto".to_string(),
-            no_timestamps: true,
             no_context: true,
             temperature: 0.0,
-            entropy_thold: 2.4,
             no_speech_thold: 0.6,
         }
     }
@@ -167,22 +161,15 @@ impl Default for LocalTranscriptionConfig {
 
 impl LocalTranscriptionConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
-        validate_local_values(self.temperature, self.entropy_thold, self.no_speech_thold)?;
+        validate_local_values(self.temperature, self.no_speech_thold)?;
 
         Ok(())
     }
 }
 
-fn validate_local_values(
-    temperature: f32,
-    entropy_thold: f32,
-    no_speech_thold: f32,
-) -> anyhow::Result<()> {
+fn validate_local_values(temperature: f32, no_speech_thold: f32) -> anyhow::Result<()> {
     if !(0.0..=1.0).contains(&temperature) {
         anyhow::bail!("temperature must be between 0.0 and 1.0");
-    }
-    if entropy_thold < 0.0 {
-        anyhow::bail!("entropy_thold must be >= 0.0");
     }
     if !(0.0..=1.0).contains(&no_speech_thold) {
         anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
@@ -1180,7 +1167,7 @@ pub fn resolve_output_format(
         return output_format.to_string();
     }
 
-    if selected_model.provider_id == "whisper" {
+    if crate::transcription::TranscriptionProvider::is_local_id(&selected_model.provider_id) {
         return LOCAL_TRANSCRIPTION_OUTPUT_FORMAT.to_string();
     }
 
@@ -1218,7 +1205,9 @@ pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()
         return Ok(());
     }
 
-    if provider_id != "whisper" && model::find_model(provider_id, model_id).is_none() {
+    if !crate::transcription::TranscriptionProvider::is_local_id(provider_id)
+        && model::find_model(provider_id, model_id).is_none()
+    {
         anyhow::bail!(
             "Unknown model '{}' for provider '{}'. Please run 'ostt model' to select a supported model.",
             model_id,
@@ -1226,9 +1215,11 @@ pub fn validate_model_id(provider_id: &str, model_id: &str) -> anyhow::Result<()
         );
     }
 
-    if provider_id == "whisper" && !crate::transcription::local_models::is_safe_model_id(model_id) {
+    if crate::transcription::TranscriptionProvider::is_local_id(provider_id)
+        && !crate::transcription::local_models::is_safe_model_id(model_id)
+    {
         anyhow::bail!(
-            "Whisper model id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
+            "Local model id '{}' must contain only lowercase letters, digits, '.', '_' or '-'.",
             model_id
         );
     }
@@ -1254,6 +1245,12 @@ pub fn validate_params_for_model(
     };
 
     for (option_name, value) in params {
+        if api::is_retired_param(provider_id, option_name) {
+            tracing::warn!(
+                "Ignoring param '{option_name}' for '{full_model_id}': it no longer has any effect and can be removed from the config."
+            );
+            continue;
+        }
         let Some(spec) = schema.option(option_name) else {
             anyhow::bail!(
                 "Invalid param '{}' for '{}'. Supported params: {}.",
@@ -1647,10 +1644,8 @@ mod tests {
 
             [whisper.params]
             language = "sv"
-            no_timestamps = false
             no_context = false
             temperature = 0.2
-            entropy_thold = 3.0
             no_speech_thold = 0.4
         "#;
 
@@ -1660,10 +1655,8 @@ mod tests {
             params["language"],
             ModelOptionValue::String("sv".to_string())
         );
-        assert_eq!(params["no_timestamps"], ModelOptionValue::Bool(false));
         assert_eq!(params["no_context"], ModelOptionValue::Bool(false));
         assert_eq!(params["temperature"], ModelOptionValue::Number(0.2));
-        assert_eq!(params["entropy_thold"], ModelOptionValue::Number(3.0));
         assert_eq!(params["no_speech_thold"], ModelOptionValue::Number(0.4));
     }
 
@@ -1672,7 +1665,6 @@ mod tests {
         let cases = [
             ("temperature = 1.1", "temperature"),
             ("temperature = -0.1", "temperature"),
-            ("entropy_thold = -0.1", "entropy_thold"),
             ("no_speech_thold = 1.1", "no_speech_thold"),
         ];
 
@@ -1702,7 +1694,6 @@ mod tests {
 
             [whisper.params]
             temperature = 1.0
-            entropy_thold = 0.0
             no_speech_thold = 0.0
         "#;
 
@@ -1734,10 +1725,8 @@ mod tests {
 
             [whisper.tiny.params]
             language = "sv"
-            no_timestamps = true
             no_context = false
             temperature = 0.0
-            entropy_thold = 2.4
             no_speech_thold = 0.6
 
             [whisper.turbo.params]
@@ -1753,7 +1742,6 @@ mod tests {
     fn params_reject_invalid_whisper_values() {
         let cases = [
             ("temperature = 1.5", "Expected 0-1"),
-            ("entropy_thold = -1.0", "Expected >= 0"),
             ("no_speech_thold = 1.5", "Expected 0-1"),
         ];
 
@@ -1774,6 +1762,28 @@ mod tests {
     }
 
     #[test]
+    fn retired_whisper_params_do_not_stop_the_config_from_loading() {
+        // Older versions accepted these. Rejecting them now would make an upgrade
+        // fail to load the whole config over settings that have no effect.
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [whisper.params]
+            no_timestamps = true
+            entropy_thold = 2.4
+
+            [whisper.turbo.params]
+            no_timestamps = false
+            entropy_thold = -1.0
+            language = "sv"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        validate_ostt_config(&config).unwrap();
+    }
+
+    #[test]
     fn params_reject_unsafe_whisper_model_id() {
         let toml_str = r#"
             [audio]
@@ -1784,7 +1794,7 @@ mod tests {
         "#;
 
         let err = parse_ostt_config(toml_str).unwrap_err().to_string();
-        assert!(err.contains("Whisper model id"));
+        assert!(err.contains("Local model id"));
     }
 
     #[test]
