@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::Once;
 
 use transcribe_cpp::{
-    Backend, Error, Model, ModelOptions, RunExtension, RunOptions, WhisperRunOptions,
+    Backend, Error, Feature, Model, ModelOptions, RunExtension, RunOptions, WhisperRunOptions,
 };
 
 use crate::config::LocalTranscriptionConfig;
@@ -67,7 +67,8 @@ pub(crate) fn transcribe(
         .session()
         .map_err(|err| anyhow::anyhow!("Failed to create transcription session: {err}"))?;
     let arch = model.arch();
-    let transcript = match session.run(samples, &run_options(&arch, config)) {
+    let options = run_options(&arch, |feature| model.supports(feature), config);
+    let transcript = match session.run(samples, &options) {
         Ok(transcript) => transcript,
         // The engine stopped early but kept what it decoded; losing a whole
         // recording would be worse than returning an incomplete transcript.
@@ -111,9 +112,23 @@ pub(crate) fn backend_details(model: &Model) -> String {
     format!("{} model on {} ({device})", model.arch(), model.backend())
 }
 
-fn run_options(arch: &str, config: &LocalTranscriptionConfig) -> RunOptions {
+fn run_options(
+    arch: &str,
+    supports: impl Fn(Feature) -> bool,
+    config: &LocalTranscriptionConfig,
+) -> RunOptions {
     RunOptions {
         language: (config.language != "auto").then(|| config.language.clone()),
+        // Models without the feature would ignore these with a warning on every run.
+        vocabulary: if supports(Feature::Vocabulary) {
+            config.vocabulary.clone()
+        } else {
+            Vec::new()
+        },
+        prompt: config
+            .prompt
+            .clone()
+            .filter(|_| supports(Feature::ContextPrompt)),
         // Other model families reject or ignore Whisper decode settings.
         family: (arch == "whisper").then(|| {
             RunExtension::Whisper(WhisperRunOptions {
@@ -140,7 +155,7 @@ mod tests {
 
     #[test]
     fn auto_language_lets_the_model_detect_the_language() {
-        let options = run_options("whisper", &LocalTranscriptionConfig::default());
+        let options = run_options("whisper", |_| true, &LocalTranscriptionConfig::default());
         assert_eq!(options.language, None);
     }
 
@@ -151,7 +166,9 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            run_options("whisper", &config).language.as_deref(),
+            run_options("whisper", |_| true, &config)
+                .language
+                .as_deref(),
             Some("sv")
         );
     }
@@ -164,7 +181,7 @@ mod tests {
             no_speech_thold: 0.5,
             ..Default::default()
         };
-        let options = run_options("whisper", &config);
+        let options = run_options("whisper", |_| true, &config);
         let whisper = whisper_options(&options);
         // no_context=true must stop conditioning on earlier segments, or a
         // hallucinated segment can propagate through the rest of a recording.
@@ -183,9 +200,27 @@ mod tests {
     }
 
     #[test]
+    fn keywords_and_prompt_go_only_to_models_that_support_them() {
+        let config = LocalTranscriptionConfig {
+            vocabulary: vec!["OSTT".to_string()],
+            prompt: Some("A Rust code review.".to_string()),
+            ..Default::default()
+        };
+        // Whisper renders both into its prompt slot as "Glossary: OSTT A Rust code review."
+        let options = run_options("whisper", |_| true, &config);
+        assert_eq!(options.vocabulary, ["OSTT"]);
+        assert_eq!(options.prompt.as_deref(), Some("A Rust code review."));
+
+        // Parakeet has neither feature; sending them would log a warning on every run.
+        let options = run_options("parakeet", |_| false, &config);
+        assert!(options.vocabulary.is_empty());
+        assert_eq!(options.prompt, None);
+    }
+
+    #[test]
     fn whisper_settings_are_not_sent_to_other_model_families() {
         // Other families reject a Whisper extension, which would fail every run.
-        let options = run_options("parakeet", &LocalTranscriptionConfig::default());
+        let options = run_options("parakeet", |_| false, &LocalTranscriptionConfig::default());
         assert!(options.family.is_none());
     }
 }

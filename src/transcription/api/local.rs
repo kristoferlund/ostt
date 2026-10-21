@@ -30,6 +30,10 @@ const OPTIONS: &[ModelOptionSpec] = &[
         name: "temperature",
         kind: ModelOptionKind::Number,
     },
+    ModelOptionSpec {
+        name: "prompt",
+        kind: ModelOptionKind::String,
+    },
 ];
 
 pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
@@ -92,6 +96,10 @@ fn apply_params(config: &TranscriptionConfig, local_config: &mut LocalTranscript
     }
     if let Some(no_speech_thold) = config.option_number("no_speech_thold") {
         local_config.no_speech_thold = no_speech_thold as f32;
+    }
+    local_config.vocabulary = config.keywords.clone();
+    if let Some(prompt) = config.option_string("prompt") {
+        local_config.prompt = Some(prompt.to_string());
     }
 }
 
@@ -208,5 +216,28 @@ mod tests {
         // has no entropy check for entropy_thold to control.
         assert!(schema.option("no_timestamps").is_none());
         assert!(schema.option("entropy_thold").is_none());
+    }
+
+    /// Saved `ostt keyword` terms used to be dropped for local models; they
+    /// must reach the engine, next to an explicit context prompt.
+    #[test]
+    fn saved_keywords_and_prompt_param_reach_the_local_engine() {
+        let mut params = IndexMap::new();
+        params.insert(
+            "prompt".to_string(),
+            ModelOptionValue::String("A Rust code review.".to_string()),
+        );
+        let config = TranscriptionConfig::new_local(
+            crate::transcription::TranscriptionProvider::Whisper,
+            "turbo".to_string(),
+            vec!["OSTT".to_string(), "Kubernetes".to_string()],
+            params,
+        );
+        let mut local_config = LocalTranscriptionConfig::default();
+        apply_params(&config, &mut local_config);
+
+        assert_eq!(local_config.vocabulary, ["OSTT", "Kubernetes"]);
+        assert_eq!(local_config.prompt.as_deref(), Some("A Rust code review."));
+        assert!(option_schema("turbo").unwrap().option("prompt").is_some());
     }
 }
