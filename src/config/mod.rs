@@ -8,6 +8,7 @@
 pub(crate) mod edit;
 pub mod file;
 pub mod secrets;
+pub mod selection;
 
 pub use file::LocalTranscriptionConfig;
 pub use file::{
@@ -19,10 +20,10 @@ pub use file::{
     PopupConfig, ProviderConfig, ProviderConfigs, ProviderModelConfig, ProviderSettings,
     ReferenceLevel, TextConfig, TranscriptionSelectionConfig, VisualizationType,
 };
-pub use secrets::{
-    clear_api_key, clear_selected_model, get_api_key, get_authorized_providers, get_selected_model,
-    get_selected_model_entry, parse_provider_model, save_api_key, save_selected_model,
-    SelectedModel,
+pub use secrets::{clear_api_key, get_api_key, get_authorized_providers, save_api_key};
+pub use selection::{
+    clear_selected_model, get_selected_model, get_selected_model_entry, parse_provider_model,
+    save_selected_model, SelectedModel,
 };
 
 pub use file::{is_local_transcription_audio_compatible, resolve_output_format, save_config};

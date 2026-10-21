@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- OSTT no longer rewrites `ostt.toml` on upgrade. The `config_version` line it used to update never drove a migration; new configs omit it and existing ones keep loading with it.
 - Keywords are stored in `ostt.toml` under `[transcription].keywords` instead of `keywords.txt`, so they can be edited with the rest of the config. On first run OSTT moves existing keywords over and renames the old file to `keywords.txt.migrated`; keywords already in `ostt.toml` take precedence.
 - The model screen no longer marks the daemon's model with a `run` badge; the footer shows it instead. Activating a local model while the daemon runs reloads it in the background, without freezing the screen.
 - A process action with an unknown or missing `type` is skipped with a warning instead of stopping the config from loading. Broken `bash` and `ai` actions are still reported as errors.

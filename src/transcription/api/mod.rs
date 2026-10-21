@@ -22,7 +22,7 @@ use std::path::Path;
 
 use super::model::{ModelOptionSchema, ModelSpec};
 use super::provider::TranscriptionProvider;
-use crate::config::file::{LocalTranscriptionConfig, ModelOptionValue};
+use crate::config::file::ModelOptionValue;
 use indexmap::IndexMap;
 use std::ops::RangeInclusive;
 
@@ -107,11 +107,6 @@ impl TranscriptionConfig {
             keywords,
             params,
         }
-    }
-
-    /// Returns the built-in whisper defaults only for whisper transcription requests.
-    pub fn local_config(&self) -> Option<&LocalTranscriptionConfig> {
-        None
     }
 
     pub fn option_bool(&self, name: &str) -> Option<bool> {

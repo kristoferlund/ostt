@@ -23,44 +23,19 @@ fn suppress_alsa_warnings() {
     }
 }
 
-/// Checks if setup is needed and applies only the required setup step.
+/// Creates the default config on first run and moves older config content
+/// into place. Called early in the startup sequence, before command handling.
 ///
-/// This is called early in the startup sequence, before command handling.
-/// It checks:
-/// 1. If config file doesn't exist, creates the default config
-/// 2. If config version is older than app version, preserves user config and updates version
-/// 3. If config version matches app version, does nothing
+/// An existing config is never rewritten on upgrade: unknown or retired
+/// content is skipped when the config loads, so there is nothing to migrate.
 async fn check_and_run_setup() -> Result<(), anyhow::Error> {
     let config_path = crate::app_dirs::config_path()?;
-
-    match crate::setup::version::check_setup_needed(&config_path)? {
-        Some(old_version) => {
-            tracing::info!(
-                "Setup needed - updating from version {} to {}",
-                old_version,
-                env!("CARGO_PKG_VERSION")
-            );
-
-            if !config_path.exists() {
-                crate::setup::run_setup().map_err(|e| {
-                    tracing::error!("Setup failed: {e}");
-                    anyhow!("Setup failed: {e}")
-                })?;
-            }
-
-            crate::setup::version::update_config_version(&config_path).map_err(|e| {
-                tracing::error!("Failed to update config version: {e}");
-                anyhow!("Failed to update config version: {e}")
-            })?;
-            tracing::info!(
-                "Setup completed successfully - config version is {}",
-                env!("CARGO_PKG_VERSION")
-            );
-        }
-        None => {
-            // Config exists and version matches, no setup needed
-            tracing::debug!("Config version up to date ({})", env!("CARGO_PKG_VERSION"));
-        }
+    if !config_path.exists() {
+        tracing::info!("No config found; creating {}", config_path.display());
+        crate::setup::run_setup().map_err(|e| {
+            tracing::error!("Setup failed: {e}");
+            anyhow!("Setup failed: {e}")
+        })?;
     }
 
     // A failed move leaves keywords.txt in place for the next run; it must not
@@ -978,6 +953,62 @@ fn ensure_single_output_mode(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `test` with an isolated, empty config directory.
+    fn with_config_dir(test: impl FnOnce(&std::path::Path)) {
+        let _guard = crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("ostt-setup-test-{unique}"));
+        std::env::set_var("XDG_CONFIG_HOME", &root);
+        let dir = crate::app_dirs::config_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+
+        test(&dir);
+
+        match previous {
+            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    fn run_setup_hook() {
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(check_and_run_setup())
+            .unwrap();
+    }
+
+    /// Upgrades used to rewrite the first line of every user's config with the
+    /// new version; an existing config must be left exactly as the user wrote it.
+    #[test]
+    fn startup_leaves_an_existing_config_untouched() {
+        with_config_dir(|dir| {
+            let content = "# mine\nconfig_version = \"0.0.12\"\n[audio]\ndevice = \"default\"\n";
+            std::fs::write(dir.join("ostt.toml"), content).unwrap();
+            run_setup_hook();
+            assert_eq!(
+                std::fs::read_to_string(dir.join("ostt.toml")).unwrap(),
+                content
+            );
+        });
+    }
+
+    #[test]
+    fn first_run_creates_a_loadable_config_without_a_version_line() {
+        with_config_dir(|dir| {
+            run_setup_hook();
+            let content = std::fs::read_to_string(dir.join("ostt.toml")).unwrap();
+            assert!(!content.contains("config_version"), "{content}");
+            crate::config::OsttConfig::load().expect("default config loads");
+        });
+    }
 
     #[test]
     fn cli_accepts_model_override_for_default_record() {
