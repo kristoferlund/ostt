@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Keywords are stored in `ostt.toml` under `[transcription].keywords` instead of `keywords.txt`, so they can be edited with the rest of the config. On first run OSTT moves existing keywords over and renames the old file to `keywords.txt.migrated`; keywords already in `ostt.toml` take precedence.
+
 ### Fixed
 
 - Selecting a model and saving replace rules no longer rewrite whole sections of `ostt.toml`. Only the changed values are written; comments, formatting and other keys are kept.

@@ -647,6 +647,9 @@ pub struct TranscriptionSelectionConfig {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// Terms that improve recognition, highest priority first (`ostt keyword`)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub keywords: Vec<String>,
 }
 
 const FIXED_TOP_LEVEL_SECTIONS: &[&str] = &[

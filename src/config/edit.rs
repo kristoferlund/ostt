@@ -4,22 +4,34 @@
 //! the user's comments and formatting, is written back as it was read.
 
 use std::fs;
+use std::path::Path;
 
 use anyhow::Context;
 use indexmap::IndexMap;
-use toml_edit::{value, DocumentMut, Item, Table};
+use toml_edit::{value, Array, DocumentMut, Item, Table, Value};
 
 /// Applies `edit` to the config file and writes the result back.
 pub(crate) fn edit_config_file(
     edit: impl FnOnce(&mut DocumentMut) -> anyhow::Result<()>,
 ) -> anyhow::Result<()> {
-    let path = crate::app_dirs::config_path()?;
-    let content = fs::read_to_string(&path)?;
+    edit_config_file_at(&crate::app_dirs::config_path()?, edit)
+}
+
+/// [`edit_config_file`] for a given path; a missing file starts empty.
+pub(crate) fn edit_config_file_at(
+    path: &Path,
+    edit: impl FnOnce(&mut DocumentMut) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.into()),
+    };
     let mut doc: DocumentMut = content
         .parse()
         .with_context(|| format!("{} is not valid TOML", path.display()))?;
     edit(&mut doc)?;
-    fs::write(&path, doc.to_string())?;
+    fs::write(path, doc.to_string())?;
     Ok(())
 }
 
@@ -43,6 +55,30 @@ pub(crate) fn set_selected_model(
             remove_if_empty(doc, "transcription");
         }
     }
+    Ok(())
+}
+
+/// Sets `[transcription].keywords`, one keyword per line so the list is easy to
+/// edit by hand. An empty list removes the key.
+pub(crate) fn set_keywords(doc: &mut DocumentMut, keywords: &[String]) -> anyhow::Result<()> {
+    if keywords.is_empty() {
+        if let Some(transcription) = existing_table_mut(doc, "transcription")? {
+            transcription.remove("keywords");
+        }
+        remove_if_empty(doc, "transcription");
+        return Ok(());
+    }
+    let mut array: Array = keywords.iter().map(String::as_str).collect();
+    for keyword in array.iter_mut() {
+        keyword.decor_mut().set_prefix("\n    ");
+    }
+    array.set_trailing_comma(true);
+    array.set_trailing("\n");
+    set_value(
+        table_mut(doc, "transcription", false)?,
+        "keywords",
+        array.into(),
+    );
     Ok(())
 }
 
@@ -81,14 +117,17 @@ pub(crate) fn set_replace_rules(
     Ok(())
 }
 
-/// Sets a string value. An existing key keeps its position, the comments above
-/// it and any trailing comment; `Table::insert` would replace all of them.
 fn set_string(table: &mut Table, key: &str, new: &str) {
+    set_value(table, key, new.into());
+}
+
+/// Sets a value. An existing key keeps its position, the comments above it and
+/// any trailing comment; `Table::insert` would replace all of them.
+fn set_value(table: &mut Table, key: &str, mut new: Value) {
     match table.get_mut(key).and_then(Item::as_value_mut) {
         Some(existing) => {
-            let decor = existing.decor().clone();
-            *existing = new.into();
-            *existing.decor_mut() = decor;
+            *new.decor_mut() = existing.decor().clone();
+            *existing = new;
         }
         None => {
             table.insert(key, value(new));
@@ -211,6 +250,43 @@ width = 90 # wide enough for the waveform
             |doc| set_selected_model(doc, None).unwrap(),
         );
         assert_eq!(updated, "");
+    }
+
+    #[test]
+    fn keywords_are_written_one_per_line_next_to_the_selection() {
+        let updated = edited(CONFIG, |doc| {
+            set_keywords(doc, &["OSTT".to_string(), "Rödeby".to_string()]).unwrap()
+        });
+        assert!(
+            updated.contains(
+                "model = \"nova-3\" # cheapest for long calls\nkeywords = [\n    \"OSTT\",\n    \"Rödeby\",\n]\n"
+            ),
+            "{updated}"
+        );
+        assert!(updated.contains("# Switched for meetings\nprovider = \"deepgram\""));
+
+        // Selecting a model must not drop the keywords stored beside it.
+        let reselected = edited(&updated, |doc| {
+            set_selected_model(doc, Some(("whisper", "base"))).unwrap()
+        });
+        let config: toml::Table = reselected.parse().unwrap();
+        assert_eq!(
+            config["transcription"]["keywords"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+    }
+
+    #[test]
+    fn an_empty_keyword_list_removes_the_key_but_not_the_selection() {
+        let content = "[transcription]\nprovider = \"a\"\nmodel = \"b\"\nkeywords = [\"x\"]\n";
+        let updated = edited(content, |doc| set_keywords(doc, &[]).unwrap());
+        assert_eq!(
+            updated,
+            "[transcription]\nprovider = \"a\"\nmodel = \"b\"\n"
+        );
     }
 
     /// Saving rules used to delete all of [text] and rewrite it, losing the
