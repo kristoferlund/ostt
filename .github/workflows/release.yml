@@ -38,17 +38,23 @@ permissions:
 #
 # If there's a prerelease-style suffix to the version, then the release(s)
 # will be marked as a prerelease.
+#
+# Pushes to main build without publishing, to save the build cache that pull
+# requests restore. GitHub only shares caches from the default branch, so
+# caches saved by one pull request are invisible to the next.
 on:
   pull_request:
   push:
+    branches:
+      - main
     tags:
       - '**[0-9]+.[0-9]+.[0-9]+*'
 
-# A new push to a pull request supersedes its running checks; release (tag)
-# runs each get their own group and are never cancelled.
+# A new push to a pull request or main supersedes its running checks; release
+# (tag) runs each get their own group and are never cancelled.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
 
 jobs:
   # Run 'dist plan' (or host) to determine what tasks we need to do
@@ -56,9 +62,9 @@ jobs:
     runs-on: "ubuntu-22.04"
     outputs:
       val: ${{ steps.plan.outputs.manifest }}
-      tag: ${{ !github.event.pull_request && github.ref_name || '' }}
-      tag-flag: ${{ !github.event.pull_request && format('--tag={0}', github.ref_name) || '' }}
-      publishing: ${{ !github.event.pull_request }}
+      tag: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      tag-flag: ${{ github.ref_type == 'tag' && format('--tag={0}', github.ref_name) || '' }}
+      publishing: ${{ github.ref_type == 'tag' }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -83,7 +89,7 @@ jobs:
       # but also really annoying to build CI around when it needs secrets to work right.)
       - id: plan
         run: |
-          dist ${{ (!github.event.pull_request && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
+          dist ${{ (github.ref_type == 'tag' && format('host --steps=create --tag={0}', github.ref_name)) || 'plan' }} --output-format=json > plan-dist-manifest.json
           echo "dist ran successfully"
           cat plan-dist-manifest.json
           echo "manifest=$(jq -c "." plan-dist-manifest.json)" >> "$GITHUB_OUTPUT"
@@ -222,7 +228,7 @@ jobs:
     name: build-linux-packages (${{ matrix.deb_arch }})
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' }}
+    if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
@@ -245,11 +251,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       # Restores the compiled dependencies, above all the native ggml build in
       # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
-      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      # ostt. Only main saves the cache; pull requests restore it. Releases
+      # (tags) skip it so every release is a clean build.
       - uses: Swatinem/rust-cache@v2
+        if: ${{ github.ref_type != 'tag' }}
         with:
           key: packages-${{ matrix.deb_arch }}
-          save-if: ${{ github.event_name == 'pull_request' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install cargo-deb
@@ -300,7 +308,7 @@ jobs:
     name: build-linux-cuda (x86_64, CUDA ${{ matrix.cuda_major }})
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' }}
+    if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-22.04
     strategy:
       fail-fast: false
@@ -347,11 +355,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       # Restores the compiled dependencies, above all the native ggml build in
       # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
-      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      # ostt. Only main saves the cache; pull requests restore it. Releases
+      # (tags) skip it so every release is a clean build.
       - uses: Swatinem/rust-cache@v2
+        if: ${{ github.ref_type != 'tag' }}
         with:
           key: ${{ matrix.variant }}
-          save-if: ${{ github.event_name == 'pull_request' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install CUDA toolkit
@@ -553,7 +563,7 @@ jobs:
     name: build-linux-vulkan (x86_64)
     needs:
       - plan
-    if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' }}
+    if: ${{ needs.plan.outputs.publishing == 'true' || github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-24.04
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -566,11 +576,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       # Restores the compiled dependencies, above all the native ggml build in
       # transcribe-cpp-sys, so a push that leaves Cargo.lock alone rebuilds only
-      # ostt. Release (tag) runs cannot see pull request caches and build clean.
+      # ostt. Only main saves the cache; pull requests restore it. Releases
+      # (tags) skip it so every release is a clean build.
       - uses: Swatinem/rust-cache@v2
+        if: ${{ github.ref_type != 'tag' }}
         with:
           key: vulkan
-          save-if: ${{ github.event_name == 'pull_request' }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev libssl-dev
       - name: Install Vulkan SDK
