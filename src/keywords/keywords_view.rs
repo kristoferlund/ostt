@@ -156,17 +156,24 @@ mod tests {
     use super::*;
     use ratatui::{backend::TestBackend, Terminal};
     use ratcn::runtime::EventResult;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn with_manager(test: impl FnOnce(&mut KeywordsManager)) {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time before unix epoch")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("ostt-keywords-view-test-{unique}"));
-        std::fs::create_dir_all(&dir).unwrap();
-        test(&mut KeywordsManager::new(&dir).unwrap());
-        let _ = std::fs::remove_dir_all(dir);
+        // Clock readings can repeat, so timestamps cannot isolate parallel tests.
+        let dir = tempfile::tempdir().unwrap();
+        test(&mut KeywordsManager::new(dir.path()).unwrap());
+    }
+
+    #[test]
+    fn managers_do_not_share_keywords_or_cleanup() {
+        with_manager(|first| {
+            first.save_keywords(&["one".into()]).unwrap();
+            with_manager(|second| {
+                assert!(second.load_keywords().unwrap().is_empty());
+                second.save_keywords(&["two".into()]).unwrap();
+                assert_eq!(first.load_keywords().unwrap(), ["one"]);
+            });
+            assert_eq!(first.load_keywords().unwrap(), ["one"]);
+        });
     }
 
     /// Adding from the form must persist the keyword and leave a fresh, closed
