@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.30 - 2026-10-21
+
 ### Added
 
 - Local Whisper models use saved `ostt keyword` terms as a glossary, so names and terms come out spelled right. A new `prompt` param adds context, e.g. `--param prompt="A Rust code review."`. A daemon started by an earlier version ignores both until `ostt daemon restart`.
