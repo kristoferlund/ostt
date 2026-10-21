@@ -5,6 +5,7 @@
 //! user's config directory, while credentials are stored with restricted permissions
 //! in the user's local data directory.
 
+pub(crate) mod edit;
 pub mod file;
 pub mod secrets;
 

@@ -63,6 +63,12 @@ async fn check_and_run_setup() -> Result<(), anyhow::Error> {
         }
     }
 
+    // A failed move leaves keywords.txt in place for the next run; it must not
+    // stop the command the user asked for.
+    if let Err(error) = crate::keywords::migrate_keywords_file(&crate::app_dirs::config_dir()) {
+        tracing::warn!("Could not move keywords.txt into ostt.toml: {error}");
+    }
+
     Ok(())
 }
 

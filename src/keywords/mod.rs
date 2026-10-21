@@ -2,9 +2,12 @@
 //!
 //! Provides storage and management of keywords used to improve transcription accuracy.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+use crate::config::TranscriptionSelectionConfig;
 
 pub mod keywords_view;
 
@@ -13,43 +16,53 @@ pub(crate) fn load_keywords() -> Result<Vec<String>> {
     keywords_manager.load_keywords()
 }
 
-/// Manages the keywords list stored in the config directory.
+/// Manages the keywords list in `[transcription].keywords` of `ostt.toml`.
 pub struct KeywordsManager {
-    /// Path to the keywords file
-    file_path: PathBuf,
+    /// Path to `ostt.toml`
+    config_path: PathBuf,
 }
 
 impl KeywordsManager {
     /// Creates a new keywords manager for the given config directory.
     ///
     /// # Arguments
-    /// * `config_dir` - Directory where the keywords file will be stored
+    /// * `config_dir` - Directory holding `ostt.toml`
     ///
     /// # Errors
     /// - If the config directory cannot be accessed
     pub fn new(config_dir: &Path) -> Result<Self> {
-        let file_path = config_dir.join("keywords.txt");
-        Ok(Self { file_path })
+        let config_path = config_dir.join("ostt.toml");
+        Ok(Self { config_path })
     }
 
-    /// Loads the list of keywords from the file.
+    /// Loads the list of keywords from the config file.
     ///
     /// # Errors
-    /// - If the file cannot be read
+    /// - If the file cannot be read or is not valid TOML
     pub fn load_keywords(&self) -> Result<Vec<String>> {
-        if !self.file_path.exists() {
-            return Ok(Vec::new());
+        // The same [transcription] parsing as the full config, so a key the
+        // config loader would reject is rejected here too.
+        #[derive(Deserialize)]
+        struct KeywordsOnly {
+            #[serde(default)]
+            transcription: TranscriptionSelectionConfig,
         }
-        let content = fs::read_to_string(&self.file_path)?;
-        let keywords = content
-            .lines()
-            .map(|line| line.trim().to_string())
-            .filter(|line| !line.is_empty())
-            .collect();
-        Ok(keywords)
+
+        let content = match fs::read_to_string(&self.config_path) {
+            Ok(content) => content,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => return Err(error.into()),
+        };
+        let config: KeywordsOnly = toml::from_str(&content).with_context(|| {
+            format!(
+                "failed to read keywords from {}",
+                self.config_path.display()
+            )
+        })?;
+        Ok(clean(config.transcription.keywords))
     }
 
-    /// Saves the list of keywords to the file.
+    /// Saves the list of keywords to the config file.
     ///
     /// # Arguments
     /// * `keywords` - List of keywords to save
@@ -57,11 +70,10 @@ impl KeywordsManager {
     /// # Errors
     /// - If the file cannot be written
     pub fn save_keywords(&self, keywords: &[String]) -> Result<()> {
-        let content = keywords.join("\n");
-        fs::write(&self.file_path, content)?;
-        Ok(())
+        crate::config::edit::edit_config_file_at(&self.config_path, |doc| {
+            crate::config::edit::set_keywords(doc, keywords)
+        })
     }
-
     /// Adds a new keyword to the list.
     ///
     /// # Arguments
@@ -92,5 +104,128 @@ impl KeywordsManager {
             self.save_keywords(&keywords)?;
         }
         Ok(())
+    }
+}
+
+/// Trimmed, without empty entries, in the user's order.
+fn clean(keywords: Vec<String>) -> Vec<String> {
+    keywords
+        .into_iter()
+        .map(|keyword| keyword.trim().to_string())
+        .filter(|keyword| !keyword.is_empty())
+        .collect()
+}
+
+/// Moves keywords from `keywords.txt`, used before 0.0.30, into `ostt.toml`
+/// and renames the old file to `keywords.txt.migrated`. If the config already
+/// has keywords, it wins and the old file is only renamed.
+pub(crate) fn migrate_keywords_file(config_dir: &Path) -> Result<()> {
+    let legacy_path = config_dir.join("keywords.txt");
+    if !legacy_path.exists() {
+        return Ok(());
+    }
+    let legacy = clean(
+        fs::read_to_string(&legacy_path)?
+            .lines()
+            .map(str::to_string)
+            .collect(),
+    );
+    let manager = KeywordsManager::new(config_dir)?;
+    if manager.load_keywords()?.is_empty() {
+        manager.save_keywords(&legacy)?;
+        tracing::info!(
+            "Moved {} keyword(s) from keywords.txt into [transcription].keywords in ostt.toml",
+            legacy.len()
+        );
+    } else if !legacy.is_empty() {
+        tracing::warn!("Ignoring keywords.txt: ostt.toml already has [transcription].keywords");
+    }
+    fs::rename(&legacy_path, config_dir.join("keywords.txt.migrated"))?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_config_dir(test: impl FnOnce(&Path)) {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ostt-keywords-test-{unique}"));
+        fs::create_dir_all(&dir).unwrap();
+        test(&dir);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    const CONFIG: &str = "[audio]\ndevice = \"default\" # USB mic\n\n[transcription]\nprovider = \"whisper\"\nmodel = \"base\"\n";
+
+    #[test]
+    fn keywords_round_trip_through_ostt_toml_without_touching_other_settings() {
+        with_config_dir(|dir| {
+            fs::write(dir.join("ostt.toml"), CONFIG).unwrap();
+            let mut manager = KeywordsManager::new(dir).unwrap();
+            manager.add_keyword("OSTT".to_string()).unwrap();
+            manager.add_keyword("Rödeby".to_string()).unwrap();
+            manager.add_keyword("OSTT".to_string()).unwrap();
+
+            assert_eq!(manager.load_keywords().unwrap(), ["OSTT", "Rödeby"]);
+            let content = fs::read_to_string(dir.join("ostt.toml")).unwrap();
+            assert!(content.starts_with(CONFIG), "{content}");
+            // The full config loader sees the same keywords.
+            let config: crate::config::OsttConfig = toml::from_str(&content).unwrap();
+            assert_eq!(config.transcription.keywords, ["OSTT", "Rödeby"]);
+        });
+    }
+
+    /// Upgrading must keep the keywords users saved in keywords.txt.
+    #[test]
+    fn keywords_txt_moves_into_the_config_once() {
+        with_config_dir(|dir| {
+            fs::write(dir.join("ostt.toml"), CONFIG).unwrap();
+            fs::write(dir.join("keywords.txt"), "OSTT\n\n  Kubernetes \n").unwrap();
+
+            migrate_keywords_file(dir).unwrap();
+
+            let manager = KeywordsManager::new(dir).unwrap();
+            assert_eq!(manager.load_keywords().unwrap(), ["OSTT", "Kubernetes"]);
+            assert!(!dir.join("keywords.txt").exists());
+            assert!(dir.join("keywords.txt.migrated").exists());
+            // A second run finds nothing to move.
+            migrate_keywords_file(dir).unwrap();
+            assert_eq!(manager.load_keywords().unwrap(), ["OSTT", "Kubernetes"]);
+        });
+    }
+
+    #[test]
+    fn keywords_already_in_the_config_win_over_keywords_txt() {
+        with_config_dir(|dir| {
+            fs::write(
+                dir.join("ostt.toml"),
+                format!("{CONFIG}keywords = [\"Rödeby\"]\n"),
+            )
+            .unwrap();
+            fs::write(dir.join("keywords.txt"), "OSTT\n").unwrap();
+
+            migrate_keywords_file(dir).unwrap();
+
+            let manager = KeywordsManager::new(dir).unwrap();
+            assert_eq!(manager.load_keywords().unwrap(), ["Rödeby"]);
+            assert!(dir.join("keywords.txt.migrated").exists());
+        });
+    }
+
+    /// A config that cannot be parsed must not lose keywords.txt: the move is
+    /// retried once the config is fixed.
+    #[test]
+    fn a_broken_config_leaves_keywords_txt_in_place() {
+        with_config_dir(|dir| {
+            fs::write(dir.join("ostt.toml"), "[audio\n").unwrap();
+            fs::write(dir.join("keywords.txt"), "OSTT\n").unwrap();
+
+            assert!(migrate_keywords_file(dir).is_err());
+            assert!(dir.join("keywords.txt").exists());
+        });
     }
 }
