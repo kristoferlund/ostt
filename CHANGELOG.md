@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The model screen no longer marks the daemon's model with a `run` badge; the footer shows it instead. Activating a local model while the daemon runs reloads it in the background, without freezing the screen.
 - A process action with an unknown or missing `type` is skipped with a warning instead of stopping the config from loading. Broken `bash` and `ai` actions are still reported as errors.
 
+### Fixed
+
+- `ostt model select` for an installed local model no longer fails with "not found" when the model registry was never cached, for example after copying a model file in by hand. It fetches the registry once and retries.
+
 ## 0.0.29 - 2026-10-20
 
 ### Added
