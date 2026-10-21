@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Selecting a model and saving replace rules no longer rewrite whole sections of `ostt.toml`. Only the changed values are written; comments, formatting and other keys are kept.
+
 ## 0.0.29 - 2026-10-20
 
 ### Added
