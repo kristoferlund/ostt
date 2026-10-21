@@ -146,6 +146,10 @@ pub struct LocalTranscriptionConfig {
     pub temperature: f32,
     /// No-speech probability threshold (0.6 = default)
     pub no_speech_thold: f32,
+    /// Custom terms, highest priority first (the saved `ostt keyword` terms)
+    pub vocabulary: Vec<String>,
+    /// Context text that steers transcription
+    pub prompt: Option<String>,
 }
 
 impl Default for LocalTranscriptionConfig {
@@ -155,6 +159,8 @@ impl Default for LocalTranscriptionConfig {
             no_context: true,
             temperature: 0.0,
             no_speech_thold: 0.6,
+            vocabulary: Vec::new(),
+            prompt: None,
         }
     }
 }

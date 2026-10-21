@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Local Whisper models use saved `ostt keyword` terms as a glossary, so names and terms come out spelled right. A new `prompt` param adds context, e.g. `--param prompt="A Rust code review."`. A daemon started by an earlier version ignores both until `ostt daemon restart`.
 - Press `s` on the `ostt model` screen to start or stop the local model daemon. The footer shows its state, loaded model and backend, for example `daemon on · parakeet-ultra · CUDA0`.
 - `ostt daemon status` shows the backend and device the daemon's model runs on, and daemon transcription logs name the backend, so GPU use can be checked without searching old logs.
 
