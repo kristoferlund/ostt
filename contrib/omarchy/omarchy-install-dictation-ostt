@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # omarchy:summary=Set up OSTT dictation
+# omarchy:requires-sudo=true
 # ostt:managed - written by `ostt omarchy setup`; changes are overwritten.
 
 set -e
