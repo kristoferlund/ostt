@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use super::TranscriptionConfig;
-use crate::config::{LocalTranscriptionConfig, ModelOptionValue};
+use crate::config::ModelOptionValue;
+use crate::transcription::engine::LocalTranscriptionConfig;
 use crate::transcription::{
     daemon_client::{probe_daemon, request_transcription},
     local_models::resolve_installed_model_path,

@@ -15,7 +15,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 use tokio::time::{sleep, timeout};
 
-use crate::config::LocalTranscriptionConfig;
+use crate::transcription::engine::LocalTranscriptionConfig;
 
 use super::local_models::daemon_socket_path;
 

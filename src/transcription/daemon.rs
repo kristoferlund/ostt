@@ -21,8 +21,8 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tokio::time::timeout;
 
-use crate::config::LocalTranscriptionConfig;
 use crate::transcription::api::local::{load_audio_for_whisper, validate_local_audio_format};
+use crate::transcription::engine::LocalTranscriptionConfig;
 use crate::transcription::local_models::{
     daemon_pid_path, daemon_socket_path, resolve_installed_model_path,
 };
