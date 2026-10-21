@@ -19,6 +19,7 @@ pub(crate) mod app_dirs;
 pub mod clipboard;
 pub mod commands;
 pub mod config;
+pub(crate) mod dictation;
 pub mod history;
 pub mod keywords;
 pub mod logging;

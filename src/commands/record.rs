@@ -167,7 +167,7 @@ fn show_recording_error(
     error
 }
 
-fn run_record_preflight(
+pub(crate) fn run_record_preflight(
     config: &OsttConfig,
     model_override: Option<SelectedModel>,
     param_overrides: &[String],
@@ -225,7 +225,7 @@ fn show_audio_startup_error(tui: &mut RecordingTui, error: anyhow::Error) -> any
     error
 }
 
-fn audio_startup_notification_body(error: &anyhow::Error) -> String {
+pub(crate) fn audio_startup_notification_body(error: &anyhow::Error) -> String {
     let searchable = error
         .chain()
         .map(ToString::to_string)
@@ -327,7 +327,7 @@ fn audio_startup_next_step(error_text: &str) -> Option<&'static str> {
     None
 }
 
-fn resolve_recording_output_format(
+pub(crate) fn resolve_recording_output_format(
     config: &OsttConfig,
     model_override: Option<&SelectedModel>,
 ) -> String {
@@ -381,7 +381,7 @@ fn finish_recording_with_output(
 /// up. A device can open successfully and never deliver a sample (a session
 /// manager that fails to link the stream, for example), which looks exactly
 /// like a silent room unless it is called out.
-const NO_SIGNAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+pub(crate) const NO_SIGNAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 fn run_recording_loop(
     tui: &mut RecordingTui,
@@ -452,7 +452,7 @@ fn run_recording_loop(
 }
 
 /// Builds the "device opened but delivers nothing" error.
-fn no_signal_error(device: &str) -> anyhow::Error {
+pub(crate) fn no_signal_error(device: &str) -> anyhow::Error {
     anyhow::anyhow!(
         "no audio data received from device '{device}' after {}s - the device opened but is not delivering samples",
         NO_SIGNAL_TIMEOUT.as_secs()

@@ -372,6 +372,59 @@ enum Commands {
         #[command(subcommand)]
         command: DaemonCommand,
     },
+    /// Dictate without a terminal, for desktop dictation keys
+    ///
+    /// `start` records from the configured microphone in the background,
+    /// `stop` transcribes with the active model and pastes into the focused
+    /// app, and `cancel` discards the recording. Each command returns
+    /// immediately; errors also appear as desktop notifications.
+    ///
+    /// Examples:
+    ///   ostt dictate toggle            # start, or stop and paste
+    ///   ostt dictate start             # bind to a key press (push-to-talk)
+    ///   ostt dictate stop              # bind to the key release
+    ///   ostt dictate status --json     # idle, recording, transcribing or error
+    Dictate {
+        #[command(subcommand)]
+        command: DictateCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum DictateCommand {
+    /// Start recording; does nothing if already recording
+    Start {
+        /// Run this processing action before pasting
+        #[arg(short = 'p', long = "process", value_name = "ACTION")]
+        process: Option<String>,
+    },
+    /// Stop recording, then transcribe and paste; does nothing when idle
+    Stop,
+    /// Start recording, or stop and paste if recording
+    Toggle {
+        /// Run this processing action before pasting
+        #[arg(short = 'p', long = "process", value_name = "ACTION")]
+        process: Option<String>,
+    },
+    /// Discard the recording or the pending transcription; does nothing when idle
+    Cancel,
+    /// Show whether dictation is idle, recording, transcribing or failed
+    Status {
+        /// Print the status as JSON
+        #[arg(long)]
+        json: bool,
+        /// Keep running and print the status whenever it changes
+        #[arg(long)]
+        follow: bool,
+    },
+    /// [Internal] Run a dictation job; started by `start` and `toggle`
+    #[command(hide = true)]
+    Run {
+        #[arg(long)]
+        job: String,
+        #[arg(long)]
+        process: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -599,6 +652,40 @@ pub async fn run() -> Result<(), anyhow::Error> {
     {
         logging::init_logging()?;
         return commands::daemon::handle_daemon_run(model_id.clone(), idle_timeout_secs).await;
+    }
+
+    // Dictation controls must stay fast and must work with a broken config:
+    // only the job itself reads the config.
+    if let Some(Commands::Dictate { command }) = &cli.command {
+        use commands::dictate::DictateAction;
+        let action = match command {
+            DictateCommand::Start { process } => DictateAction::Start {
+                process: process.as_deref(),
+            },
+            DictateCommand::Stop => DictateAction::Stop,
+            DictateCommand::Toggle { process } => DictateAction::Toggle {
+                process: process.as_deref(),
+            },
+            DictateCommand::Cancel => DictateAction::Cancel,
+            DictateCommand::Status { json, follow } => DictateAction::Status {
+                json: *json,
+                follow: *follow,
+            },
+            DictateCommand::Run { job, process } => {
+                logging::init_logging()?;
+                check_and_run_setup().await?;
+                let config_data = load_config()?;
+                return crate::dictation::run::run_job(
+                    &config_data,
+                    &crate::dictation::state::Paths::default_location(),
+                    job.clone(),
+                    process.clone(),
+                )
+                .await;
+            }
+        };
+        logging::init_logging()?;
+        return commands::dictate::handle_dictate(action).await;
     }
 
     match &cli.command {
@@ -897,7 +984,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 unreachable!("daemon run is handled before logging init")
             }
         },
-        Some(Commands::Completions { .. }) | Some(Commands::Logs { .. }) => {
+        Some(Commands::Completions { .. })
+        | Some(Commands::Logs { .. })
+        | Some(Commands::Dictate { .. }) => {
             unreachable!("These commands are handled earlier")
         }
     }
