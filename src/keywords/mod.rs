@@ -149,14 +149,10 @@ mod tests {
     use super::*;
 
     fn with_config_dir(test: impl FnOnce(&Path)) {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time")
-            .as_nanos();
-        let dir = std::env::temp_dir().join(format!("ostt-keywords-test-{unique}"));
-        fs::create_dir_all(&dir).unwrap();
-        test(&dir);
-        let _ = fs::remove_dir_all(dir);
+        // Clock readings can repeat (macOS has microsecond resolution), so a
+        // timestamp cannot isolate tests that run in parallel.
+        let dir = tempfile::tempdir().unwrap();
+        test(dir.path());
     }
 
     const CONFIG: &str = "[audio]\ndevice = \"default\" # USB mic\n\n[transcription]\nprovider = \"whisper\"\nmodel = \"base\"\n";
