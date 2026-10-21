@@ -38,6 +38,10 @@ struct Response {
     #[serde(default)]
     model_id: Option<String>,
     #[serde(default)]
+    backend: Option<String>,
+    #[serde(default)]
+    device: Option<String>,
+    #[serde(default)]
     text: Option<String>,
     #[serde(default)]
     error: Option<String>,
@@ -48,6 +52,10 @@ struct Response {
 /// Information returned by a successful daemon ping.
 pub struct DaemonInfo {
     pub model_id: String,
+    /// Backend the model runs on, e.g. "CUDA0" or "CPU". `None` from a daemon
+    /// started by an older OSTT.
+    pub backend: Option<String>,
+    pub device: Option<String>,
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
@@ -60,7 +68,28 @@ pub async fn probe_daemon() -> Option<DaemonInfo> {
         .ok()??;
     resp.ok.then_some(DaemonInfo {
         model_id: resp.model_id.unwrap_or_default(),
+        backend: resp.backend,
+        device: resp.device,
     })
+}
+
+/// Reload a running daemon with `model_id` so it follows the selected model.
+/// Does nothing when no daemon is running or it already has the model.
+pub async fn reload_if_running(model_id: &str) -> anyhow::Result<()> {
+    let Some(info) = probe_daemon().await else {
+        tracing::debug!(
+            "No local daemon running; selected model '{model_id}' will load in-process"
+        );
+        return Ok(());
+    };
+    if info.model_id == model_id {
+        return Ok(());
+    }
+    tracing::info!(
+        "Reloading local daemon after model selection: '{}' -> '{model_id}'",
+        info.model_id
+    );
+    ensure_daemon(model_id, None).await
 }
 
 /// Ensure the daemon is running and loaded with `model_id`.

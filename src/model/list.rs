@@ -125,19 +125,6 @@ fn model_row(entry: &ModelEntry, is_selected: bool) -> Text<'static> {
         spans.push(Span::raw(" "));
     }
 
-    if entry.is_daemon_loaded {
-        let (pill_fg, pill_bg) = if is_selected {
-            (Color::Black, Color::LightMagenta)
-        } else {
-            (Color::Black, Color::Magenta)
-        };
-        spans.push(Span::styled(
-            " run ",
-            Style::default().fg(pill_fg).bg(pill_bg),
-        ));
-        spans.push(Span::raw(" "));
-    }
-
     let details = if crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id) {
         let size = format_bytes(u64::from(entry.size_mb) * 1024 * 1024);
         if description.is_empty() {
@@ -195,7 +182,6 @@ mod tests {
             size_mb: 1,
             is_downloaded: false,
             is_active: false,
-            is_daemon_loaded: false,
             is_available_in_registry: true,
             languages: Vec::new(),
             url: String::new(),
