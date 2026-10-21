@@ -3,7 +3,7 @@
 //! Handles first-run setup by creating necessary config files.
 
 /// Embedded default configuration template.
-const DEFAULT_CONFIG: &str = include_str!("../../environments/ostt.toml");
+const DEFAULT_CONFIG: &str = include_str!("default-config.toml");
 
 /// Runs the setup process if the main config file is missing.
 ///
