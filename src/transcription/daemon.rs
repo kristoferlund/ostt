@@ -5,7 +5,7 @@
 //! 4-byte little-endian length prefix followed by UTF-8 JSON.
 //!
 //! Request variants (JSON `"type"` field):
-//!   `"ping"`       — returns `model_id`; used by clients to verify the daemon
+//!   `"ping"`       — returns `model_id`, `backend` and `device`; used by clients to verify the daemon
 //!   `"transcribe"` — expects `"audio_path"`; returns `"text"`
 //!   `"shutdown"`   — triggers a graceful shutdown
 //!
@@ -47,6 +47,11 @@ struct Response {
     ok: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     model_id: Option<String>,
+    /// Backend the model runs on, e.g. "CUDA0" or "CPU".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    backend: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    device: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,6 +177,8 @@ async fn handle_connection(
                 &Response {
                     ok: true,
                     model_id: Some(model_id.to_string()),
+                    backend: Some(model.backend()),
+                    device: Some(crate::transcription::engine::device_details(&model)),
                     text: None,
                     error: None,
                 },
@@ -185,6 +192,8 @@ async fn handle_connection(
                 &Response {
                     ok: true,
                     model_id: Some(model_id.to_string()),
+                    backend: None,
+                    device: None,
                     text: None,
                     error: None,
                 },
@@ -194,7 +203,8 @@ async fn handle_connection(
         }
         Request::Transcribe { audio_path, config } => {
             tracing::info!(
-                "daemon: transcription request received (model: {model_id}, audio: {audio_path})"
+                "daemon: transcription request received (model: {model_id}, backend: {}, audio: {audio_path})",
+                model.backend()
             );
             let path = PathBuf::from(&audio_path);
             let resp = match run_inference(&path, model, config).await {
@@ -203,6 +213,8 @@ async fn handle_connection(
                     Response {
                         ok: true,
                         model_id: Some(model_id.to_string()),
+                        backend: None,
+                        device: None,
                         text: Some(text),
                         error: None,
                     }
@@ -212,6 +224,8 @@ async fn handle_connection(
                     Response {
                         ok: false,
                         model_id: None,
+                        backend: None,
+                        device: None,
                         text: None,
                         error: Some(e.to_string()),
                     }

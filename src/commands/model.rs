@@ -225,7 +225,7 @@ pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
             local_models::fetch_registry().await.map(|_| ())
         })
         .await?;
-        reload_daemon_if_running(&selected.model_id).await?;
+        crate::transcription::daemon_client::reload_if_running(&selected.model_id).await?;
         println!(
             "Selected model: {}/{}",
             activated.provider_id, activated.model_id
@@ -380,16 +380,6 @@ async fn find_local_model_entry(
         .into_iter()
         .find(|entry| requested.matches(entry))
         .ok_or_else(|| anyhow::anyhow!("Unknown local model: {}", requested.label()))
-}
-
-async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
-    let Some(info) = crate::transcription::daemon_client::probe_daemon().await else {
-        return Ok(());
-    };
-    if info.model_id != model_id {
-        crate::transcription::daemon_client::ensure_daemon(model_id, None).await?;
-    }
-    Ok(())
 }
 
 fn print_download_progress(downloaded_bytes: u64, total_bytes: u64, speed_mbps: f64) {
