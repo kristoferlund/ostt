@@ -2,13 +2,8 @@
 //!
 //! Handles first-run setup by creating necessary config files.
 
-pub mod version;
-
 /// Embedded default configuration template.
 const DEFAULT_CONFIG: &str = include_str!("../../environments/ostt.toml");
-
-/// Current application version from Cargo.toml
-const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Runs the setup process if the main config file is missing.
 ///
@@ -21,11 +16,7 @@ pub fn run_setup() -> anyhow::Result<()> {
     let config_dir = crate::app_dirs::config_dir();
     std::fs::create_dir_all(&config_dir)?;
 
-    // Write main config file with version prefix
-    let config_path = config_dir.join("ostt.toml");
-    let config_with_version = format!(r#"config_version = "{}""#, CURRENT_VERSION);
-    let full_config = format!("{}\n{}", config_with_version, DEFAULT_CONFIG);
-    std::fs::write(&config_path, full_config)?;
+    std::fs::write(config_dir.join("ostt.toml"), DEFAULT_CONFIG)?;
 
     Ok(())
 }
@@ -37,9 +28,6 @@ mod tests {
 
     #[test]
     fn embedded_default_config_is_valid_toml() {
-        let config_with_version = format!(r#"config_version = "{}""#, CURRENT_VERSION);
-        let full_config = format!("{}\n{}", config_with_version, DEFAULT_CONFIG);
-
-        toml::from_str::<OsttConfig>(&full_config).unwrap();
+        toml::from_str::<OsttConfig>(DEFAULT_CONFIG).unwrap();
     }
 }

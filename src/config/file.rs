@@ -10,10 +10,6 @@ use std::path::PathBuf;
 
 use crate::transcription::{api, model};
 
-fn current_config_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
-}
-
 /// Visualization type for recording display.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
@@ -665,7 +661,6 @@ const DEPRECATED_TOP_LEVEL_SECTIONS: &[&str] = &["providers", "model_options"];
 /// Complete application configuration.
 #[derive(Debug)]
 pub struct OsttConfig {
-    pub config_version: String,
     pub audio: AudioConfig,
     pub transcription: TranscriptionSelectionConfig,
     pub provider_configs: ProviderConfigs,
@@ -720,7 +715,6 @@ impl OsttConfig {
     #[allow(dead_code)]
     pub(crate) fn default() -> Self {
         OsttConfig {
-            config_version: current_config_version(),
             audio: AudioConfig {
                 device: "default".to_string(),
                 peak_volume_threshold: default_peak_volume_threshold(),
@@ -741,10 +735,8 @@ impl OsttConfig {
 fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
     drop_deprecated_content(table);
 
-    let config_version = match table.remove("config_version") {
-        Some(value) => value.try_into()?,
-        None => current_config_version(),
-    };
+    // Written by OSTT before 0.0.30; it never drove a migration.
+    table.remove("config_version");
     let audio = take_required_section::<AudioConfig>(table, "audio")?;
     let transcription =
         take_optional_section::<TranscriptionSelectionConfig>(table, "transcription")?;
@@ -777,7 +769,6 @@ fn parse_config_table(table: &mut toml::Table) -> anyhow::Result<OsttConfig> {
     }
 
     let config = OsttConfig {
-        config_version,
         audio,
         transcription,
         provider_configs,
@@ -963,12 +954,11 @@ fn set_provider_setting(
 
 fn config_to_table(config: &OsttConfig) -> anyhow::Result<toml::Table> {
     let mut table = toml::Table::new();
-    table.insert(
-        "config_version".to_string(),
-        toml::Value::String(config.config_version.clone()),
-    );
     table.insert("audio".to_string(), toml::Value::try_from(&config.audio)?);
-    if config.transcription.provider.is_some() || config.transcription.model.is_some() {
+    if config.transcription.provider.is_some()
+        || config.transcription.model.is_some()
+        || !config.transcription.keywords.is_empty()
+    {
         table.insert(
             "transcription".to_string(),
             toml::Value::try_from(&config.transcription)?,
@@ -1434,6 +1424,26 @@ mod tests {
 
     fn parse_ostt_config(toml_str: &str) -> Result<OsttConfig, toml::de::Error> {
         toml::from_str(toml_str)
+    }
+
+    /// Configs written before 0.0.30 start with a `config_version` line.
+    #[test]
+    fn config_version_from_older_releases_is_accepted() {
+        let config =
+            parse_ostt_config("config_version = \"0.0.12\"\n[audio]\ndevice = \"default\"\n");
+        assert!(config.is_ok(), "{config:?}");
+    }
+
+    /// A full save must not drop keywords when no model is selected.
+    #[test]
+    fn full_save_keeps_keywords_without_a_selected_model() {
+        let mut config = OsttConfig::default();
+        config.transcription.keywords = vec!["OSTT".to_string()];
+        let saved = toml::to_string(&config_to_table(&config).unwrap()).unwrap();
+        assert_eq!(
+            parse_ostt_config(&saved).unwrap().transcription.keywords,
+            ["OSTT"]
+        );
     }
 
     // ═══════════════════════════════════════════════════════════════════

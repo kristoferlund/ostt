@@ -51,7 +51,7 @@ pub(super) async fn transcribe(
     audio_path: &Path,
 ) -> anyhow::Result<String> {
     validate_local_audio_format(audio_path)?;
-    let mut local_config = config.local_config().cloned().unwrap_or_default();
+    let mut local_config = LocalTranscriptionConfig::default();
     apply_params(config, &mut local_config);
 
     if let Some(text) = try_daemon_transcription(&config.model_id, audio_path, &local_config).await
