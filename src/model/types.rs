@@ -14,8 +14,6 @@ pub(crate) struct ModelEntry {
     pub size_mb: u32,
     pub is_downloaded: bool,
     pub is_active: bool,
-    /// True when the local model daemon is running and has this model loaded.
-    pub is_daemon_loaded: bool,
     pub is_available_in_registry: bool,
     pub languages: Vec<String>,
     pub url: String,
@@ -94,8 +92,68 @@ pub(crate) struct State {
     pub id_input: InputState,
     pub name_input: InputState,
     pub toasts: ToasterState<'static>,
-    /// Model ID currently loaded in the daemon, if any.
-    pub daemon_model_id: Option<String>,
+    pub daemon: DaemonStatus,
+}
+
+/// The local model daemon as the footer shows it. A running daemon follows the
+/// selected local model, so its state belongs to the screen, not to a row.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum DaemonStatus {
+    Off,
+    Starting,
+    Stopping,
+    On {
+        model_id: String,
+        backend: Option<String>,
+    },
+}
+
+/// What the daemon key does in the current state.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DaemonToggle {
+    Start(String),
+    Stop,
+    /// A start or stop is already in progress.
+    Busy,
+    /// The daemon hosts local models only.
+    NoLocalModel,
+}
+
+impl DaemonStatus {
+    pub(crate) fn from_probe(
+        info: Option<&crate::transcription::daemon_client::DaemonInfo>,
+    ) -> Self {
+        match info {
+            Some(info) => Self::On {
+                model_id: info.model_id.clone(),
+                backend: info.backend.clone(),
+            },
+            None => Self::Off,
+        }
+    }
+
+    pub(crate) fn loaded_model_id(&self) -> Option<&str> {
+        match self {
+            Self::On { model_id, .. } => Some(model_id),
+            _ => None,
+        }
+    }
+
+    pub(crate) fn label(&self) -> String {
+        match self {
+            Self::Off => "daemon off".to_string(),
+            Self::Starting => "daemon starting…".to_string(),
+            Self::Stopping => "daemon stopping…".to_string(),
+            Self::On {
+                model_id,
+                backend: Some(backend),
+            } => format!("daemon on · {model_id} · {backend}"),
+            Self::On {
+                model_id,
+                backend: None,
+            } => format!("daemon on · {model_id}"),
+        }
+    }
 }
 
 impl State {
@@ -113,7 +171,7 @@ impl State {
             id_input: InputState::default(),
             name_input: InputState::default(),
             toasts: ToasterState::default(),
-            daemon_model_id: None,
+            daemon: DaemonStatus::Off,
         }
     }
 
@@ -135,12 +193,35 @@ impl State {
         session::toast(&mut self.toasts, toast);
     }
 
-    /// Update cached daemon status and reflect it on each entry's `is_daemon_loaded`.
-    pub(crate) fn update_daemon_status(&mut self, loaded_model_id: Option<&str>) {
-        self.daemon_model_id = loaded_model_id.map(str::to_owned);
-        for entry in &mut self.entries {
-            entry.is_daemon_loaded = loaded_model_id == Some(entry.id.as_str());
+    pub(crate) fn daemon_toggle(&self) -> DaemonToggle {
+        match &self.daemon {
+            DaemonStatus::Starting | DaemonStatus::Stopping => DaemonToggle::Busy,
+            DaemonStatus::On { .. } => DaemonToggle::Stop,
+            DaemonStatus::Off => match self.active_local_model_id() {
+                Some(model_id) => DaemonToggle::Start(model_id.to_string()),
+                None => DaemonToggle::NoLocalModel,
+            },
         }
+    }
+
+    /// The model a running daemon should reload to follow the selection.
+    /// Selecting a cloud model leaves the daemon loaded, so switching back to
+    /// local is instant.
+    pub(crate) fn daemon_follow_target(&self) -> Option<String> {
+        let loaded = self.daemon.loaded_model_id()?;
+        self.active_local_model_id()
+            .filter(|active| *active != loaded)
+            .map(str::to_string)
+    }
+
+    fn active_local_model_id(&self) -> Option<&str> {
+        self.entries
+            .iter()
+            .find(|entry| entry.is_active)
+            .filter(|entry| {
+                crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id)
+            })
+            .map(|entry| entry.id.as_str())
     }
 
     pub(crate) fn selected_entry(&self) -> Option<&ModelEntry> {
@@ -186,7 +267,6 @@ impl State {
             local_state,
             registry,
             selected_model.as_ref(),
-            self.daemon_model_id.as_deref(),
         );
         clamp_selection(&mut self.selected, self.entries.len());
         Ok(())

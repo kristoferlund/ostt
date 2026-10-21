@@ -109,6 +109,12 @@ pub async fn handle_daemon_status(config: &OsttConfig) -> anyhow::Result<()> {
             } else {
                 println!("Model:   {}", d.model_id);
             }
+            if let Some(backend) = &d.backend {
+                println!(
+                    "Backend: {backend} ({})",
+                    d.device.as_deref().unwrap_or("unknown device")
+                );
+            }
         }
         None => {
             println!("Status:  stopped");

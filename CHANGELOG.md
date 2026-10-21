@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Press `s` on the `ostt model` screen to start or stop the local model daemon. The footer shows its state, loaded model and backend, for example `daemon on · parakeet-ultra · CUDA0`.
+- `ostt daemon status` shows the backend and device the daemon's model runs on, and daemon transcription logs name the backend, so GPU use can be checked without searching old logs.
+
+### Changed
+
+- The model screen no longer marks the daemon's model with a `run` badge; the footer shows it instead. Activating a local model while the daemon runs reloads it in the background, without freezing the screen.
+
 ## 0.0.29 - 2026-10-20
 
 ### Added
