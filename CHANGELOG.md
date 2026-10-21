@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The model screen no longer marks the daemon's model with a `run` badge; the footer shows it instead. Activating a local model while the daemon runs reloads it in the background, without freezing the screen.
+- A process action with an unknown or missing `type` is skipped with a warning instead of stopping the config from loading. Broken `bash` and `ai` actions are still reported as errors.
 
 ## 0.0.29 - 2026-10-20
 

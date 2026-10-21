@@ -528,12 +528,28 @@ impl<'de> Deserialize<'de> for ProcessConfig {
             #[serde(default)]
             default_model: Option<String>,
             #[serde(default)]
-            actions: IndexMap<String, ProcessActionConfig>,
+            actions: IndexMap<String, toml::Value>,
         }
 
         let raw = RawProcessConfig::deserialize(deserializer)?;
-        let actions = raw
-            .actions
+        let mut parsed = Vec::with_capacity(raw.actions.len());
+        for (id, value) in raw.actions {
+            // An action type this OSTT version does not know (for example one
+            // from a newer release) is skipped so the rest of the config loads.
+            let action_type = value.get("type").and_then(toml::Value::as_str);
+            if !matches!(action_type, Some("bash" | "ai")) {
+                tracing::warn!(
+                    "Ignoring process action '{id}': unknown type {}. Expected \"bash\" or \"ai\".",
+                    action_type.map_or("(missing)".to_string(), |t| format!("\"{t}\""))
+                );
+                continue;
+            }
+            let action: ProcessActionConfig = value
+                .try_into()
+                .map_err(|e| serde::de::Error::custom(format!("process action '{id}': {e}")))?;
+            parsed.push((id, action));
+        }
+        let actions = parsed
             .into_iter()
             .map(|(id, action)| {
                 let mut details = action.details;
@@ -2188,6 +2204,56 @@ mod tests {
 
         let config = parse_ostt_config(toml_str).unwrap();
         assert!(config.process.actions.is_empty());
+    }
+
+    #[test]
+    fn process_action_with_unknown_type_is_skipped() {
+        // A newer OSTT may add action types; an older binary must still load
+        // the config and keep the actions it can run.
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [process.actions.future]
+            name = "Future"
+            type = "webhook"
+            url = "https://example.com"
+
+            [process.actions.untyped]
+            name = "Untyped"
+            command = "cat"
+
+            [process.actions.clean]
+            name = "Clean up"
+            type = "bash"
+            command = "cat"
+        "#;
+
+        let config = parse_ostt_config(toml_str).unwrap();
+        let ids: Vec<_> = config
+            .process
+            .actions
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect();
+        assert_eq!(ids, ["clean"]);
+    }
+
+    #[test]
+    fn process_action_of_known_type_with_missing_field_still_fails() {
+        // Skipping is only for types OSTT cannot run; a broken bash action is
+        // a user mistake that should be reported, not silently dropped.
+        let toml_str = r#"
+            [audio]
+            device = "default"
+
+            [process.actions.clean]
+            name = "Clean up"
+            type = "bash"
+        "#;
+
+        let err = parse_ostt_config(toml_str).unwrap_err().to_string();
+        assert!(err.contains("clean"), "{err}");
     }
 
     #[test]
