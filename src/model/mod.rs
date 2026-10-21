@@ -18,7 +18,7 @@ use crate::transcription::local_models::{
 use crate::transcription::{self, TranscriptionProvider};
 use crate::ui::session::{self, Chrome, Routed};
 
-use types::{DownloadState, Mode, ModelEntry, RunningDownload, State};
+use types::{DaemonStatus, DaemonToggle, DownloadState, Mode, ModelEntry, RunningDownload, State};
 
 enum Msg {
     Focus(FocusState),
@@ -33,6 +33,7 @@ enum Msg {
     Info,
     Custom,
     Delete,
+    ToggleDaemon,
 }
 
 fn runtime() -> Ratcn<State, Msg> {
@@ -52,9 +53,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
         crate::transcription::local_models::load_registry_entries().unwrap_or_default()
     });
     let selected_model = config::get_selected_model_entry()?;
-    let daemon_model_id = transcription::daemon_client::probe_daemon()
-        .await
-        .map(|daemon| daemon.model_id);
+    let daemon = transcription::daemon_client::probe_daemon().await;
 
     let mut state = State::new(build_model_entries(
         &ostt_config,
@@ -62,9 +61,8 @@ pub(crate) async fn run() -> anyhow::Result<()> {
         &local_state,
         &registry,
         selected_model.as_ref(),
-        daemon_model_id.as_deref(),
     ));
-    state.daemon_model_id = daemon_model_id;
+    state.daemon = DaemonStatus::from_probe(daemon.as_ref());
     if registry.is_empty() {
         state.set_mode(Mode::Error {
             message: "Could not load remote registry; custom URL entry is still available with [c]"
@@ -78,6 +76,7 @@ pub(crate) async fn run() -> anyhow::Result<()> {
         state,
         registry,
         download: None,
+        daemon_task: None,
     }
     .run()
     .await
@@ -89,6 +88,9 @@ struct ModelsView {
     state: State,
     registry: Vec<RegistryEntry>,
     download: Option<RunningDownload>,
+    /// Starts or stops the daemon without blocking the screen; a large model
+    /// can take several seconds to load.
+    daemon_task: Option<tokio::task::JoinHandle<anyhow::Result<()>>>,
 }
 
 impl ModelsView {
@@ -96,11 +98,11 @@ impl ModelsView {
         let mut last_daemon_probe = Instant::now();
         loop {
             self.finish_download().await?;
-            // Re-probe to pick up a daemon that started or stopped in the background.
-            if last_daemon_probe.elapsed() >= Duration::from_secs(2) {
+            self.finish_daemon_task().await?;
+            // Re-probe to pick up a daemon started or stopped outside this screen.
+            if self.daemon_task.is_none() && last_daemon_probe.elapsed() >= Duration::from_secs(2) {
                 let daemon = transcription::daemon_client::probe_daemon().await;
-                self.state
-                    .update_daemon_status(daemon.as_ref().map(|d| d.model_id.as_str()));
+                self.state.daemon = DaemonStatus::from_probe(daemon.as_ref());
                 last_daemon_probe = Instant::now();
             }
             self.state.toasts.prune_expired(session::now());
@@ -153,7 +155,7 @@ impl ModelsView {
                 Mode::Info { entry } => Some(entry.name.as_str()),
                 _ => None,
             },
-            footer: footer(&state.mode),
+            footer: &footer(state),
             toasts: Some(&state.toasts),
         };
         session::draw(
@@ -181,6 +183,7 @@ impl ModelsView {
             Msg::Info => state.show_info(),
             Msg::Custom => state.show_custom_url(),
             Msg::Delete => state.confirm_delete(),
+            Msg::ToggleDaemon => self.toggle_daemon(),
             Msg::Accept => match state.mode.clone() {
                 Mode::CustomUrl => self.resolve_custom_url().await,
                 Mode::CustomDetails { resolved_entry } => {
@@ -223,12 +226,13 @@ impl ModelsView {
             return Ok(());
         }
 
-        match activate_entry(&entry).await {
+        match activate_entry(&entry) {
             Ok(()) => {
                 tracing::info!("Activated local model '{}'", entry.id);
                 self.state
                     .toast(Toast::success(format!("Activated {}", entry.name)));
                 self.state.refresh(&load_state(), &self.registry)?;
+                self.follow_selection_with_daemon();
             }
             Err(error) => {
                 tracing::error!("Failed to activate local model '{}': {}", entry.id, error);
@@ -324,8 +328,9 @@ impl ModelsView {
         match delete_entry(entry) {
             Ok(()) => {
                 tracing::info!("Deleted local model '{}'", entry.id);
-                if entry.is_daemon_loaded {
-                    stop_daemon_for_deleted_model(&entry.id);
+                if self.state.daemon.loaded_model_id() == Some(entry.id.as_str()) {
+                    tracing::info!("Stopping daemon after deleting its model '{}'", entry.id);
+                    self.stop_daemon();
                 }
                 self.state
                     .toast(Toast::success(format!("Deleted {}", entry.name)));
@@ -338,6 +343,63 @@ impl ModelsView {
                 });
             }
         }
+        Ok(())
+    }
+
+    fn toggle_daemon(&mut self) {
+        match self.state.daemon_toggle() {
+            DaemonToggle::Start(model_id) => self.start_daemon(model_id),
+            DaemonToggle::Stop => self.stop_daemon(),
+            DaemonToggle::Busy => {}
+            DaemonToggle::NoLocalModel => self
+                .state
+                .toast(Toast::error("Select a local model to run the daemon")),
+        }
+    }
+
+    fn follow_selection_with_daemon(&mut self) {
+        if let Some(model_id) = self.state.daemon_follow_target() {
+            self.start_daemon(model_id);
+        }
+    }
+
+    fn start_daemon(&mut self, model_id: String) {
+        tracing::info!("Starting daemon for model '{model_id}' from the model screen");
+        self.state.daemon = DaemonStatus::Starting;
+        self.daemon_task = Some(tokio::spawn(async move {
+            transcription::daemon_client::ensure_daemon(&model_id, None).await
+        }));
+    }
+
+    fn stop_daemon(&mut self) {
+        tracing::info!("Stopping daemon from the model screen");
+        self.state.daemon = DaemonStatus::Stopping;
+        self.daemon_task = Some(tokio::spawn(transcription::daemon_client::shutdown_daemon()));
+    }
+
+    async fn finish_daemon_task(&mut self) -> anyhow::Result<()> {
+        if !self
+            .daemon_task
+            .as_ref()
+            .is_some_and(|task| task.is_finished())
+        {
+            return Ok(());
+        }
+        let task = self.daemon_task.take().expect("finished daemon task");
+        if let Err(error) = task.await? {
+            tracing::error!("Daemon start/stop failed: {error}");
+            self.state.toast(Toast::error(error.to_string()));
+        }
+        // A stopping daemon can still accept a probe for a moment, so trust the request.
+        self.state.daemon = match self.state.daemon {
+            DaemonStatus::Stopping => DaemonStatus::Off,
+            _ => {
+                let daemon = transcription::daemon_client::probe_daemon().await;
+                DaemonStatus::from_probe(daemon.as_ref())
+            }
+        };
+        // The selection may have changed while the daemon was loading.
+        self.follow_selection_with_daemon();
         Ok(())
     }
 }
@@ -365,9 +427,19 @@ fn custom_model_error(entries: &[ModelEntry], id: &str, name: &str) -> Option<St
     }
 }
 
-fn footer(mode: &Mode) -> &'static str {
+fn footer(state: &State) -> String {
+    match state.mode {
+        // Status first, so a narrow terminal cuts the key hints instead.
+        Mode::Browse => format!("{} │ {}", state.daemon.label(), footer_keys(&state.mode)),
+        _ => footer_keys(&state.mode).to_string(),
+    }
+}
+
+fn footer_keys(mode: &Mode) -> &'static str {
     match mode {
-        Mode::Browse => "↑↓ nav, ↵ activate/download, x/del delete, i info, c custom, esc/q back",
+        Mode::Browse => {
+            "↑↓ nav, ↵ activate/download, s daemon, x/del delete, i info, c custom, esc/q back"
+        }
         Mode::Info { .. } => "esc/q back",
         Mode::CustomUrl => "↵ next, esc cancel",
         Mode::CustomDetails { .. } => "↵ download, tab switch, esc cancel",
@@ -401,13 +473,14 @@ fn shortcut(mode: &Mode, event: &Event) -> Option<Msg> {
     match (mode, key.code) {
         (Mode::Browse, KeyCode::Char('i')) => Some(Msg::Info),
         (Mode::Browse, KeyCode::Char('c')) => Some(Msg::Custom),
+        (Mode::Browse, KeyCode::Char('s')) => Some(Msg::ToggleDaemon),
         (Mode::Browse, KeyCode::Char('x' | 'd') | KeyCode::Delete) => Some(Msg::Delete),
         (Mode::Info { .. }, _) if session::is_cancel(event) => Some(Msg::Dismiss),
         _ => None,
     }
 }
 
-async fn activate_entry(entry: &ModelEntry) -> anyhow::Result<()> {
+fn activate_entry(entry: &ModelEntry) -> anyhow::Result<()> {
     if !crate::transcription::TranscriptionProvider::is_local_id(&entry.provider_id) {
         config::save_selected_model(&entry.provider_id, &entry.id)?;
         return Ok(());
@@ -415,8 +488,7 @@ async fn activate_entry(entry: &ModelEntry) -> anyhow::Result<()> {
     if !model_destination(&entry.registry_entry()).exists() {
         anyhow::bail!("Model file not found");
     }
-    config::save_selected_model(&entry.provider_id, &entry.id)?;
-    reload_daemon_if_running(&entry.id).await
+    config::save_selected_model(&entry.provider_id, &entry.id)
 }
 
 fn build_model_entries(
@@ -425,24 +497,18 @@ fn build_model_entries(
     local_state: &LocalModelState,
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
-    daemon_model_id: Option<&str>,
 ) -> Vec<ModelEntry> {
     let mut entries = Vec::new();
     entries.extend(build_custom_model_entries(
         config,
         local_state,
         selected_model,
-        daemon_model_id,
     ));
     entries.extend(build_cloud_model_entries(
         authorized_provider_ids,
         selected_model,
     ));
-    entries.extend(build_local_model_entries(
-        registry,
-        selected_model,
-        daemon_model_id,
-    ));
+    entries.extend(build_local_model_entries(registry, selected_model));
     entries
 }
 
@@ -450,14 +516,11 @@ fn build_custom_model_entries(
     config: &config::OsttConfig,
     local_state: &LocalModelState,
     selected_model: Option<&SelectedModel>,
-    daemon_model_id: Option<&str>,
 ) -> Vec<ModelEntry> {
     let mut entries: Vec<ModelEntry> = local_state
         .custom_models
         .iter()
-        .map(|entry| {
-            local_model_entry_from_registry_entry(entry, &[], selected_model, daemon_model_id)
-        })
+        .map(|entry| local_model_entry_from_registry_entry(entry, &[], selected_model))
         .map(|mut entry| {
             entry.group_id = Some("Custom models".to_string());
             entry
@@ -498,7 +561,6 @@ fn build_custom_model_entries(
                         selected.provider_id == provider_id && selected.model_id == *profile_id
                     })
                     .unwrap_or(false),
-                is_daemon_loaded: false,
                 is_available_in_registry: false,
                 languages: vec!["Configured".to_string()],
                 url: String::new(),
@@ -541,7 +603,6 @@ fn build_cloud_model_entries(
                     selected.provider_id == model.provider_id && selected.model_id == model.model_id
                 })
                 .unwrap_or(false),
-            is_daemon_loaded: false,
             is_available_in_registry: false,
             languages: model
                 .languages
@@ -560,13 +621,10 @@ fn build_cloud_model_entries(
 fn build_local_model_entries(
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
-    daemon_model_id: Option<&str>,
 ) -> Vec<ModelEntry> {
     registry
         .iter()
-        .map(|entry| {
-            local_model_entry_from_registry_entry(entry, registry, selected_model, daemon_model_id)
-        })
+        .map(|entry| local_model_entry_from_registry_entry(entry, registry, selected_model))
         .collect()
 }
 
@@ -574,13 +632,11 @@ fn local_model_entry_from_registry_entry(
     entry: &RegistryEntry,
     registry: &[RegistryEntry],
     selected_model: Option<&SelectedModel>,
-    daemon_model_id: Option<&str>,
 ) -> ModelEntry {
     let is_downloaded = model_destination(entry).exists();
     let is_active = selected_model
         .map(|selected| selected.provider_id == entry.provider_id && selected.model_id == entry.id)
         .unwrap_or(false);
-    let is_daemon_loaded = daemon_model_id == Some(entry.id.as_str());
 
     ModelEntry {
         id: entry.id.clone(),
@@ -590,7 +646,6 @@ fn local_model_entry_from_registry_entry(
         size_mb: entry.size_mb,
         is_downloaded,
         is_active,
-        is_daemon_loaded,
         is_available_in_registry: registry
             .iter()
             .any(|registry_entry| registry_entry.id == entry.id),
@@ -604,27 +659,6 @@ fn local_model_entry_from_registry_entry(
             .clone()
             .or_else(|| Some("Local models".to_string())),
     }
-}
-
-async fn reload_daemon_if_running(model_id: &str) -> anyhow::Result<()> {
-    let Some(info) = crate::transcription::daemon_client::probe_daemon().await else {
-        tracing::debug!(
-            "No local daemon running; selected model '{model_id}' will load in-process"
-        );
-        return Ok(());
-    };
-
-    if info.model_id == model_id {
-        tracing::info!("Local daemon already loaded with activated model '{model_id}'");
-        return Ok(());
-    }
-
-    tracing::info!(
-        "Reloading local daemon after model activation: '{}' -> '{}'",
-        info.model_id,
-        model_id
-    );
-    crate::transcription::daemon_client::ensure_daemon(model_id, None).await
 }
 
 fn spawn_download(entry: RegistryEntry, is_custom: bool) -> RunningDownload {
@@ -725,20 +759,6 @@ fn sync_download_progress(state: &mut State, running: &RunningDownload) {
     }
 }
 
-fn stop_daemon_for_deleted_model(model_id: &str) {
-    #[cfg(unix)]
-    {
-        let model_id = model_id.to_string();
-        tokio::spawn(async move {
-            if let Err(e) = crate::transcription::daemon_client::shutdown_daemon().await {
-                tracing::warn!("could not stop daemon after deleting model '{model_id}': {e}");
-            } else {
-                tracing::info!("daemon stopped after deleting model '{model_id}'");
-            }
-        });
-    }
-}
-
 fn delete_entry(entry: &ModelEntry) -> anyhow::Result<()> {
     if delete_model(&entry.id).is_ok() {
         return Ok(());
@@ -836,7 +856,6 @@ mod tests {
                 size_mb: 0,
                 is_downloaded: true,
                 is_active: false,
-                is_daemon_loaded: false,
                 is_available_in_registry: false,
                 languages: Vec::new(),
                 url: String::new(),
@@ -853,7 +872,6 @@ mod tests {
                 size_mb: 0,
                 is_downloaded: true,
                 is_active: true,
-                is_daemon_loaded: false,
                 is_available_in_registry: true,
                 languages: Vec::new(),
                 url: String::new(),
@@ -889,7 +907,7 @@ mod tests {
             };
             let config = config::OsttConfig::default();
 
-            let entries = build_model_entries(&config, &[], &state, &registry, None, None);
+            let entries = build_model_entries(&config, &[], &state, &registry, None);
 
             assert_eq!(entries.len(), 2);
             assert_eq!(entries[0].id, "custom");
@@ -917,7 +935,6 @@ mod tests {
                 &LocalModelState::default(),
                 &[],
                 None,
-                None,
             );
 
             assert!(entries.iter().any(|entry| {
@@ -940,7 +957,7 @@ mod tests {
                 model_id: "turbo".to_string(),
             };
 
-            let entries = build_local_model_entries(&registry, Some(&selected), None);
+            let entries = build_local_model_entries(&registry, Some(&selected));
 
             assert_eq!(entries.len(), 1);
             assert!(entries[0].is_downloaded);
@@ -958,7 +975,6 @@ mod tests {
             size_mb: 1,
             is_downloaded: false,
             is_active: false,
-            is_daemon_loaded: false,
             is_available_in_registry: true,
             languages: Vec::new(),
             url: "https://example.com/missing.bin".to_string(),
@@ -990,7 +1006,6 @@ mod tests {
             size_mb: 1,
             is_downloaded: true,
             is_active: false,
-            is_daemon_loaded: false,
             is_available_in_registry: true,
             languages: Vec::new(),
             url: String::new(),
@@ -1003,6 +1018,86 @@ mod tests {
 
     fn key(code: KeyCode) -> Event {
         Event::Key(code.into())
+    }
+
+    /// Entries `local-a`, `local-b` and `cloud`, with `active` selected.
+    fn daemon_state(active: &str, daemon: DaemonStatus) -> State {
+        let mut cloud = entry("cloud");
+        cloud.provider_id = "openai".to_string();
+        let mut entries = vec![entry("local-a"), entry("local-b"), cloud];
+        for entry in &mut entries {
+            entry.is_active = entry.id == active;
+        }
+        let mut state = State::new(entries);
+        state.daemon = daemon;
+        state
+    }
+
+    fn daemon_on(model_id: &str) -> DaemonStatus {
+        DaemonStatus::On {
+            model_id: model_id.to_string(),
+            backend: Some("CUDA0".to_string()),
+        }
+    }
+
+    /// The daemon is turned on once and then follows the selected local model,
+    /// so users never re-enable it after switching models.
+    #[test]
+    fn running_daemon_follows_local_selection_but_keeps_its_model_for_cloud() {
+        assert_eq!(
+            daemon_state("local-b", daemon_on("local-a")).daemon_follow_target(),
+            Some("local-b".to_string())
+        );
+        assert_eq!(
+            daemon_state("local-a", daemon_on("local-a")).daemon_follow_target(),
+            None
+        );
+        // Keeping the local model loaded makes switching back to it instant.
+        assert_eq!(
+            daemon_state("cloud", daemon_on("local-a")).daemon_follow_target(),
+            None
+        );
+        // A stopped daemon stays stopped; selecting a model never starts one.
+        assert_eq!(
+            daemon_state("local-b", DaemonStatus::Off).daemon_follow_target(),
+            None
+        );
+    }
+
+    #[test]
+    fn daemon_key_starts_the_selected_local_model_or_stops_the_daemon() {
+        assert_eq!(
+            daemon_state("local-b", DaemonStatus::Off).daemon_toggle(),
+            DaemonToggle::Start("local-b".to_string())
+        );
+        assert_eq!(
+            daemon_state("cloud", daemon_on("local-a")).daemon_toggle(),
+            DaemonToggle::Stop
+        );
+        // The daemon only hosts local models.
+        assert_eq!(
+            daemon_state("cloud", DaemonStatus::Off).daemon_toggle(),
+            DaemonToggle::NoLocalModel
+        );
+        // A second press while loading must not spawn a second daemon.
+        assert_eq!(
+            daemon_state("local-a", DaemonStatus::Starting).daemon_toggle(),
+            DaemonToggle::Busy
+        );
+    }
+
+    /// The footer is where users check that the daemon runs on the GPU, and
+    /// the status comes first so a narrow terminal cuts key hints, not it.
+    #[test]
+    fn browse_footer_leads_with_daemon_model_and_backend() {
+        let state = daemon_state("cloud", daemon_on("local-a"));
+        assert!(
+            footer(&state).starts_with("daemon on · local-a · CUDA0 │ "),
+            "{}",
+            footer(&state)
+        );
+        let state = daemon_state("local-a", DaemonStatus::Off);
+        assert!(footer(&state).starts_with("daemon off │ "));
     }
 
     fn downloading() -> Mode {
@@ -1082,6 +1177,9 @@ mod tests {
                     ("↵", &[Enter], |h| {
                         matches!(h, Handled::Msg(Msg::Activate(_)))
                     }),
+                    ("s", &[Char('s')], |h| {
+                        matches!(h, Handled::Msg(Msg::ToggleDaemon))
+                    }),
                     ("x/del", &[Char('x'), Delete], |h| {
                         matches!(h, Handled::Msg(Msg::Delete))
                     }),
@@ -1133,7 +1231,7 @@ mod tests {
             ),
         ];
         for (mode, cases) in modes {
-            let advertised: Vec<_> = footer(&mode)
+            let advertised: Vec<_> = footer_keys(&mode)
                 .split(", ")
                 .map(|item| item.split(' ').next().unwrap())
                 .collect();
@@ -1210,7 +1308,6 @@ mod tests {
             &LocalModelState::default(),
             &[],
             None,
-            None,
         );
 
         assert!(entries.iter().any(|entry| entry.provider_id == "openai"));
@@ -1231,7 +1328,6 @@ mod tests {
             &LocalModelState::default(),
             &[],
             Some(&selected),
-            None,
         );
 
         let active_entries: Vec<_> = entries.iter().filter(|entry| entry.is_active).collect();
@@ -1264,7 +1360,6 @@ mod tests {
             &LocalModelState::default(),
             &[],
             Some(&selected),
-            None,
         );
 
         assert_eq!(entries.len(), 1);
