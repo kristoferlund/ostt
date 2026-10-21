@@ -2,12 +2,20 @@ name: macOS checks
 
 # Release builds for macOS only run when publishing, so pull requests would not
 # otherwise compile the Metal backend or the Intel build at all.
+# Pushes to main save the build cache that pull requests restore.
 on:
   pull_request:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build-and-smoke-test:
@@ -27,6 +35,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
+      # Only main saves the cache; pull requests restore it.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Test
         run: cargo test --release --locked
       - name: Build
