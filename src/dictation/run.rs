@@ -176,9 +176,7 @@ async fn record_and_deliver(
 /// switched to since, if it is no longer OSTT. Its result must not be pasted
 /// into whatever the user is doing with the other backend.
 fn omarchy_switched_away() -> Option<String> {
-    if std::env::var_os("OSTT_OMARCHY_DICTATION").is_none() {
-        return None;
-    }
+    std::env::var_os("OSTT_OMARCHY_DICTATION")?;
     let selected = std::fs::read_to_string(crate::commands::omarchy::selection_path()).ok();
     switched_away(selected.as_deref())
 }
