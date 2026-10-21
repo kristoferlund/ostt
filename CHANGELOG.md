@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ostt dictate start|stop|toggle|cancel|status` records without a terminal, for desktop dictation keys. `stop` transcribes with the active model and pastes into the focused app; `cancel` discards the recording. Each command returns at once, errors show as desktop notifications, and `status --json --follow` streams the state for bar widgets.
+- `ostt omarchy setup` makes OSTT selectable as the dictation backend in Omarchy 4.5 (Setup > Defaults > Dictation), so Omarchy's Right Alt / F9 hold and Super + Ctrl + X toggle dictate with OSTT. Super + Ctrl + Alt + X cancels. `ostt omarchy remove` undoes it.
+
 ## 0.0.30 - 2026-10-21
 
 ### Added
