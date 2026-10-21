@@ -1,0 +1,23 @@
+#!/bin/bash
+
+# omarchy:summary=Record dictation using OSTT
+# omarchy:args=<start|stop|toggle>
+# ostt:managed - written by `ostt omarchy setup`; changes are overwritten.
+
+# Marks the job as Omarchy's, so a result that finishes after the user
+# switched to another dictation backend is kept in history, not pasted.
+export OSTT_OMARCHY_DICTATION=1
+
+case "${1:-}" in
+  start | toggle) exec ostt dictate "$1" ;;
+  stop)
+    # Omarchy stops the old backend when switching; that must succeed even
+    # when OSTT was removed in the meantime.
+    command -v ostt >/dev/null 2>&1 || exit 0
+    exec ostt dictate stop
+    ;;
+  *)
+    echo "Usage: omarchy dictation ostt <start|stop|toggle>" >&2
+    exit 1
+    ;;
+esac

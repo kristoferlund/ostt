@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# omarchy:summary=Remove OSTT dictation from Omarchy
+# ostt:managed - written by `ostt omarchy setup`; changes are overwritten.
+
+set -e
+
+# Removes the Omarchy integration only; OSTT itself stays installed.
+if omarchy-cmd-present ostt; then
+  ostt omarchy remove
+else
+  echo "OSTT is not installed."
+fi

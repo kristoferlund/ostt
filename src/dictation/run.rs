@@ -159,12 +159,36 @@ async fn record_and_deliver(
             crate::history::save_transcription(text).context("failed to save history")?;
             // Prune only once the recording is kept, as the terminal recorder does.
             recording_history::prune_old_recordings();
+            if let Some(backend) = omarchy_switched_away() {
+                anyhow::bail!(
+                    "Not pasted: Omarchy dictation switched to {backend}. The text is in `ostt history`."
+                );
+            }
             crate::commands::output::write_text(text, None, false, true, &paste_config, "Dictation")
                 .context("could not paste the transcript")
         },
         remove_recording,
     )
     .await)
+}
+
+/// For a job started by Omarchy's dictation keys: the backend the user
+/// switched to since, if it is no longer OSTT. Its result must not be pasted
+/// into whatever the user is doing with the other backend.
+fn omarchy_switched_away() -> Option<String> {
+    if std::env::var_os("OSTT_OMARCHY_DICTATION").is_none() {
+        return None;
+    }
+    let selected = std::fs::read_to_string(crate::commands::omarchy::selection_path()).ok();
+    switched_away(selected.as_deref())
+}
+
+fn switched_away(selected: Option<&str>) -> Option<String> {
+    match selected.map(str::trim) {
+        Some("ostt") => None,
+        Some("") | None => Some("no backend".to_string()),
+        Some(other) => Some(other.to_string()),
+    }
 }
 
 fn remove_recording(path: &Path) {
@@ -277,4 +301,17 @@ pub(crate) async fn send_control(paths: &Paths, request: &str) -> anyhow::Result
     .await
     .context("the dictation job did not answer")??;
     serde_json::from_str(&line).context("invalid reply from the dictation job")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_selection_other_than_ostt_blocks_the_paste() {
+        assert_eq!(switched_away(Some("ostt\n")), None);
+        assert_eq!(switched_away(Some("voxtype\n")).as_deref(), Some("voxtype"));
+        // Removing the selection (OSTT's remover does) also means "not OSTT".
+        assert_eq!(switched_away(None).as_deref(), Some("no backend"));
+    }
 }

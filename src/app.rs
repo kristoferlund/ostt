@@ -388,6 +388,23 @@ enum Commands {
         #[command(subcommand)]
         command: DictateCommand,
     },
+    /// Use OSTT as Omarchy's dictation backend (Omarchy 4.5 or later)
+    ///
+    /// `setup` adds OSTT under Setup > Defaults > Dictation in the Omarchy
+    /// menu; selecting it there finishes the setup and switches dictation to
+    /// OSTT. `remove` undoes this and leaves OSTT installed.
+    Omarchy {
+        #[command(subcommand)]
+        command: OmarchyCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum OmarchyCommand {
+    /// Make OSTT selectable as the Omarchy dictation backend
+    Setup,
+    /// Remove the Omarchy dictation integration
+    Remove,
 }
 
 #[derive(Subcommand)]
@@ -983,6 +1000,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
             DaemonCommand::Run { .. } => {
                 unreachable!("daemon run is handled before logging init")
             }
+        },
+        Some(Commands::Omarchy { command }) => match command {
+            OmarchyCommand::Setup => commands::omarchy::handle_setup()?,
+            OmarchyCommand::Remove => commands::omarchy::handle_remove().await?,
         },
         Some(Commands::Completions { .. })
         | Some(Commands::Logs { .. })

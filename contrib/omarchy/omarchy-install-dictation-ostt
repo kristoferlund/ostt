@@ -1,0 +1,50 @@
+#!/bin/bash
+
+# omarchy:summary=Set up OSTT dictation
+# ostt:managed - written by `ostt omarchy setup`; changes are overwritten.
+
+set -e
+
+confirm() {
+  gum confirm --affirmative "$(omarchy-i18n common.yes)" --negative "$(omarchy-i18n common.no)" "$1"
+}
+
+if omarchy-cmd-missing ostt; then
+  echo "OSTT is not installed. Install it with: curl -fsSL https://ostt.ai/install | bash"
+  exit 1
+fi
+
+# OSTT records with ffmpeg and pastes on Wayland with wtype.
+missing=()
+omarchy-cmd-present ffmpeg || missing+=(ffmpeg)
+omarchy-cmd-present wtype || missing+=(wtype)
+if ((${#missing[@]})); then
+  omarchy-pkg-add "${missing[@]}"
+fi
+
+if ! ostt model current >/dev/null 2>&1; then
+  echo "Choose the model OSTT transcribes with."
+  echo "Local models run offline; cloud models need an API key (ostt auth login)."
+  echo
+  ostt model || true
+fi
+if ! model=$(ostt model current 2>/dev/null); then
+  echo "No transcription model is selected, so dictation was not switched to OSTT."
+  echo "Run 'ostt model', then select OSTT again in Setup > Defaults > Dictation."
+  exit 1
+fi
+
+# A local model loads on every dictation unless the daemon keeps it ready.
+case $model in
+  whisper/* | parakeet/*)
+    if ! ostt daemon status 2>/dev/null | grep -q "Service: installed"; then
+      if confirm "Keep $model loaded in the background so dictation starts instantly?"; then
+        ostt daemon install
+      fi
+    fi
+    ;;
+esac
+
+omarchy-dictation-use ostt
+hyprctl reload >/dev/null
+omarchy-notification-send -g 󰍬 "OSTT dictation is ready" "$(omarchy-i18n dictation.hint) Cancel with Super + Ctrl + Alt + X." -t 10000
