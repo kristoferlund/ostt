@@ -100,7 +100,17 @@ pub(crate) fn transcribe(
 
 /// Describes the backend and device a loaded model runs on, for logs and status.
 pub(crate) fn backend_details(model: &Model) -> String {
-    let device = match model.device() {
+    format!(
+        "{} model on {} ({})",
+        model.arch(),
+        model.backend(),
+        device_details(model)
+    )
+}
+
+/// The device a loaded model runs on, with its memory when known.
+pub(crate) fn device_details(model: &Model) -> String {
+    match model.device() {
         Ok(device) if device.memory_total > 0 => format!(
             "{}, {} MB",
             device.description,
@@ -108,8 +118,7 @@ pub(crate) fn backend_details(model: &Model) -> String {
         ),
         Ok(device) => device.description,
         Err(_) => "unknown device".to_string(),
-    };
-    format!("{} model on {} ({device})", model.arch(), model.backend())
+    }
 }
 
 fn run_options(
