@@ -188,11 +188,43 @@ pub fn handle_model_params(model: Option<String>, json: bool) -> anyhow::Result<
     Ok(())
 }
 
+/// Activates an installed local model. Selection reads the cached registry, so
+/// when it has no entry for the model (no cache yet, or a catalog newer than
+/// the cache) the registry is fetched once and the selection retried.
+async fn activate_local_model<F, Fut>(
+    provider_id: &str,
+    model_id: &str,
+    refresh_registry: F,
+) -> anyhow::Result<crate::config::SelectedModel>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    match local_models::activate_model_for_provider(provider_id, model_id) {
+        Err(error)
+            if matches!(
+                error.downcast_ref::<local_models::ModelError>(),
+                Some(local_models::ModelError::NotFound(_))
+            ) =>
+        {
+            tracing::info!("Local model '{model_id}' is not in the cached registry; refreshing it");
+            if let Err(refresh_error) = refresh_registry().await {
+                tracing::warn!("Could not refresh the local model registry: {refresh_error}");
+                return Err(error);
+            }
+            local_models::activate_model_for_provider(provider_id, model_id)
+        }
+        result => result,
+    }
+}
+
 pub async fn handle_model_select(model: String) -> anyhow::Result<()> {
     let selected = crate::config::parse_provider_model(&model)?;
     if crate::transcription::TranscriptionProvider::is_local_id(&selected.provider_id) {
-        let activated =
-            local_models::activate_model_for_provider(&selected.provider_id, &selected.model_id)?;
+        let activated = activate_local_model(&selected.provider_id, &selected.model_id, || async {
+            local_models::fetch_registry().await.map(|_| ())
+        })
+        .await?;
         reload_daemon_if_running(&selected.model_id).await?;
         println!(
             "Selected model: {}/{}",
@@ -389,6 +421,95 @@ fn format_bytes(bytes: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs `test` with empty, isolated config and models directories.
+    fn with_isolated_dirs(test: impl FnOnce(std::path::PathBuf)) {
+        let _guard = local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let previous_xdg_config_home = std::env::var_os("XDG_CONFIG_HOME");
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("ostt-model-select-test-{unique}"));
+        let models_dir = dir.join("models");
+        std::fs::create_dir_all(&models_dir).expect("create models dir");
+        std::env::set_var("XDG_CONFIG_HOME", dir.join("config"));
+        local_models::set_test_models_dir(Some(models_dir.clone()));
+
+        test(models_dir);
+
+        local_models::set_test_models_dir(None);
+        match previous_xdg_config_home {
+            Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+            None => std::env::remove_var("XDG_CONFIG_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    fn parakeet_entry() -> local_models::RegistryEntry {
+        local_models::RegistryEntry {
+            id: "parakeet-ultra".to_string(),
+            provider_id: "parakeet".to_string(),
+            name: "Parakeet Ultra".to_string(),
+            description: String::new(),
+            languages: Vec::new(),
+            size_mb: 0,
+            url: "https://example.com/parakeet-ultra.gguf".to_string(),
+            recommended_hardware: None,
+            sha256: None,
+            category: None,
+            group_id: None,
+        }
+    }
+
+    /// An installed model must be selectable before the registry was ever
+    /// cached, e.g. when the file was copied in by hand.
+    #[test]
+    fn selecting_an_installed_model_without_a_cached_registry_fetches_it() {
+        with_isolated_dirs(|models_dir| {
+            std::fs::write(models_dir.join("parakeet-ultra.gguf"), [0]).expect("write model");
+            let runtime = tokio::runtime::Runtime::new().expect("runtime");
+            let refreshed = std::cell::Cell::new(false);
+            let selected = runtime
+                .block_on(activate_local_model("parakeet", "parakeet-ultra", || {
+                    refreshed.set(true);
+                    let cache = models_dir.join("registry.json");
+                    async move {
+                        std::fs::write(cache, serde_json::to_vec(&[parakeet_entry()])?)?;
+                        Ok(())
+                    }
+                }))
+                .expect("select after refresh");
+
+            assert!(refreshed.get());
+            assert_eq!(selected.provider_id, "parakeet");
+            let config = crate::config::OsttConfig::load().expect("load config");
+            assert_eq!(
+                config.transcription.model.as_deref(),
+                Some("parakeet-ultra")
+            );
+        });
+    }
+
+    /// Offline, the original "not found" error is reported, not the fetch error.
+    #[test]
+    fn a_failed_registry_refresh_reports_the_original_error() {
+        with_isolated_dirs(|models_dir| {
+            std::fs::write(models_dir.join("parakeet-ultra.gguf"), [0]).expect("write model");
+            let runtime = tokio::runtime::Runtime::new().expect("runtime");
+            let error = runtime
+                .block_on(activate_local_model(
+                    "parakeet",
+                    "parakeet-ultra",
+                    || async { anyhow::bail!("offline") },
+                ))
+                .expect_err("no registry entry");
+
+            assert!(error.to_string().contains("was not found"), "{error}");
+        });
+    }
 
     #[test]
     fn parse_local_model_arg_accepts_short_id_for_any_local_provider() {

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `ostt model select` for an installed local model no longer fails with "not found" when the model registry was never cached, for example after copying a model file in by hand. It fetches the registry once and retries.
+
 ## 0.0.29 - 2026-10-20
 
 ### Added
