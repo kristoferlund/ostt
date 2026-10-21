@@ -4,12 +4,44 @@
 use std::path::Path;
 use std::sync::Once;
 
+use serde::{Deserialize, Serialize};
 use transcribe_cpp::{
     Backend, Error, Feature, Model, ModelOptions, RunExtension, RunOptions, WhisperRunOptions,
 };
 
-use crate::config::LocalTranscriptionConfig;
 use crate::transcription::local_models::ModelError;
+
+/// Settings for one local transcription run, also sent to the daemon with each
+/// request. `#[serde(default)]` lets a daemon from another version accept it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LocalTranscriptionConfig {
+    /// Language hint: "auto" or ISO code (e.g. "sv", "en")
+    pub language: String,
+    /// Suppress text context from previous segments
+    pub no_context: bool,
+    /// Sampling temperature (0.0 = greedy/deterministic)
+    pub temperature: f32,
+    /// No-speech probability threshold (0.6 = default)
+    pub no_speech_thold: f32,
+    /// Custom terms, highest priority first (the saved `ostt keyword` terms)
+    pub vocabulary: Vec<String>,
+    /// Context text that steers transcription
+    pub prompt: Option<String>,
+}
+
+impl Default for LocalTranscriptionConfig {
+    fn default() -> Self {
+        Self {
+            language: "auto".to_string(),
+            no_context: true,
+            temperature: 0.0,
+            no_speech_thold: 0.6,
+            vocabulary: Vec::new(),
+            prompt: None,
+        }
+    }
+}
 
 /// Loads a local model on the build's preferred backend (GPU when compiled in
 /// and available, CPU otherwise).

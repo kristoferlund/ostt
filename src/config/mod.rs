@@ -10,7 +10,6 @@ pub mod file;
 pub mod secrets;
 pub mod selection;
 
-pub use file::LocalTranscriptionConfig;
 pub use file::{
     ActionDetails, ActionInput, AiTool, InputContent, InputRole, InputSource, ProcessAction,
     ProcessConfig,

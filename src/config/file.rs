@@ -130,55 +130,6 @@ fn default_true() -> bool {
     true
 }
 
-/// Built-in whisper.cpp transcription defaults.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct LocalTranscriptionConfig {
-    /// Language hint: "auto" or ISO code (e.g. "sv", "en")
-    pub language: String,
-    /// Suppress text context from previous segments
-    pub no_context: bool,
-    /// Sampling temperature (0.0 = greedy/deterministic)
-    pub temperature: f32,
-    /// No-speech probability threshold (0.6 = default)
-    pub no_speech_thold: f32,
-    /// Custom terms, highest priority first (the saved `ostt keyword` terms)
-    pub vocabulary: Vec<String>,
-    /// Context text that steers transcription
-    pub prompt: Option<String>,
-}
-
-impl Default for LocalTranscriptionConfig {
-    fn default() -> Self {
-        Self {
-            language: "auto".to_string(),
-            no_context: true,
-            temperature: 0.0,
-            no_speech_thold: 0.6,
-            vocabulary: Vec::new(),
-            prompt: None,
-        }
-    }
-}
-
-impl LocalTranscriptionConfig {
-    pub fn validate(&self) -> anyhow::Result<()> {
-        validate_local_values(self.temperature, self.no_speech_thold)?;
-
-        Ok(())
-    }
-}
-
-fn validate_local_values(temperature: f32, no_speech_thold: f32) -> anyhow::Result<()> {
-    if !(0.0..=1.0).contains(&temperature) {
-        anyhow::bail!("temperature must be between 0.0 and 1.0");
-    }
-    if !(0.0..=1.0).contains(&no_speech_thold) {
-        anyhow::bail!("no_speech_thold must be between 0.0 and 1.0");
-    }
-    Ok(())
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum ModelOptionValue {
