@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A process action with an unknown or missing `type` is skipped with a warning instead of stopping the config from loading. Broken `bash` and `ai` actions are still reported as errors.
+
 ## 0.0.29 - 2026-10-20
 
 ### Added
