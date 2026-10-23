@@ -6,6 +6,8 @@
 use crate::config::{AiTool, InputRole};
 use crate::process::input::ResolvedMessage;
 use anyhow::{bail, Context};
+use base64::{engine::general_purpose::STANDARD, Engine};
+use std::path::Path;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -135,6 +137,75 @@ pub(crate) fn build_stdin_content(
     format!("{system_prompt}\n\n<text>\n{user_prompt}\n</text>")
 }
 
+/// Returns the arguments that attach an image to the prompt.
+///
+/// Claude Code has no attach flag; it takes the image in a stream-json message
+/// on stdin (see `claude_image_message`), so its arguments switch to that format.
+fn attachment_args(tool: &AiTool, path: &Path) -> anyhow::Result<Vec<String>> {
+    Ok(match tool {
+        AiTool::OpenCode => vec![format!("--file={}", path.display())],
+        AiTool::CodexCli => vec![format!("--image={}", path.display())],
+        AiTool::ClaudeCode => [
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+        ]
+        .map(String::from)
+        .to_vec(),
+        AiTool::GeminiCli => bail!("Gemini CLI actions do not support attachments yet"),
+    })
+}
+
+/// Builds a Claude Code stream-json user message holding the image and the prompt.
+fn claude_image_message(prompt: &str, path: &Path) -> anyhow::Result<String> {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    let media_type = match extension.as_deref() {
+        Some("png") => "image/png",
+        Some("jpg" | "jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("webp") => "image/webp",
+        _ => bail!(
+            "Unsupported attachment type: {} (use png, jpeg, gif or webp)",
+            path.display()
+        ),
+    };
+    let data = std::fs::read(path)
+        .with_context(|| format!("failed to read attachment: {}", path.display()))?;
+    let message = serde_json::json!({
+        "type": "user",
+        "message": {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image",
+                    "source": { "type": "base64", "media_type": media_type, "data": STANDARD.encode(data) }
+                },
+                { "type": "text", "text": prompt }
+            ]
+        }
+    });
+    Ok(format!("{message}\n"))
+}
+
+/// Extracts the response text from Claude Code's stream-json output.
+fn claude_stream_result(stdout: &str) -> anyhow::Result<String> {
+    let result = stdout
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find(|event| event["type"] == "result")
+        .context("Claude Code returned no result")?;
+    let text = result["result"].as_str().unwrap_or_default().trim();
+    if result["is_error"] == true {
+        bail!("Claude Code failed: {text}");
+    }
+    Ok(text.to_string())
+}
+
 /// Executes an AI action by invoking the specified CLI tool in non-interactive mode.
 ///
 /// Constructs a prompt from the resolved messages, pipes it to the tool via stdin,
@@ -146,6 +217,7 @@ pub(crate) fn build_stdin_content(
 /// * `messages` - Resolved input messages (from input resolution)
 /// * `tool_binary` - Optional binary path override (defaults to standard binary name)
 /// * `tool_args` - Optional extra CLI arguments appended after required ones
+/// * `attachment` - Optional image sent along with the prompt
 ///
 /// # Errors
 /// - If the CLI tool is not found on PATH
@@ -158,6 +230,7 @@ pub async fn execute_ai_action(
     messages: &[ResolvedMessage],
     tool_binary: Option<&str>,
     tool_args: Option<&[String]>,
+    attachment: Option<&Path>,
 ) -> anyhow::Result<String> {
     let (system_prompt, user_prompt) = build_prompts(messages);
 
@@ -181,13 +254,20 @@ pub async fn execute_ai_action(
     // Build required args for this tool (model, flags, etc.)
     let mut args = tool.build_required_args(model);
 
+    if let Some(path) = attachment {
+        args.extend(attachment_args(tool, path)?);
+    }
+
     // Append user-provided extra args, if any
     if let Some(extra) = tool_args {
         args.extend(extra.iter().cloned());
     }
 
     // Build the stdin content
-    let stdin_content = build_stdin_content(tool, &system_prompt, &user_prompt);
+    let mut stdin_content = build_stdin_content(tool, &system_prompt, &user_prompt);
+    if let (AiTool::ClaudeCode, Some(path)) = (tool, attachment) {
+        stdin_content = claude_image_message(&stdin_content, path)?;
+    }
 
     tracing::info!(
         "Invoking AI tool: {} {}",
@@ -279,7 +359,10 @@ pub async fn execute_ai_action(
     }
 
     // Check for empty output
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let mut stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if let (AiTool::ClaudeCode, Some(_)) = (tool, attachment) {
+        stdout = claude_stream_result(&stdout)?;
+    }
     if stdout.is_empty() {
         tracing::warn!("AI tool '{}' returned empty output", binary);
         bail!("AI tool '{}' returned no output", binary);
@@ -394,6 +477,7 @@ mod tests {
             &messages,
             Some("/nonexistent/custom-binary"),
             None,
+            None,
         )
         .await;
 
@@ -444,6 +528,7 @@ mod tests {
             "test-model",
             &messages,
             Some("nonexistent-tool-binary-xyz"),
+            None,
             None,
         )
         .await;
@@ -497,6 +582,7 @@ mod tests {
             &messages,
             Some(script_path.to_str().unwrap()),
             None,
+            None,
         )
         .await;
 
@@ -514,5 +600,98 @@ mod tests {
             "error should contain stderr content, got: {}",
             err
         );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Attachments
+    // ═══════════════════════════════════════════════════════════════════
+
+    #[test]
+    fn codex_and_opencode_attach_with_their_own_flags() {
+        let path = Path::new("/tmp/context.png");
+        assert_eq!(
+            attachment_args(&AiTool::CodexCli, path).unwrap(),
+            vec!["--image=/tmp/context.png"]
+        );
+        assert_eq!(
+            attachment_args(&AiTool::OpenCode, path).unwrap(),
+            vec!["--file=/tmp/context.png"]
+        );
+    }
+
+    #[tokio::test]
+    async fn gemini_rejects_attachment_instead_of_dropping_it() {
+        let messages = vec![msg(InputRole::User, "test")];
+        let result = execute_ai_action(
+            &AiTool::GeminiCli,
+            "unused",
+            &messages,
+            Some("/nonexistent/gemini"),
+            None,
+            Some(Path::new("/tmp/context.png")),
+        )
+        .await;
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("attachments"), "got: {err}");
+    }
+
+    /// Claude Code has no attach flag, so the image must travel inside the
+    /// stream-json message on stdin, and the answer must be pulled out of the
+    /// stream-json result event rather than returned as raw JSON.
+    #[tokio::test]
+    async fn claude_receives_image_in_stdin_and_returns_plain_text() {
+        let dir = std::env::temp_dir().join("ostt_test_ai_claude_attach");
+        std::fs::create_dir_all(&dir).unwrap();
+        let image = dir.join("context.png");
+        std::fs::write(&image, b"fake png bytes").unwrap();
+        let stdin_copy = dir.join("stdin.json");
+        let script_path = dir.join("claude.sh");
+        std::fs::write(
+            &script_path,
+            format!(
+                "#!/bin/sh\ncat > '{}'\necho '{{\"type\":\"system\"}}'\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"  processed  \"}}'\n",
+                stdin_copy.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let messages = vec![msg(InputRole::User, "spoken words")];
+        let result = execute_ai_action(
+            &AiTool::ClaudeCode,
+            "unused",
+            &messages,
+            Some(script_path.to_str().unwrap()),
+            None,
+            Some(&image),
+        )
+        .await;
+        let sent: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&stdin_copy).unwrap()).unwrap();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(result.unwrap(), "processed");
+        let content = &sent["message"]["content"];
+        assert_eq!(content[0]["source"]["media_type"], "image/png");
+        assert_eq!(
+            content[0]["source"]["data"],
+            STANDARD.encode(b"fake png bytes")
+        );
+        assert!(content[1]["text"]
+            .as_str()
+            .unwrap()
+            .contains("<text>\nspoken words\n</text>"));
+    }
+
+    #[test]
+    fn claude_error_result_is_reported_as_failure() {
+        let stdout = r#"{"type":"result","is_error":true,"result":"overloaded"}"#;
+        let err = claude_stream_result(stdout).unwrap_err().to_string();
+        assert!(err.contains("overloaded"), "got: {err}");
     }
 }

@@ -20,6 +20,8 @@ use crate::process;
 /// * `list` - If true, list configured actions and exit
 /// * `clipboard` - If true, copy result to clipboard instead of stdout
 /// * `output_file` - Optional file path to write result to instead of stdout
+/// * `attachment` - Optional image passed to an AI action along with the text
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_process(
     config_data: &config::OsttConfig,
     index: Option<usize>,
@@ -28,8 +30,15 @@ pub async fn handle_process(
     clipboard: bool,
     paste: bool,
     output_file: Option<String>,
+    attachment: Option<&std::path::Path>,
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Process Command ===");
+
+    if let Some(path) = attachment {
+        if !path.is_file() {
+            return Err(anyhow::anyhow!("Attachment not found: {}", path.display()));
+        }
+    }
 
     if config_data.process.actions.is_empty() {
         return Err(anyhow::anyhow!(
@@ -95,8 +104,13 @@ pub async fn handle_process(
     // Use animation if the picker was shown (we're in a TUI flow),
     // otherwise execute directly (no TUI was started)
     let result = if picker_was_shown {
-        match process::execute_action_with_animation(&action, &transcription.text, &keywords)
-            .await?
+        match process::execute_action_with_animation(
+            &action,
+            &transcription.text,
+            &keywords,
+            attachment,
+        )
+        .await?
         {
             Some(r) => r,
             None => {
@@ -105,7 +119,7 @@ pub async fn handle_process(
             }
         }
     } else {
-        process::execute_action(&action, &transcription.text, &keywords).await?
+        process::execute_action(&action, &transcription.text, &keywords, attachment).await?
     };
 
     output::write_text(

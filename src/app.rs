@@ -312,6 +312,10 @@ enum Commands {
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
 
+        /// Image to send to the AI action along with the text
+        #[arg(long, value_name = "FILE")]
+        attach: Option<std::path::PathBuf>,
+
         /// Output format for `ostt process list`
         #[arg(long, value_enum, default_value_t = ListFormat::Table)]
         format: ListFormat,
@@ -847,12 +851,22 @@ pub async fn run() -> Result<(), anyhow::Error> {
             clipboard,
             paste,
             output,
+            attach,
             ..
         }) => {
             ensure_single_output_mode(clipboard, paste, output.as_ref())?;
             let (index, action) = resolve_process_args(index_or_action, action)?;
-            commands::handle_process(&config_data, index, action, false, clipboard, paste, output)
-                .await?;
+            commands::handle_process(
+                &config_data,
+                index,
+                action,
+                false,
+                clipboard,
+                paste,
+                output,
+                attach.as_deref(),
+            )
+            .await?;
         }
         Some(Commands::Launch { args }) => {
             ensure_single_output_mode(cli.clipboard, cli.paste, cli.output.as_ref())?;

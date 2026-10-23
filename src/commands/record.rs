@@ -484,7 +484,9 @@ async fn run_process_action_with_animation(
 
     let task_text = text.clone();
     let task_handle =
-        tokio::spawn(async move { process::execute_action(&action, &task_text, &keywords).await });
+        tokio::spawn(
+            async move { process::execute_action(&action, &task_text, &keywords, None).await },
+        );
 
     loop {
         if let Err(e) = tui.render_transcription_animation(&mut animation) {
