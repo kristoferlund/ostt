@@ -106,7 +106,13 @@ pub async fn apply_requested_action(
     transcription: &str,
     keywords: &[String],
     process_arg: Option<&str>,
+    attachment: Option<&Path>,
 ) -> anyhow::Result<String> {
+    if process_arg.is_some() && transcription.trim().is_empty() {
+        tracing::info!("Transcription is empty; skipping processing");
+        return Ok(String::new());
+    }
+
     let Some(action) = select_requested_action(process_config, process_arg, |actions| {
         match super::process_view::show_action_picker(actions)? {
             super::process_view::PickerResult::Selected(action_id) => Ok(Some(action_id)),
@@ -118,13 +124,15 @@ pub async fn apply_requested_action(
     };
 
     if process_arg == Some("") {
-        return match execute_action_with_animation(&action, transcription, keywords, None).await? {
+        return match execute_action_with_animation(&action, transcription, keywords, attachment)
+            .await?
+        {
             Some(result) => Ok(result),
             None => Ok(transcription.to_string()),
         };
     }
 
-    execute_action(&action, transcription, keywords, None).await
+    execute_action(&action, transcription, keywords, attachment).await
 }
 
 fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Result<ProcessAction> {
@@ -264,5 +272,16 @@ mod tests {
             err.contains("Command exited with status"),
             "error should mention exit status, got: {err}"
         );
+    }
+
+    /// Silence must not be sent to an action (and, for AI actions, a model).
+    #[tokio::test]
+    async fn empty_transcription_skips_processing() {
+        let config = ProcessConfig {
+            actions: vec![bash_action("echo should-not-run")],
+            ..Default::default()
+        };
+        let result = apply_requested_action(&config, "  \n", &[], Some("test"), None).await;
+        assert_eq!(result.unwrap(), "");
     }
 }

@@ -22,12 +22,14 @@ use std::sync::{
 ///
 /// Records audio with real-time waveform visualization, optionally transcribes the recording,
 /// and saves to history. Supports external triggers via SIGUSR1 signal.
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_record(
     config: &OsttConfig,
     clipboard: bool,
     paste: bool,
     output_file: Option<String>,
     process: Option<String>,
+    attachment: Option<&std::path::Path>,
     model_override: Option<SelectedModel>,
     param_overrides: &[String],
 ) -> anyhow::Result<()> {
@@ -112,7 +114,7 @@ pub async fn handle_record(
 
     // A transcription failure is non-fatal for record mode; it still leaves the audio in history.
     let output_text = match maybe_transcribed_text {
-        Some(transcribed_text) if process.is_some() => {
+        Some(transcribed_text) if process.is_some() && !transcribed_text.trim().is_empty() => {
             let Some(action) =
                 process::select_requested_action(&config.process, process.as_deref(), |actions| {
                     pick_action_id_with_recording_tui(&mut tui, actions)
@@ -131,7 +133,7 @@ pub async fn handle_record(
             };
 
             Some(
-                run_process_action_with_animation(&mut tui, action, transcribed_text)
+                run_process_action_with_animation(&mut tui, action, transcribed_text, attachment)
                     .await
                     .context("failed to process transcription")
                     .map_err(|err| show_recording_error(&mut tui, "Processing Error", err))?,
@@ -477,16 +479,17 @@ async fn run_process_action_with_animation(
     tui: &mut RecordingTui,
     action: ProcessAction,
     text: String,
+    attachment: Option<&std::path::Path>,
 ) -> anyhow::Result<String> {
     let keywords = keywords::load_keywords().context("failed to load keywords")?;
     let mut animation = TranscriptionAnimation::new(80);
     animation.set_status_label("Processing...");
 
     let task_text = text.clone();
-    let task_handle =
-        tokio::spawn(
-            async move { process::execute_action(&action, &task_text, &keywords, None).await },
-        );
+    let task_attachment = attachment.map(std::path::Path::to_path_buf);
+    let task_handle = tokio::spawn(async move {
+        process::execute_action(&action, &task_text, &keywords, task_attachment.as_deref()).await
+    });
 
     loop {
         if let Err(e) = tui.render_transcription_animation(&mut animation) {

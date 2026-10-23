@@ -34,12 +34,6 @@ pub async fn handle_process(
 ) -> Result<(), anyhow::Error> {
     tracing::info!("=== ostt Process Command ===");
 
-    if let Some(path) = attachment {
-        if !path.is_file() {
-            return Err(anyhow::anyhow!("Attachment not found: {}", path.display()));
-        }
-    }
-
     if config_data.process.actions.is_empty() {
         return Err(anyhow::anyhow!(
             "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
