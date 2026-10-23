@@ -9,6 +9,7 @@ use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::session;
 use ratcn::terminal::{Session, SessionOptions};
+use std::path::Path;
 
 /// Executes a processing action on the given transcription text.
 ///
@@ -19,6 +20,7 @@ use ratcn::terminal::{Session, SessionOptions};
 /// * `action` - The action configuration to execute
 /// * `transcription` - The raw transcription text
 /// * `keywords` - The user's keyword list (for AI actions that reference keywords)
+/// * `attachment` - Optional image; AI actions send it to the tool, bash actions get its path in `OSTT_ATTACHMENT`
 ///
 /// # Errors
 /// - If the action type is bash and the command fails
@@ -28,6 +30,7 @@ pub async fn execute_action(
     action: &ProcessAction,
     transcription: &str,
     keywords: &[String],
+    attachment: Option<&Path>,
 ) -> anyhow::Result<String> {
     let action_type = match &action.details {
         ActionDetails::Bash { .. } => "bash",
@@ -37,7 +40,7 @@ pub async fn execute_action(
 
     let result = match &action.details {
         ActionDetails::Bash { command } => {
-            super::bash::execute_bash_action(command, transcription).await
+            super::bash::execute_bash_action(command, transcription, attachment).await
         }
         ActionDetails::Ai {
             tool,
@@ -59,6 +62,7 @@ pub async fn execute_action(
                 &messages,
                 tool_binary.as_deref(),
                 tool_args.as_deref(),
+                attachment,
             )
             .await
         }
@@ -102,7 +106,13 @@ pub async fn apply_requested_action(
     transcription: &str,
     keywords: &[String],
     process_arg: Option<&str>,
+    attachment: Option<&Path>,
 ) -> anyhow::Result<String> {
+    if process_arg.is_some() && transcription.trim().is_empty() {
+        tracing::info!("Transcription is empty; skipping processing");
+        return Ok(String::new());
+    }
+
     let Some(action) = select_requested_action(process_config, process_arg, |actions| {
         match super::process_view::show_action_picker(actions)? {
             super::process_view::PickerResult::Selected(action_id) => Ok(Some(action_id)),
@@ -114,13 +124,15 @@ pub async fn apply_requested_action(
     };
 
     if process_arg == Some("") {
-        return match execute_action_with_animation(&action, transcription, keywords).await? {
+        return match execute_action_with_animation(&action, transcription, keywords, attachment)
+            .await?
+        {
             Some(result) => Ok(result),
             None => Ok(transcription.to_string()),
         };
     }
 
-    execute_action(&action, transcription, keywords).await
+    execute_action(&action, transcription, keywords, attachment).await
 }
 
 fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Result<ProcessAction> {
@@ -147,6 +159,7 @@ pub async fn execute_action_with_animation(
     action: &ProcessAction,
     transcription: &str,
     keywords: &[String],
+    attachment: Option<&Path>,
 ) -> anyhow::Result<Option<String>> {
     // No mouse: motion reports would wake the loop and advance the animation.
     let mut session = Session::open(SessionOptions::new().adaptive())?;
@@ -158,9 +171,16 @@ pub async fn execute_action_with_animation(
     let action_clone = action.clone();
     let transcription_clone = transcription.to_string();
     let keywords_clone = keywords.to_vec();
+    let attachment_clone = attachment.map(Path::to_path_buf);
 
     let task_handle = tokio::spawn(async move {
-        execute_action(&action_clone, &transcription_clone, &keywords_clone).await
+        execute_action(
+            &action_clone,
+            &transcription_clone,
+            &keywords_clone,
+            attachment_clone.as_deref(),
+        )
+        .await
     });
 
     let mut cancelled = false;
@@ -231,26 +251,37 @@ mod tests {
     #[tokio::test]
     async fn bash_cat_returns_transcription_as_is() {
         let action = bash_action("cat");
-        let result = execute_action(&action, "hello world", &[]).await;
+        let result = execute_action(&action, "hello world", &[], None).await;
         assert_eq!(result.unwrap(), "hello world");
     }
 
     #[tokio::test]
     async fn bash_tr_transforms_text() {
         let action = bash_action("tr '[:lower:]' '[:upper:]'");
-        let result = execute_action(&action, "hello world", &[]).await;
+        let result = execute_action(&action, "hello world", &[], None).await;
         assert_eq!(result.unwrap(), "HELLO WORLD");
     }
 
     #[tokio::test]
     async fn bash_failure_returns_error() {
         let action = bash_action("echo err >&2; exit 1");
-        let result = execute_action(&action, "", &[]).await;
+        let result = execute_action(&action, "", &[], None).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("Command exited with status"),
             "error should mention exit status, got: {err}"
         );
+    }
+
+    /// Silence must not be sent to an action (and, for AI actions, a model).
+    #[tokio::test]
+    async fn empty_transcription_skips_processing() {
+        let config = ProcessConfig {
+            actions: vec![bash_action("echo should-not-run")],
+            ..Default::default()
+        };
+        let result = apply_requested_action(&config, "  \n", &[], Some("test"), None).await;
+        assert_eq!(result.unwrap(), "");
     }
 }

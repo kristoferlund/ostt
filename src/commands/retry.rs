@@ -27,6 +27,7 @@ pub async fn handle_retry(
         paste,
         output_file,
         process,
+        attachment,
         model_override,
         param_overrides,
     } = options;
@@ -73,6 +74,7 @@ pub async fn handle_retry(
                 &transcription_text,
                 &context.keywords,
                 process.as_deref(),
+                attachment,
             )
             .await?;
             output::write_text(
@@ -99,6 +101,7 @@ pub struct RetryOptions<'a> {
     pub paste: bool,
     pub output_file: Option<String>,
     pub process: Option<String>,
+    pub attachment: Option<&'a std::path::Path>,
     pub model_override: Option<config::SelectedModel>,
     pub param_overrides: &'a [String],
 }

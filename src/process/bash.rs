@@ -1,6 +1,7 @@
 //! Bash action executor for bash processing actions.
 //!
 //! Executes a shell command with text piped to stdin and captures stdout as the result.
+//! An attachment path is passed to the command in the `OSTT_ATTACHMENT` environment variable.
 
 /// Executes a bash command with the given input piped to stdin.
 ///
@@ -9,13 +10,18 @@
 /// # Arguments
 /// * `command` - The shell command to execute (passed to `sh -c`)
 /// * `input` - Text to pipe into the command's stdin
+/// * `attachment` - Optional file path exposed to the command as `OSTT_ATTACHMENT`
 ///
 /// # Errors
 /// - If the command cannot be spawned
 /// - If stdin cannot be written
 /// - If the command exits with non-zero status
 /// - If stdout cannot be read
-pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<String> {
+pub async fn execute_bash_action(
+    command: &str,
+    input: &str,
+    attachment: Option<&std::path::Path>,
+) -> anyhow::Result<String> {
     use std::time::Duration;
     use tokio::io::AsyncWriteExt;
     use tokio::process::Command;
@@ -26,9 +32,12 @@ pub async fn execute_bash_action(command: &str, input: &str) -> anyhow::Result<S
     tracing::debug!("Executing bash command: {}", command);
 
     // Spawn `sh -c <command>` with stdin piped and stdout/stderr captured
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(command)
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c").arg(command);
+    if let Some(path) = attachment {
+        cmd.env("OSTT_ATTACHMENT", path);
+    }
+    let mut child = cmd
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -90,19 +99,19 @@ mod tests {
 
     #[tokio::test]
     async fn tr_uppercase_transforms_input() {
-        let result = execute_bash_action("tr '[:lower:]' '[:upper:]'", "hello").await;
+        let result = execute_bash_action("tr '[:lower:]' '[:upper:]'", "hello", None).await;
         assert_eq!(result.unwrap(), "HELLO");
     }
 
     #[tokio::test]
     async fn cat_passes_input_through() {
-        let result = execute_bash_action("cat", "pass through").await;
+        let result = execute_bash_action("cat", "pass through", None).await;
         assert_eq!(result.unwrap(), "pass through");
     }
 
     #[tokio::test]
     async fn non_zero_exit_returns_error_with_stderr() {
-        let result = execute_bash_action("echo err >&2; exit 1", "").await;
+        let result = execute_bash_action("echo err >&2; exit 1", "", None).await;
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("Command exited with status"),
@@ -116,11 +125,19 @@ mod tests {
 
     #[tokio::test]
     async fn nonexistent_command_returns_clear_error() {
-        let result = execute_bash_action("nonexistent_command_xyz", "").await;
+        let result = execute_bash_action("nonexistent_command_xyz", "", None).await;
         let err = result.unwrap_err().to_string();
         assert!(
             err.contains("Command not found"),
             "error should mention 'Command not found', got: {err}"
         );
+    }
+
+    /// Custom agents run as bash actions, so this is how they receive an image.
+    #[tokio::test]
+    async fn attachment_path_is_exposed_as_env_var() {
+        let path = std::path::Path::new("/tmp/context.png");
+        let result = execute_bash_action("echo \"$OSTT_ATTACHMENT\"", "", Some(path)).await;
+        assert_eq!(result.unwrap(), "/tmp/context.png");
     }
 }
