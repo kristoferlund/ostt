@@ -16,6 +16,9 @@ use tokio::time::timeout;
 /// Timeout for CLI tool invocations.
 const TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Timeout for `<tool> --version`, which should return at once.
+const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Minimum required versions for each AI tool.
 fn min_version(tool: &AiTool) -> Option<(u32, u32, u32)> {
     match tool {
@@ -29,18 +32,28 @@ fn min_version(tool: &AiTool) -> Option<(u32, u32, u32)> {
 ///
 /// Runs `<binary> --version` and parses the output for a semver-like version string.
 /// Returns Ok(()) if the version is sufficient or no minimum is required.
-async fn validate_tool_version(tool: &AiTool, binary: &str) -> anyhow::Result<()> {
+async fn validate_tool_version(tool: &AiTool, binary: &str, limit: Duration) -> anyhow::Result<()> {
     let (min_major, min_minor, min_patch) = match min_version(tool) {
         Some(v) => v,
         None => return Ok(()),
     };
 
-    let output = tokio::process::Command::new(binary)
+    let version = tokio::process::Command::new(binary)
         .arg("--version")
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .output()
+        .kill_on_drop(true)
+        .output();
+    let output = timeout(limit, version)
         .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "'{} --version' did not finish within {} seconds",
+                binary,
+                limit.as_secs()
+            )
+        })?
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 anyhow::anyhow!(
@@ -238,7 +251,7 @@ pub async fn execute_ai_action(
     let binary = tool_binary.unwrap_or(tool.default_binary());
 
     // Validate tool version before proceeding
-    validate_tool_version(tool, binary).await?;
+    validate_tool_version(tool, binary, VERSION_TIMEOUT).await?;
 
     // Prepend a standard preamble so the model knows the input text is delimited
     // by <text> tags. This is always true (build_stdin_content wraps the user
@@ -292,6 +305,7 @@ pub async fn execute_ai_action(
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -693,5 +707,31 @@ mod tests {
         let stdout = r#"{"type":"result","is_error":true,"result":"overloaded"}"#;
         let err = claude_stream_result(stdout).unwrap_err().to_string();
         assert!(err.contains("overloaded"), "got: {err}");
+    }
+
+    /// A tool whose `--version` hangs must fail the action, not hang dictation.
+    #[tokio::test]
+    async fn hanging_version_check_fails_instead_of_hanging() {
+        let dir = std::env::temp_dir().join("ostt_test_ai_version_hang");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script_path = dir.join("opencode.sh");
+        std::fs::write(&script_path, "#!/bin/sh\nsleep 30\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let result = validate_tool_version(
+            &AiTool::OpenCode,
+            script_path.to_str().unwrap(),
+            Duration::from_millis(200),
+        )
+        .await;
+        std::fs::remove_dir_all(&dir).ok();
+
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("did not finish"), "got: {err}");
     }
 }
