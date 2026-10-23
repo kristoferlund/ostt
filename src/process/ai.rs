@@ -137,11 +137,7 @@ pub(crate) fn build_prompts(messages: &[ResolvedMessage]) -> (String, String) {
 /// prompts that can override or dilute a user-provided system prompt.
 /// By putting everything in the user message, our instructions are treated
 /// as the primary task.
-pub(crate) fn build_stdin_content(
-    _tool: &AiTool,
-    system_prompt: &str,
-    user_prompt: &str,
-) -> String {
+pub(crate) fn build_stdin_content(system_prompt: &str, user_prompt: &str) -> String {
     format!("{system_prompt}\n\n<text>\n{user_prompt}\n</text>")
 }
 
@@ -253,7 +249,10 @@ fn claude_result(stdout: &str) -> Option<anyhow::Result<String>> {
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
         .find(|event| event["type"] == "result")?;
     let text = result["result"].as_str().unwrap_or_default().trim();
-    Some(if result["is_error"] == true {
+    // Some versions report failures such as `error_max_turns` only in `subtype`
+    let failed =
+        result["is_error"] == true || result["subtype"].as_str().is_some_and(|s| s != "success");
+    Some(if failed {
         let reason = match text {
             "" => result["subtype"].as_str().unwrap_or("unknown error"),
             text => text,
@@ -267,7 +266,8 @@ fn claude_result(stdout: &str) -> Option<anyhow::Result<String>> {
 /// Executes an AI action by invoking the specified CLI tool in non-interactive mode.
 ///
 /// Constructs a prompt from the resolved messages, pipes it to the tool via stdin,
-/// and captures stdout as the result.
+/// and returns the tool's response: stdout, or for Claude Code the text of its
+/// stream-json result.
 ///
 /// # Arguments
 /// * `tool` - Which CLI tool to invoke
@@ -309,7 +309,7 @@ pub async fn execute_ai_action(
          {system_prompt}"
     );
 
-    let prompt = build_stdin_content(tool, &system_prompt, &user_prompt);
+    let prompt = build_stdin_content(&system_prompt, &user_prompt);
     let stdin_content = match tool {
         AiTool::ClaudeCode => claude_message(&prompt, attachment)?,
         _ => prompt,
@@ -552,24 +552,11 @@ mod tests {
     }
 
     #[test]
-    fn all_tools_stdin_combines_system_prompt_and_wrapped_user() {
-        let system = "You are a helpful assistant.";
-        let user = "Hello world";
-        let expected = "You are a helpful assistant.\n\n<text>\nHello world\n</text>";
-
-        for tool in [
-            AiTool::OpenCode,
-            AiTool::ClaudeCode,
-            AiTool::GeminiCli,
-            AiTool::CodexCli,
-        ] {
-            let stdin = build_stdin_content(&tool, system, user);
-            assert_eq!(
-                stdin, expected,
-                "{:?} stdin should combine system prompt and wrapped user text",
-                tool
-            );
-        }
+    fn stdin_combines_system_prompt_and_wrapped_user() {
+        assert_eq!(
+            build_stdin_content("You are a helpful assistant.", "Hello world"),
+            "You are a helpful assistant.\n\n<text>\nHello world\n</text>"
+        );
     }
 
     #[tokio::test]
@@ -629,7 +616,7 @@ mod tests {
     #[tokio::test]
     async fn non_zero_exit_returns_error_with_stderr() {
         // Use `bash` as the tool binary with `-c` to run a script that writes to
-        // stderr and exits non-zero. The required args from `build_required_args` are
+        // stderr and exits non-zero. The required args from `command_args` are
         // passed before our extra args, but `bash -c` uses only the first `-c` arg
         // as the script and ignores the rest (they become positional params $0, $1...).
         // We must ensure `-c` and the script come first, so we use them as tool_binary
@@ -761,8 +748,8 @@ mod tests {
         let err = claude_result(stdout).unwrap().unwrap_err().to_string();
         assert!(err.contains("overloaded"), "got: {err}");
 
-        // Some error results carry only a subtype
-        let stdout = r#"{"type":"result","is_error":true,"subtype":"error_max_turns"}"#;
+        // Some error results carry only a subtype, without is_error
+        let stdout = r#"{"type":"result","subtype":"error_max_turns"}"#;
         let err = claude_result(stdout).unwrap().unwrap_err().to_string();
         assert!(err.contains("error_max_turns"), "got: {err}");
     }

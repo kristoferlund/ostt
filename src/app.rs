@@ -568,14 +568,27 @@ enum AuthCommand {
     Status,
 }
 
-/// Parses `--attach`: the file must exist and be a supported image.
+/// Parses `--attach`: the file must exist and be a supported image. The path
+/// is made absolute, as `ostt launch` passes it to a popup that may start in
+/// another directory.
 fn parse_attachment(value: &str) -> Result<PathBuf, String> {
-    let path = PathBuf::from(value);
+    let path = std::path::absolute(value).map_err(|e| format!("invalid path {value}: {e}"))?;
     if !path.is_file() {
         return Err(format!("file not found: {value}"));
     }
     crate::process::image_media_type(&path).map_err(|e| e.to_string())?;
     Ok(path)
+}
+
+/// A top-level `--attach` belongs to the default record command (or `launch`);
+/// before another subcommand it would be silently ignored.
+fn check_top_level_attach(cli: &Cli) -> anyhow::Result<()> {
+    if cli.attach.is_some() && !matches!(cli.command, None | Some(Commands::Launch { .. })) {
+        return Err(anyhow!(
+            "Put --attach after the subcommand, next to its --process."
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_process_args(
@@ -620,6 +633,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
     }
 
     let cli = Cli::parse();
+    check_top_level_attach(&cli)?;
 
     // Handle commands that don't need logging or config setup
     // The `daemon run` subcommand is the long-running daemon process itself.
@@ -921,7 +935,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
         }
         Some(Commands::Launch { args }) => {
             ensure_single_output_mode(cli.clipboard, cli.paste, cli.output.as_ref())?;
-            // Reconstruct the full ostt args list. Global flags (-c, -o, -p) are
+            // Reconstruct the full ostt args list. Top-level flags are
             // consumed by clap before they reach the Launch args vec, so we
             // re-inject them here so they get passed to the spawned ostt instance.
             let mut full_args = args;
@@ -1382,11 +1396,18 @@ mod tests {
         fs::remove_file(image).ok();
     }
 
+    fn parse_error(args: &[&str]) -> String {
+        match Cli::try_parse_from(args) {
+            Ok(_) => panic!("expected {args:?} to be rejected"),
+            Err(e) => e.to_string(),
+        }
+    }
+
     /// An attachment without an action would be silently ignored.
     #[test]
     fn cli_rejects_attach_without_process() {
         let image = temp_image("ostt_cli_attach_noprocess.png");
-        let result = Cli::try_parse_from([
+        let err = parse_error(&[
             "ostt",
             "transcribe",
             "audio.wav",
@@ -1394,19 +1415,52 @@ mod tests {
             image.to_str().unwrap(),
         ]);
         fs::remove_file(image).ok();
-        assert!(result.is_err());
+        assert!(err.contains("--process"), "got: {err}");
     }
 
     /// Bad attachments fail before recording or transcribing, not after.
     #[test]
     fn cli_rejects_missing_or_non_image_attachment() {
-        assert!(
-            Cli::try_parse_from(["ostt", "-p", "ctx", "--attach", "/nonexistent/a.png"]).is_err()
-        );
+        let err = parse_error(&["ostt", "-p", "ctx", "--attach", "/nonexistent/a.png"]);
+        assert!(err.contains("file not found"), "got: {err}");
+
         let text = std::env::temp_dir().join("ostt_cli_attach.txt");
         fs::write(&text, b"text").unwrap();
-        let result = Cli::try_parse_from(["ostt", "-p", "ctx", "--attach", text.to_str().unwrap()]);
+        let err = parse_error(&["ostt", "-p", "ctx", "--attach", text.to_str().unwrap()]);
         fs::remove_file(text).ok();
-        assert!(result.is_err());
+        assert!(err.contains("Unsupported attachment type"), "got: {err}");
+    }
+
+    /// Before a subcommand, a top-level --attach would be silently ignored.
+    #[test]
+    fn top_level_attach_is_rejected_before_a_subcommand() {
+        let image = temp_image("ostt_cli_attach_toplevel.png");
+        let image_arg = image.to_str().unwrap();
+        let before_transcribe = Cli::try_parse_from([
+            "ostt",
+            "--attach",
+            image_arg,
+            "-p",
+            "ctx",
+            "transcribe",
+            "a.wav",
+        ])
+        .expect("parse cli");
+        let default_record =
+            Cli::try_parse_from(["ostt", "--attach", image_arg, "-p", "ctx"]).expect("parse cli");
+        fs::remove_file(image).ok();
+
+        assert!(check_top_level_attach(&before_transcribe).is_err());
+        assert!(check_top_level_attach(&default_record).is_ok());
+    }
+
+    /// `ostt launch` hands the path to a popup that may start elsewhere.
+    #[test]
+    fn attachment_path_is_made_absolute() {
+        let name = "ostt_cli_attach_relative.png";
+        fs::write(name, b"png").unwrap();
+        let parsed = parse_attachment(name);
+        fs::remove_file(name).ok();
+        assert_eq!(parsed.unwrap(), std::env::current_dir().unwrap().join(name));
     }
 }
