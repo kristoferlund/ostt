@@ -336,7 +336,7 @@ mod tests {
 
         assert_eq!(
             AiTool::OpenCode.build_required_args(model),
-            vec!["--pure", "run", "--model", "test-model"]
+            vec!["run", "--model", "test-model"]
         );
         assert_eq!(
             AiTool::ClaudeCode.build_required_args(model),
@@ -354,11 +354,11 @@ mod tests {
         );
         assert_eq!(
             AiTool::GeminiCli.build_required_args(model),
-            vec!["-p", "-m", "test-model"]
+            vec!["--skip-trust", "-m", "test-model", "-p", ""]
         );
         assert_eq!(
             AiTool::CodexCli.build_required_args(model),
-            vec!["exec", "--model", "test-model"]
+            vec!["exec", "--skip-git-repo-check", "--model", "test-model"]
         );
     }
 
