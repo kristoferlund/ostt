@@ -363,12 +363,7 @@ impl AiTool {
     pub fn build_required_args(&self, model: &str) -> Vec<String> {
         match self {
             AiTool::OpenCode => {
-                vec![
-                    "--pure".to_string(),
-                    "run".to_string(),
-                    "--model".to_string(),
-                    model.to_string(),
-                ]
+                vec!["run".to_string(), "--model".to_string(), model.to_string()]
             }
             AiTool::ClaudeCode => {
                 vec![
@@ -384,10 +379,24 @@ impl AiTool {
                 ]
             }
             AiTool::GeminiCli => {
-                vec!["-p".to_string(), "-m".to_string(), model.to_string()]
+                // `-p` needs a value; stdin is appended to it. Headless mode
+                // refuses untrusted directories without `--skip-trust`.
+                vec![
+                    "--skip-trust".to_string(),
+                    "-m".to_string(),
+                    model.to_string(),
+                    "-p".to_string(),
+                    String::new(),
+                ]
             }
             AiTool::CodexCli => {
-                vec!["exec".to_string(), "--model".to_string(), model.to_string()]
+                // Without `--skip-git-repo-check`, Codex refuses to run outside a git repo.
+                vec![
+                    "exec".to_string(),
+                    "--skip-git-repo-check".to_string(),
+                    "--model".to_string(),
+                    model.to_string(),
+                ]
             }
         }
     }
