@@ -653,11 +653,24 @@ fn resolve_process_args(
 /// - If logging initialization fails
 /// - If command execution fails (e.g., authentication, recording, history viewing)
 pub async fn run() -> Result<(), anyhow::Error> {
-    if env::args_os().nth(1).as_deref() == Some(std::ffi::OsStr::new("paste-helper")) {
+    // OSTT runs itself as a detached helper to finish a paste after the
+    // command that started it has exited.
+    let helper: Option<fn(&crate::config::OsttConfig) -> anyhow::Result<()>> = match env::args_os()
+        .nth(1)
+        .as_deref()
+        .and_then(std::ffi::OsStr::to_str)
+    {
+        Some(crate::paste::PASTE_HELPER) => Some(crate::paste::handle_paste_helper),
+        Some(crate::paste::RESTORE_CLIPBOARD_HELPER) => {
+            Some(crate::paste::handle_restore_clipboard_helper)
+        }
+        _ => None,
+    };
+    if let Some(helper) = helper {
         logging::init_logging()?;
         check_and_run_setup().await?;
         let config_data = load_config()?;
-        return crate::paste::handle_paste_helper(&config_data);
+        return helper(&config_data);
     }
 
     let cli = Cli::parse();
@@ -1332,7 +1345,9 @@ mod tests {
             let mut output = Vec::new();
             generate(shell, &mut Cli::command(), "ostt", &mut output);
             assert!(!output.is_empty());
-            assert!(!String::from_utf8_lossy(&output).contains("paste-helper"));
+            let output = String::from_utf8_lossy(&output);
+            assert!(!output.contains(crate::paste::PASTE_HELPER));
+            assert!(!output.contains(crate::paste::RESTORE_CLIPBOARD_HELPER));
         }
     }
 

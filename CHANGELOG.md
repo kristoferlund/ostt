@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An empty transcription is no longer sent to the processing action.
 - A `--process` action that does not exist is reported before recording or transcribing, not after.
 - ostt no longer runs `<agent> --version` before every AI action to check a minimum version (OpenCode's 1.4.3 check is gone too); that cost up to a second per dictation. An agent too old for the arguments ostt passes fails with its own error, and the words are output unprocessed.
+- `--paste` returns as soon as the text is pasted. The previous clipboard is still restored after `restore_delay_ms`, by a background ostt process, so a dictation popup closes about 750 ms sooner.
 - When a processing action fails, `record`, `transcribe` and `retry` output the unprocessed transcription instead (stdout, file, clipboard or paste), so the words are not lost, and exit with status 3 to show that processing failed.
 
 ### Fixed
