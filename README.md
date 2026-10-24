@@ -58,7 +58,7 @@ Start here:
 - [Processing Actions](https://ostt.ai/guide/processing)
 - [Configuration](https://ostt.ai/guide/configuration)
 - [Why OSTT?](https://ostt.ai/guide/why-ostt)
-- [Platform Setup](https://ostt.ai/guide/platforms)
+- Platform setup: [macOS](https://ostt.ai/guide/platforms/macos), [Omarchy / Hyprland](https://ostt.ai/guide/platforms/hyprland), [GNOME](https://ostt.ai/guide/platforms/gnome), [KDE Plasma](https://ostt.ai/guide/platforms/kde)
 - [Providers and Models](https://ostt.ai/reference/providers)
 
 ## Install
