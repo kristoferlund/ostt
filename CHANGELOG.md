@@ -9,11 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Claude Code, Codex and OpenCode actions receive the image; bash actions get its path in `$OSTT_ATTACHMENT`. Gemini CLI actions do not support attachments yet.
+- `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Agents that take images receive it (all built-in ones except Hermes); bash actions get its path in `$OSTT_ATTACHMENT`.
+- Agents for AI actions are now data instead of code. ostt ships built-in agents for Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi and Hermes, and `[process.agents.<id>]` in `ostt.toml` adds an agent or replaces a built-in one: its command with `{model}` and `{workdir}` placeholders, how it takes an image, and the environment variables and files it needs. An action's `tool` names any agent id; the existing ids keep working. `ostt agent list [--format json]` lists agents, whether each is installed, and whether it takes images.
 - Processing actions take an optional `description`, a one-line explanation shown under the action's name in the action picker and included in `ostt process list --format json`.
 
 ### Changed
 
+- Every built-in agent runs with its tools switched off, in a new empty working directory, so text in a transcript or screenshot cannot make it run commands or read and change files (#119). Claude Code could still use tools that need no approval, such as reading files; Codex, OpenCode and Gemini CLI could use their tools.
 - Claude Code actions now read Claude's structured output, so a failure shows Claude's reason instead of raw output.
 - An empty transcription is no longer sent to the processing action.
 

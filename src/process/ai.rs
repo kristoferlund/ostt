@@ -1,13 +1,14 @@
-//! AI CLI tool executor for AI processing actions.
+//! Agent executor for AI processing actions.
 //!
-//! Invokes external CLI tools (OpenCode, Claude Code, Gemini CLI, Codex CLI) in
-//! non-interactive mode, pipes the resolved prompt, and captures the response text.
+//! Runs an agent CLI non-interactively as its `AgentSpec` describes (see
+//! `config/agents.toml`): in a new empty working directory, with the resolved
+//! prompt on stdin, and captures the response text.
 
-use crate::config::{AiTool, InputRole};
+use crate::config::agents::{AgentFormat, AgentSpec};
+use crate::config::InputRole;
 use crate::process::input::ResolvedMessage;
 use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use std::ffi::OsString;
 use std::path::Path;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
@@ -20,23 +21,25 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 /// Timeout for `<tool> --version`, which should return at once.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Minimum required versions for each AI tool.
-fn min_version(tool: &AiTool) -> Option<(u32, u32, u32)> {
-    match tool {
-        AiTool::OpenCode => Some((1, 4, 3)),
-        // No version requirements for other tools yet
-        _ => None,
-    }
+/// Parses an `X.Y.Z` version anywhere in `text`.
+fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
+    let version_re = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)").unwrap();
+    let caps = version_re.captures(text)?;
+    Some((
+        caps[1].parse().ok()?,
+        caps[2].parse().ok()?,
+        caps[3].parse().ok()?,
+    ))
 }
 
-/// Validates that the installed AI tool meets the minimum version requirement.
+/// Checks that `<binary> --version` is at least `minimum`.
 ///
-/// Runs `<binary> --version` and parses the output for a semver-like version string.
-/// Returns Ok(()) if the version is sufficient or no minimum is required.
-async fn validate_tool_version(tool: &AiTool, binary: &str, limit: Duration) -> anyhow::Result<()> {
-    let (min_major, min_minor, min_patch) = match min_version(tool) {
-        Some(v) => v,
-        None => return Ok(()),
+/// An unparseable version is let through: an agent that changes how it
+/// prints its version should not stop working.
+async fn validate_tool_version(binary: &str, minimum: &str, limit: Duration) -> anyhow::Result<()> {
+    let Some(minimum_version) = parse_version(minimum) else {
+        tracing::warn!("Ignoring minimum version '{minimum}' for '{binary}': not X.Y.Z");
+        return Ok(());
     };
 
     let version = tokio::process::Command::new(binary)
@@ -61,50 +64,19 @@ async fn validate_tool_version(tool: &AiTool, binary: &str, limit: Duration) -> 
         })?;
 
     let version_text = String::from_utf8_lossy(&output.stdout);
-    let version_str = version_text.trim();
-
-    // Parse version: look for X.Y.Z pattern anywhere in the output
-    let version_re = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)").unwrap();
-    let (major, minor, patch) = match version_re.captures(version_str) {
-        Some(caps) => (
-            caps[1].parse::<u32>().unwrap_or(0),
-            caps[2].parse::<u32>().unwrap_or(0),
-            caps[3].parse::<u32>().unwrap_or(0),
-        ),
-        None => {
-            tracing::warn!(
-                "Could not parse version from '{}' output: {}",
-                binary,
-                version_str
-            );
-            return Ok(()); // Don't block on unparseable version
-        }
-    };
-
-    if (major, minor, patch) < (min_major, min_minor, min_patch) {
-        bail!(
-            "'{}' version {}.{}.{} is too old. Minimum required: {}.{}.{}. Please update.",
+    let Some(version) = parse_version(&version_text) else {
+        tracing::warn!(
+            "Could not parse version from '{}' output: {}",
             binary,
-            major,
-            minor,
-            patch,
-            min_major,
-            min_minor,
-            min_patch
+            version_text.trim()
         );
+        return Ok(());
+    };
+    let (major, minor, patch) = version;
+    if version < minimum_version {
+        bail!("'{binary}' version {major}.{minor}.{patch} is too old. Minimum required: {minimum}. Please update.");
     }
-
-    tracing::debug!(
-        "AI tool '{}' version {}.{}.{} meets minimum {}.{}.{}",
-        binary,
-        major,
-        minor,
-        patch,
-        min_major,
-        min_minor,
-        min_patch
-    );
-
+    tracing::debug!("AI tool '{binary}' version {major}.{minor}.{patch} meets minimum {minimum}");
     Ok(())
 }
 
@@ -141,61 +113,74 @@ pub(crate) fn build_stdin_content(system_prompt: &str, user_prompt: &str) -> Str
     format!("{system_prompt}\n\n<text>\n{user_prompt}\n</text>")
 }
 
-/// Builds the full argument list for a tool: its required arguments, the
-/// attachment, then the user's `tool_args`.
-///
-/// Attachments use the `--flag=path` form: Codex's `--image` and OpenCode's
-/// `--file` take several values and would swallow a following argument.
-fn command_args(
-    tool: &AiTool,
-    model: &str,
-    attachment: Option<&Path>,
-    tool_args: Option<&[String]>,
-) -> anyhow::Result<Vec<OsString>> {
-    let required: &[&str] = match tool {
-        AiTool::OpenCode => &["run", "--model", model],
-        // stream-json lets the message carry an image and reports errors as a
-        // structured result (see `claude_message` and `claude_result`).
-        AiTool::ClaudeCode => &[
-            "-p",
-            "--model",
-            model,
-            "--no-session-persistence",
-            "--mcp-config",
-            r#"{"mcpServers":{}}"#,
-            "--strict-mcp-config",
-            "--allowedTools",
-            "",
-            "--input-format",
-            "stream-json",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-        ],
-        // `-p` needs a value; stdin is appended to it. Headless mode refuses
-        // untrusted directories without `--skip-trust`.
-        AiTool::GeminiCli => &["--skip-trust", "-m", model, "-p", ""],
-        // Without `--skip-git-repo-check`, Codex refuses to run outside a git repo.
-        AiTool::CodexCli => &["exec", "--skip-git-repo-check", "--model", model],
-    };
-    let mut args: Vec<OsString> = required.iter().map(OsString::from).collect();
-
-    match (tool, attachment) {
-        // Claude Code takes the image in its stdin message.
-        (_, None) | (AiTool::ClaudeCode, Some(_)) => {}
-        (AiTool::OpenCode, Some(path)) => args.push(flag_with_path("--file=", path)),
-        (AiTool::CodexCli, Some(path)) => args.push(flag_with_path("--image=", path)),
-        (AiTool::GeminiCli, Some(_)) => bail!("Gemini CLI actions do not support attachments yet"),
-    }
-
-    args.extend(tool_args.unwrap_or_default().iter().map(OsString::from));
-    Ok(args)
+/// Values for the placeholders in an agent's spec.
+struct Placeholders<'a> {
+    model: &'a str,
+    workdir: &'a Path,
+    image: Option<&'a Path>,
 }
 
-fn flag_with_path(flag: &str, path: &Path) -> OsString {
-    let mut arg = OsString::from(flag);
-    arg.push(path);
-    arg
+impl Placeholders<'_> {
+    fn fill(&self, template: &str) -> String {
+        let mut text = template
+            .replace("{model}", self.model)
+            .replace("{workdir}", &self.workdir.to_string_lossy());
+        if let Some(image) = self.image {
+            text = text.replace("{image}", &image.to_string_lossy());
+        }
+        text
+    }
+}
+
+/// Builds the arguments after the program: the agent's own, the image
+/// arguments when an image is attached, then the user's `tool_args`.
+fn command_args(
+    agent: &AgentSpec,
+    placeholders: &Placeholders,
+    tool_args: Option<&[String]>,
+) -> Vec<String> {
+    let image_args = match (placeholders.image, &agent.image_args) {
+        (Some(_), Some(args)) => args.as_slice(),
+        _ => &[],
+    };
+    agent.command[1..]
+        .iter()
+        .chain(image_args)
+        .map(|arg| placeholders.fill(arg))
+        .chain(tool_args.unwrap_or_default().iter().cloned())
+        .collect()
+}
+
+/// Makes the agent's empty working directory: the files its spec lists, and
+/// the image under a fixed name, so paths need no quoting and an `@path`
+/// reference stays inside the directory the agent is allowed to see.
+fn prepare_workdir(
+    agent: &AgentSpec,
+    attachment: Option<&Path>,
+) -> anyhow::Result<(tempfile::TempDir, Option<std::path::PathBuf>)> {
+    let workdir = tempfile::Builder::new()
+        .prefix("ostt-agent-")
+        .tempdir()
+        .context("failed to create the agent's working directory")?;
+    for (name, content) in &agent.files {
+        // Names come from the config; keep them inside the directory.
+        if name.is_empty() || name.contains('/') || name == ".." {
+            bail!("Agent file name '{name}' must be a plain file name");
+        }
+        std::fs::write(workdir.path().join(name), content)
+            .with_context(|| format!("failed to write the agent's file '{name}'"))?;
+    }
+    let image = match attachment {
+        Some(path) => {
+            let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("img");
+            let copy = workdir.path().join(format!("ostt-image.{extension}"));
+            std::fs::copy(path, &copy)
+                .with_context(|| format!("failed to read attachment: {}", path.display()))?;
+            Some(copy)
+        }
+        None => None,
+    };
+    Ok((workdir, image))
 }
 
 /// Returns the media type of a supported image attachment.
@@ -243,7 +228,7 @@ fn claude_message(prompt: &str, image: Option<&Path>) -> anyhow::Result<String> 
 ///
 /// Returns `None` when there is none, e.g. when Claude rejected its arguments
 /// before starting; the exit status and stderr explain those failures.
-fn claude_result(stdout: &str) -> Option<anyhow::Result<String>> {
+fn claude_result(name: &str, stdout: &str) -> Option<anyhow::Result<String>> {
     let result = stdout
         .lines()
         .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
@@ -257,46 +242,62 @@ fn claude_result(stdout: &str) -> Option<anyhow::Result<String>> {
             "" => result["subtype"].as_str().unwrap_or("unknown error"),
             text => text,
         };
-        Err(anyhow::anyhow!("Claude Code failed: {reason}"))
+        Err(anyhow::anyhow!("{name} failed: {reason}"))
     } else {
         Ok(text.to_string())
     })
 }
 
-/// Executes an AI action by invoking the specified CLI tool in non-interactive mode.
+/// Executes an AI action by running its agent non-interactively.
 ///
-/// Constructs a prompt from the resolved messages, pipes it to the tool via stdin,
-/// and returns the tool's response: stdout, or for Claude Code the text of its
-/// stream-json result.
+/// Constructs a prompt from the resolved messages, pipes it to the agent via
+/// stdin in a new empty working directory, and returns the agent's response:
+/// stdout, or for the Claude stream-json format the text of its result.
 ///
 /// # Arguments
-/// * `tool` - Which CLI tool to invoke
-/// * `model` - Model identifier (passed through to the tool as-is)
+/// * `agent_id` - The agent's id, for messages
+/// * `agent` - How to run the agent
+/// * `model` - Model identifier (passed through to the agent as-is)
 /// * `messages` - Resolved input messages (from input resolution)
-/// * `tool_binary` - Optional binary path override (defaults to standard binary name)
-/// * `tool_args` - Optional extra CLI arguments appended after required ones
+/// * `tool_binary` - Optional program path override (defaults to the agent's)
+/// * `tool_args` - Optional extra CLI arguments appended after the agent's
 /// * `attachment` - Optional image sent along with the prompt
 ///
 /// # Errors
-/// - If the CLI tool is not found on PATH
-/// - If the tool exits with non-zero status
-/// - If the tool times out
-/// - If the tool returns empty stdout
+/// - If the agent takes no images and one is attached
+/// - If the agent is not found on PATH
+/// - If the agent exits with non-zero status
+/// - If the agent times out
+/// - If the agent returns empty output
 pub async fn execute_ai_action(
-    tool: &AiTool,
+    agent_id: &str,
+    agent: &AgentSpec,
     model: &str,
     messages: &[ResolvedMessage],
     tool_binary: Option<&str>,
     tool_args: Option<&[String]>,
     attachment: Option<&Path>,
 ) -> anyhow::Result<String> {
+    if attachment.is_some() && !agent.takes_images() {
+        bail!("{} ({agent_id}) does not take images", agent.name);
+    }
     let (system_prompt, user_prompt) = build_prompts(messages);
 
-    // Built first so an unsupported attachment fails before running anything
-    let args = command_args(tool, model, attachment, tool_args)?;
+    let (workdir, image) = prepare_workdir(agent, attachment)?;
+    let placeholders = Placeholders {
+        model,
+        workdir: workdir.path(),
+        image: image.as_deref(),
+    };
+    let binary = match tool_binary {
+        Some(binary) => binary.to_string(),
+        None => placeholders.fill(agent.program()),
+    };
+    let args = command_args(agent, &placeholders, tool_args);
 
-    let binary = tool_binary.unwrap_or(tool.default_binary());
-    validate_tool_version(tool, binary, VERSION_TIMEOUT).await?;
+    if let Some(minimum) = &agent.minimum_version {
+        validate_tool_version(&binary, minimum, VERSION_TIMEOUT).await?;
+    }
 
     // Prepend a standard preamble so the model knows the input text is delimited
     // by <text> tags. This is always true (build_stdin_content wraps the user
@@ -309,10 +310,13 @@ pub async fn execute_ai_action(
          {system_prompt}"
     );
 
-    let prompt = build_stdin_content(&system_prompt, &user_prompt);
-    let stdin_content = match tool {
-        AiTool::ClaudeCode => claude_message(&prompt, attachment)?,
-        _ => prompt,
+    let mut prompt = build_stdin_content(&system_prompt, &user_prompt);
+    if let (Some(_), Some(reference)) = (&image, &agent.image_prompt) {
+        prompt = format!("{prompt}\n\n{}", placeholders.fill(reference));
+    }
+    let stdin_content = match agent.format {
+        AgentFormat::ClaudeStreamJson => claude_message(&prompt, image.as_deref())?,
+        AgentFormat::Text => prompt,
     };
 
     tracing::info!(
@@ -320,11 +324,10 @@ pub async fn execute_ai_action(
         binary,
         args.iter()
             .map(|a| {
-                let a = a.to_string_lossy();
                 if a.chars().count() > 50 {
                     format!("{}...", a.chars().take(50).collect::<String>())
                 } else {
-                    a.into_owned()
+                    a.clone()
                 }
             })
             .collect::<Vec<_>>()
@@ -334,8 +337,15 @@ pub async fn execute_ai_action(
 
     // Spawn the child process with terminal-hostile environment variables
     // to prevent tools from outputting ANSI escapes or attempting TTY interactions
-    let mut child = Command::new(binary)
+    let mut child = Command::new(&binary)
         .args(&args)
+        .current_dir(workdir.path())
+        .envs(
+            agent
+                .env
+                .iter()
+                .map(|(key, value)| (key, placeholders.fill(value))),
+        )
         .env("TERM", "dumb")
         .env("NO_COLOR", "1")
         .stdin(std::process::Stdio::piped())
@@ -387,14 +397,14 @@ pub async fn execute_ai_action(
     })??;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let claude = match tool {
-        AiTool::ClaudeCode => claude_result(&stdout),
-        _ => None,
+    let claude = match agent.format {
+        AgentFormat::ClaudeStreamJson => claude_result(&agent.name, &stdout),
+        AgentFormat::Text => None,
     };
     let text = match claude {
         Some(result) => result.inspect_err(|e| tracing::error!("{e}"))?,
         None => {
-            check_exit_status(binary, &output)?;
+            check_exit_status(&binary, &output)?;
             stdout.trim().to_string()
         }
     };
@@ -445,7 +455,12 @@ fn check_exit_status(binary: &str, output: &std::process::Output) -> anyhow::Res
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::agents::builtin_agents;
     use crate::config::InputRole;
+
+    fn agent(id: &str) -> AgentSpec {
+        builtin_agents()[id].clone()
+    }
 
     // ═══════════════════════════════════════════════════════════════════
     // 2.1.D — AI executor tests
@@ -483,71 +498,96 @@ mod tests {
         assert_eq!(user, "First paragraph.\n\nSecond paragraph.");
     }
 
-    fn args(tool: AiTool, attachment: Option<&str>, tool_args: &[&str]) -> Vec<String> {
+    fn args(id: &str, image: Option<&str>, tool_args: &[&str]) -> Vec<String> {
         let tool_args: Vec<String> = tool_args.iter().map(|a| a.to_string()).collect();
-        command_args(
-            &tool,
-            "test-model",
-            attachment.map(Path::new),
-            Some(&tool_args),
-        )
-        .unwrap()
-        .into_iter()
-        .map(|a| a.into_string().unwrap())
-        .collect()
+        let placeholders = Placeholders {
+            model: "test-model",
+            workdir: Path::new("/work"),
+            image: image.map(Path::new),
+        };
+        command_args(&agent(id), &placeholders, Some(&tool_args))
     }
 
     #[test]
-    fn command_args_returns_correct_args_for_each_tool() {
+    fn command_args_fill_the_model_and_workdir() {
         assert_eq!(
-            args(AiTool::OpenCode, None, &[]),
-            ["run", "--model", "test-model"]
-        );
-        assert_eq!(
-            args(AiTool::ClaudeCode, None, &[]),
+            args("opencode", None, &[]),
             [
-                "-p",
+                "run",
+                "--standalone",
+                "--agent",
+                "ostt",
                 "--model",
-                "test-model",
-                "--no-session-persistence",
-                "--mcp-config",
-                r#"{"mcpServers":{}}"#,
-                "--strict-mcp-config",
-                "--allowedTools",
-                "",
-                "--input-format",
-                "stream-json",
-                "--output-format",
-                "stream-json",
-                "--verbose",
+                "test-model"
             ]
         );
-        assert_eq!(
-            args(AiTool::GeminiCli, None, &[]),
-            ["--skip-trust", "-m", "test-model", "-p", ""]
-        );
-        assert_eq!(
-            args(AiTool::CodexCli, None, &[]),
-            ["exec", "--skip-git-repo-check", "--model", "test-model"]
+        let gemini = args("gemini-cli", None, &[]);
+        assert!(
+            gemini.contains(&"/work/ostt-policy.toml".to_string()),
+            "{gemini:?}"
         );
     }
 
-    /// The attachment flags take several values, so the path must be joined to
-    /// the flag; otherwise the user's `tool_args` would be read as more files.
+    /// The image flags take several values, so the path must be joined to the
+    /// flag; otherwise the user's `tool_args` would be read as more files.
     #[test]
-    fn attachment_is_one_argument_before_tool_args() {
+    fn image_args_come_before_tool_args() {
+        let codex = args("codex-cli", Some("/work/ostt-image.png"), &["-c", "x=1"]);
         assert_eq!(
-            args(AiTool::CodexCli, Some("/tmp/a.png"), &["-c", "x=1"])[4..],
-            ["--image=/tmp/a.png", "-c", "x=1"]
-        );
-        assert_eq!(
-            args(AiTool::OpenCode, Some("/tmp/a.png"), &["--agent", "plan"])[3..],
-            ["--file=/tmp/a.png", "--agent", "plan"]
+            codex[codex.len() - 3..],
+            ["--image=/work/ostt-image.png", "-c", "x=1"]
         );
         // Claude takes the image on stdin, so its arguments do not change
         assert_eq!(
-            args(AiTool::ClaudeCode, Some("/tmp/a.png"), &[]),
-            args(AiTool::ClaudeCode, None, &[])
+            args("claude-code", Some("/work/ostt-image.png"), &[]),
+            args("claude-code", None, &[])
+        );
+    }
+
+    fn has_args(command: &[String], expected: &[&str]) -> bool {
+        command.windows(expected.len()).any(|w| w == expected)
+    }
+
+    /// The prompt and screenshot can carry instructions from other people, so
+    /// every built-in agent must run without tools. These are the settings
+    /// that were verified to switch each agent's tools off.
+    #[test]
+    fn builtin_agents_run_without_tools() {
+        let check = |id: &str, expected: &[&str]| {
+            let command = &agent(id).command;
+            assert!(
+                has_args(command, expected),
+                "{id} lost {expected:?}: {command:?}"
+            );
+        };
+        check("claude-code", &["--tools", ""]);
+        check(
+            "claude-code",
+            &[
+                "--mcp-config",
+                r#"{"mcpServers":{}}"#,
+                "--strict-mcp-config",
+            ],
+        );
+        check("codex-cli", &["--sandbox", "read-only"]);
+        check("codex-cli", &["--disable", "shell_tool"]);
+        check("codex-cli", &["--ignore-user-config"]);
+        check("opencode", &["--standalone", "--agent", "ostt"]);
+        assert!(agent("opencode").env["OPENCODE_CONFIG_CONTENT"]
+            .contains(r#"{"action":"*","resource":"*","effect":"deny"}"#));
+        check("gemini-cli", &["--policy", "{workdir}/ostt-policy.toml"]);
+        let policy = &agent("gemini-cli").files["ostt-policy.toml"];
+        assert!(policy.contains(r#"toolName = "*""#) && policy.contains(r#"mcpName = "*""#));
+        check("pi", &["--no-tools"]);
+        check("pi", &["--no-mcp"]);
+        check("oh-my-pi", &["--no-tools"]);
+        check("oh-my-pi", &["--config", "{workdir}/ostt.yml"]);
+        assert!(agent("oh-my-pi").files["ostt.yml"].contains("enableProjectConfig: false"));
+        check("hermes", &["-t", "bot_room"]);
+        assert_eq!(
+            builtin_agents().len(),
+            7,
+            "a new built-in agent needs its tools-off check here"
         );
     }
 
@@ -565,7 +605,8 @@ mod tests {
         // The error message should contain the custom binary name, not the default.
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            &AiTool::ClaudeCode,
+            "claude-code",
+            &agent("claude-code"),
             "test-model",
             &messages,
             Some("/nonexistent/custom-binary"),
@@ -591,7 +632,8 @@ mod tests {
     async fn missing_cli_tool_returns_error_with_tool_name() {
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            &AiTool::OpenCode,
+            "opencode",
+            &agent("pi"),
             "test-model",
             &messages,
             Some("nonexistent-tool-binary-xyz"),
@@ -644,7 +686,8 @@ mod tests {
 
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            &AiTool::OpenCode,
+            "pi",
+            &agent("pi"),
             "unused",
             &messages,
             Some(script_path.to_str().unwrap()),
@@ -674,19 +717,91 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════════
 
     #[tokio::test]
-    async fn gemini_rejects_attachment_instead_of_dropping_it() {
+    async fn agent_without_images_rejects_attachment_instead_of_dropping_it() {
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            &AiTool::GeminiCli,
+            "hermes",
+            &agent("hermes"),
             "unused",
             &messages,
-            Some("/nonexistent/gemini"),
+            Some("/nonexistent/hermes"),
             None,
             Some(Path::new("/tmp/context.png")),
         )
         .await;
         let err = result.unwrap_err().to_string();
-        assert!(err.contains("attachments"), "got: {err}");
+        assert!(err.contains("does not take images"), "got: {err}");
+    }
+
+    /// An agent runs in its own empty directory, which holds the files its
+    /// spec lists and a copy of the image; its env and the image reference
+    /// in the prompt point there.
+    #[tokio::test]
+    async fn agent_runs_in_a_prepared_workdir() {
+        let dir = std::env::temp_dir().join("ostt_test_ai_workdir");
+        std::fs::create_dir_all(&dir).unwrap();
+        let image = dir.join("shot.jpg");
+        std::fs::write(&image, b"jpeg bytes").unwrap();
+        let report = dir.join("report");
+        let script_path = dir.join("agent.sh");
+        std::fs::write(
+            &script_path,
+            format!(
+                "#!/bin/sh\n{{ pwd; echo \"$AGENT_DIR\"; cat policy.txt; echo; cat ostt-image.jpg; echo; echo \"$@\"; cat; }} > '{}'\necho answer\n",
+                report.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let spec: AgentSpec = toml::from_str(&format!(
+            r#"
+            name = "Fake"
+            command = ["{}", "--model", "{{model}}"]
+            image_args = ["--image={{image}}"]
+            image_prompt = "@{{image}}"
+            env = {{ AGENT_DIR = "{{workdir}}" }}
+            files = {{ "policy.txt" = "deny all" }}
+            "#,
+            script_path.display()
+        ))
+        .unwrap();
+        let messages = vec![msg(InputRole::User, "spoken words")];
+        let result =
+            execute_ai_action("fake", &spec, "m1", &messages, None, None, Some(&image)).await;
+        let lines: Vec<String> = std::fs::read_to_string(&report)
+            .unwrap()
+            .lines()
+            .map(String::from)
+            .collect();
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert_eq!(result.unwrap(), "answer");
+        let workdir = &lines[0];
+        assert!(
+            workdir.contains("ostt-agent-"),
+            "not a fresh workdir: {workdir}"
+        );
+        assert_eq!(&lines[1], workdir);
+        assert_eq!(lines[2], "deny all");
+        assert_eq!(lines[3], "jpeg bytes");
+        assert_eq!(
+            lines[4],
+            format!("--model m1 --image={workdir}/ostt-image.jpg")
+        );
+        assert!(
+            lines.contains(&format!("@{workdir}/ostt-image.jpg")),
+            "{lines:?}"
+        );
+        assert!(
+            !Path::new(workdir).exists(),
+            "workdir must be removed afterwards"
+        );
     }
 
     /// Claude Code has no attach flag, so the image must travel inside the
@@ -717,7 +832,8 @@ mod tests {
 
         let messages = vec![msg(InputRole::User, "spoken words")];
         let result = execute_ai_action(
-            &AiTool::ClaudeCode,
+            "claude-code",
+            &agent("claude-code"),
             "unused",
             &messages,
             Some(script_path.to_str().unwrap()),
@@ -745,12 +861,18 @@ mod tests {
     #[test]
     fn claude_error_result_reports_its_reason() {
         let stdout = r#"{"type":"result","is_error":true,"result":"overloaded"}"#;
-        let err = claude_result(stdout).unwrap().unwrap_err().to_string();
+        let err = claude_result("Claude Code", stdout)
+            .unwrap()
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("overloaded"), "got: {err}");
 
         // Some error results carry only a subtype, without is_error
         let stdout = r#"{"type":"result","subtype":"error_max_turns"}"#;
-        let err = claude_result(stdout).unwrap().unwrap_err().to_string();
+        let err = claude_result("Claude Code", stdout)
+            .unwrap()
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("error_max_turns"), "got: {err}");
     }
 
@@ -775,7 +897,8 @@ mod tests {
 
         let messages = vec![msg(InputRole::User, "words")];
         let result = execute_ai_action(
-            &AiTool::ClaudeCode,
+            "claude-code",
+            &agent("claude-code"),
             "unused",
             &messages,
             Some(script_path.to_str().unwrap()),
@@ -814,7 +937,8 @@ mod tests {
 
         let messages = vec![msg(InputRole::User, "words")];
         let result = execute_ai_action(
-            &AiTool::ClaudeCode,
+            "claude-code",
+            &agent("claude-code"),
             "unused",
             &messages,
             Some(script_path.to_str().unwrap()),
@@ -843,8 +967,8 @@ mod tests {
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let result = validate_tool_version(
-            &AiTool::OpenCode,
             script_path.to_str().unwrap(),
+            "1.0.0",
             Duration::from_millis(200),
         )
         .await;

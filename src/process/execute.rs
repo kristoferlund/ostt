@@ -48,16 +48,24 @@ pub async fn execute_action(
             inputs,
             tool_binary,
             tool_args,
+            agent,
         } => {
             let messages = super::input::resolve_inputs(inputs, transcription, keywords)?;
             let tool = tool
-                .as_ref()
+                .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no tool", action.id))?;
+            let agent = agent.as_ref().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Unknown agent '{tool}' in action '{}'. Use 'ostt agent list' to see available agents.",
+                    action.id
+                )
+            })?;
             let model = model
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no model", action.id))?;
             super::ai::execute_ai_action(
                 tool,
+                agent,
                 model,
                 &messages,
                 tool_binary.as_deref(),

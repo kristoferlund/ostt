@@ -5,14 +5,14 @@
 //! user's config directory, while credentials are stored with restricted permissions
 //! in the user's local data directory.
 
+pub mod agents;
 pub(crate) mod edit;
 pub mod file;
 pub mod secrets;
 pub mod selection;
 
 pub use file::{
-    ActionDetails, ActionInput, AiTool, InputContent, InputRole, InputSource, ProcessAction,
-    ProcessConfig,
+    ActionDetails, ActionInput, InputContent, InputRole, InputSource, ProcessAction, ProcessConfig,
 };
 pub use file::{
     AudioConfig, ModelOptionValue, OsttConfig, OutputConfig, ParamsConfig, PasteConfig,

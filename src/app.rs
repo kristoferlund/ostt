@@ -283,6 +283,15 @@ enum Commands {
     /// and common transcription corrections.
     Replace,
 
+    /// List the agents AI processing actions can run
+    ///
+    /// Built-in agents, and those added or replaced in [process.agents] in
+    /// ostt.toml. An AI action names one with `tool = "<id>"`.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
+
     /// Open configuration file in your preferred editor
     ///
     /// Edit audio settings, provider options, and other configuration.
@@ -447,6 +456,16 @@ enum LocalModelCommand {
     Remove {
         #[arg(value_name = "MODEL_ID|PROVIDER/MODEL")]
         model_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentCommand {
+    /// List agents, whether each is installed and takes images
+    List {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
     },
 }
 
@@ -897,6 +916,9 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
         },
         Some(Commands::Replace) => commands::handle_replace().await?,
+        Some(Commands::Agent {
+            command: AgentCommand::List { format },
+        }) => commands::agent::handle_agent_list(&config_data, format.is_json())?,
         Some(Commands::Config { command }) => match command {
             None => commands::handle_config()?,
             Some(ConfigCommand::Path) => commands::config::handle_config_path()?,
