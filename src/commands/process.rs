@@ -129,6 +129,17 @@ pub async fn handle_process(
     Ok(())
 }
 
+/// Whether `--attach` works with the action: bash actions get the image's
+/// path, AI actions need an agent that takes images.
+fn takes_images(action: &config::ProcessAction) -> bool {
+    match &action.details {
+        config::ActionDetails::Bash { .. } => true,
+        config::ActionDetails::Ai { agent, .. } => {
+            matches!(agent, config::agents::AgentLookup::Found(spec) if spec.takes_images())
+        }
+    }
+}
+
 pub fn handle_process_list(
     config_data: &config::OsttConfig,
     json: bool,
@@ -149,6 +160,7 @@ pub fn handle_process_list(
                     "id": action.id,
                     "name": action.name,
                     "description": action.description,
+                    "images": takes_images(action),
                 })
             })
             .collect();
@@ -161,4 +173,47 @@ pub fn handle_process_list(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Integrations offer a screenshot only for actions that can use one, so
+    /// an action whose agent takes no images must say so.
+    #[test]
+    fn images_follow_the_actions_agent() {
+        let config: config::ProcessConfig = toml::from_str(
+            r#"
+            [actions.copy]
+            name = "Copy"
+            type = "bash"
+            command = "cat"
+
+            [actions.claude]
+            name = "Claude"
+            type = "ai"
+            tool = "claude-code"
+            model = "haiku"
+            inputs = [{ role = "user", source = "transcription" }]
+
+            [actions.hermes]
+            name = "Hermes"
+            type = "ai"
+            tool = "hermes"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+
+            [actions.unknown]
+            name = "Unknown"
+            type = "ai"
+            tool = "nope"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let images: Vec<bool> = config.actions.iter().map(takes_images).collect();
+        assert_eq!(images, [true, true, false, false]);
+    }
 }
