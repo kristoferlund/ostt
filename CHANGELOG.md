@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Claude Code, Codex and OpenCode actions receive the image; bash actions get its path in `$OSTT_ATTACHMENT`. Gemini CLI actions do not support attachments yet.
+
+### Changed
+
+- Claude Code actions now read Claude's structured output, so a failure shows Claude's reason instead of raw output.
+- An empty transcription is no longer sent to the processing action.
+
+### Fixed
+
+- A processing action no longer hangs forever when the tool's `--version` check never returns; it fails after 10 seconds. Tools that time out are now stopped instead of left running.
+- A large prompt can no longer block a processing action before its timeout starts, and a tool that exits early reports its own error instead of "Broken pipe".
+
 ## 0.0.30 - 2026-10-21
 
 ### Added

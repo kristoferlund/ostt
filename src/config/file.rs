@@ -353,53 +353,6 @@ impl AiTool {
             AiTool::CodexCli => "codex",
         }
     }
-
-    /// Returns the tool-specific required CLI arguments given a model and system prompt.
-    ///
-    /// - OpenCode: `["run", "--model", model]`
-    /// - Claude Code: `["-p", "--system-prompt", system, "--model", model]`
-    /// - Gemini CLI: `["-p", system, "-m", model]`
-    /// - Codex CLI: `["exec", system, "--model", model]`
-    pub fn build_required_args(&self, model: &str) -> Vec<String> {
-        match self {
-            AiTool::OpenCode => {
-                vec!["run".to_string(), "--model".to_string(), model.to_string()]
-            }
-            AiTool::ClaudeCode => {
-                vec![
-                    "-p".to_string(),
-                    "--model".to_string(),
-                    model.to_string(),
-                    "--no-session-persistence".to_string(),
-                    "--mcp-config".to_string(),
-                    r#"{"mcpServers":{}}"#.to_string(),
-                    "--strict-mcp-config".to_string(),
-                    "--allowedTools".to_string(),
-                    String::new(),
-                ]
-            }
-            AiTool::GeminiCli => {
-                // `-p` needs a value; stdin is appended to it. Headless mode
-                // refuses untrusted directories without `--skip-trust`.
-                vec![
-                    "--skip-trust".to_string(),
-                    "-m".to_string(),
-                    model.to_string(),
-                    "-p".to_string(),
-                    String::new(),
-                ]
-            }
-            AiTool::CodexCli => {
-                // Without `--skip-git-repo-check`, Codex refuses to run outside a git repo.
-                vec![
-                    "exec".to_string(),
-                    "--skip-git-repo-check".to_string(),
-                    "--model".to_string(),
-                    model.to_string(),
-                ]
-            }
-        }
-    }
 }
 
 /// Type-specific fields for a processing action.

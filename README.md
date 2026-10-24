@@ -96,6 +96,7 @@ ostt launch -c -p clean       # Popup hotkey workflow with processing
 ostt process                  # Process most recent history item, show picker
 ostt process clean            # Process most recent history item with clean action
 ostt process 3 clean -c       # Process history item #3 with clean action
+ostt process clean --attach screen.png  # Send an image to the AI action too
 ostt process list             # List configured actions
 ```
 

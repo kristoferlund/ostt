@@ -86,6 +86,11 @@ struct Cli {
     #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
     process: Option<String>,
 
+    /// Image to send to the processing action (AI actions get the image,
+    /// bash actions its path in OSTT_ATTACHMENT)
+    #[arg(long, value_name = "FILE", requires = "process", value_parser = parse_attachment)]
+    attach: Option<PathBuf>,
+
     /// Override transcription model for this run
     #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
     model: Option<String>,
@@ -134,6 +139,11 @@ enum Commands {
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
 
+        /// Image to send to the processing action (AI actions get the image,
+        /// bash actions its path in OSTT_ATTACHMENT)
+        #[arg(long, value_name = "FILE", requires = "process", value_parser = parse_attachment)]
+        attach: Option<PathBuf>,
+
         /// Override transcription model for this run
         #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
         model: Option<String>,
@@ -163,6 +173,11 @@ enum Commands {
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
+
+        /// Image to send to the processing action (AI actions get the image,
+        /// bash actions its path in OSTT_ATTACHMENT)
+        #[arg(long, value_name = "FILE", requires = "process", value_parser = parse_attachment)]
+        attach: Option<PathBuf>,
 
         /// Override transcription model for this run
         #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
@@ -200,6 +215,11 @@ enum Commands {
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
+
+        /// Image to send to the processing action (AI actions get the image,
+        /// bash actions its path in OSTT_ATTACHMENT)
+        #[arg(long, value_name = "FILE", requires = "process", value_parser = parse_attachment)]
+        attach: Option<PathBuf>,
 
         /// Override transcription model for this run
         #[arg(short = 'm', long = "model", value_name = "PROVIDER/MODEL")]
@@ -311,6 +331,11 @@ enum Commands {
         /// Write result to file instead of stdout (shadows global -o)
         #[arg(short, long, value_name = "FILE")]
         output: Option<String>,
+
+        /// Image to send to the action (AI actions get the image, bash actions
+        /// its path in OSTT_ATTACHMENT)
+        #[arg(long, value_name = "FILE", value_parser = parse_attachment)]
+        attach: Option<PathBuf>,
 
         /// Output format for `ostt process list`
         #[arg(long, value_enum, default_value_t = ListFormat::Table)]
@@ -543,6 +568,29 @@ enum AuthCommand {
     Status,
 }
 
+/// Parses `--attach`: the file must exist and be a supported image. The path
+/// is made absolute, as `ostt launch` passes it to a popup that may start in
+/// another directory.
+fn parse_attachment(value: &str) -> Result<PathBuf, String> {
+    let path = std::path::absolute(value).map_err(|e| format!("invalid path {value}: {e}"))?;
+    if !path.is_file() {
+        return Err(format!("file not found: {value}"));
+    }
+    crate::process::image_media_type(&path).map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// A top-level `--attach` belongs to the default record command (or `launch`);
+/// before another subcommand it would be silently ignored.
+fn check_top_level_attach(cli: &Cli) -> anyhow::Result<()> {
+    if cli.attach.is_some() && !matches!(cli.command, None | Some(Commands::Launch { .. })) {
+        return Err(anyhow!(
+            "Put --attach after the subcommand, next to its --process."
+        ));
+    }
+    Ok(())
+}
+
 fn resolve_process_args(
     index_or_action: Option<String>,
     action: Option<String>,
@@ -585,6 +633,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
     }
 
     let cli = Cli::parse();
+    check_top_level_attach(&cli)?;
 
     // Handle commands that don't need logging or config setup
     // The `daemon run` subcommand is the long-running daemon process itself.
@@ -675,15 +724,30 @@ pub async fn run() -> Result<(), anyhow::Error> {
             // Default command is record
             // Merge top-level options with explicit record command options
             // If both are specified, the explicit record command options take precedence
-            let (clipboard, paste, output, process, model) = match cli.command {
+            let (clipboard, paste, output, process, attach, model) = match cli.command {
                 Some(Commands::Record {
                     clipboard,
                     paste,
                     output,
                     process,
+                    attach,
                     model,
-                }) => (clipboard, paste, output, process, model.or(cli.model)),
-                None => (cli.clipboard, cli.paste, cli.output, cli.process, cli.model),
+                }) => (
+                    clipboard,
+                    paste,
+                    output,
+                    process,
+                    attach,
+                    model.or(cli.model),
+                ),
+                None => (
+                    cli.clipboard,
+                    cli.paste,
+                    cli.output,
+                    cli.process,
+                    cli.attach,
+                    cli.model,
+                ),
                 _ => unreachable!(),
             };
             ensure_single_output_mode(clipboard, paste, output.as_ref())?;
@@ -697,6 +761,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 paste,
                 output,
                 process,
+                attach.as_deref(),
                 model_override,
                 &cli.params,
             )
@@ -708,6 +773,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
             paste,
             output,
             process,
+            attach,
             model,
         }) => {
             ensure_single_output_mode(clipboard, paste, output.as_ref())?;
@@ -724,6 +790,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                     paste,
                     output_file: output,
                     process,
+                    attachment: attach.as_deref(),
                     model_override,
                     param_overrides: &cli.params,
                 },
@@ -736,6 +803,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
             paste,
             output,
             process,
+            attach,
             model,
         }) => {
             ensure_single_output_mode(clipboard, paste, output.as_ref())?;
@@ -752,6 +820,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
                     paste,
                     output_file: output,
                     process,
+                    attachment: attach.as_deref(),
                     model_override,
                     param_overrides: &cli.params,
                 },
@@ -847,16 +916,26 @@ pub async fn run() -> Result<(), anyhow::Error> {
             clipboard,
             paste,
             output,
+            attach,
             ..
         }) => {
             ensure_single_output_mode(clipboard, paste, output.as_ref())?;
             let (index, action) = resolve_process_args(index_or_action, action)?;
-            commands::handle_process(&config_data, index, action, false, clipboard, paste, output)
-                .await?;
+            commands::handle_process(
+                &config_data,
+                index,
+                action,
+                false,
+                clipboard,
+                paste,
+                output,
+                attach.as_deref(),
+            )
+            .await?;
         }
         Some(Commands::Launch { args }) => {
             ensure_single_output_mode(cli.clipboard, cli.paste, cli.output.as_ref())?;
-            // Reconstruct the full ostt args list. Global flags (-c, -o, -p) are
+            // Reconstruct the full ostt args list. Top-level flags are
             // consumed by clap before they reach the Launch args vec, so we
             // re-inject them here so they get passed to the spawned ostt instance.
             let mut full_args = args;
@@ -865,6 +944,10 @@ pub async fn run() -> Result<(), anyhow::Error> {
                     full_args.insert(0, process);
                 }
                 full_args.insert(0, "-p".to_string());
+            }
+            if let Some(ref attach) = cli.attach {
+                full_args.insert(0, attach.to_string_lossy().into_owned());
+                full_args.insert(0, "--attach".to_string());
             }
             if cli.clipboard {
                 full_args.insert(0, "-c".to_string());
@@ -1277,5 +1360,107 @@ mod tests {
                 .expect("parse cli");
 
         assert_eq!(cli.params, vec!["language=sv"]);
+    }
+
+    fn temp_image(name: &str) -> PathBuf {
+        let path = std::env::temp_dir().join(name);
+        fs::write(&path, b"png").unwrap();
+        path
+    }
+
+    #[test]
+    fn cli_accepts_attach_with_process_on_default_record_and_transcribe() {
+        let image = temp_image("ostt_cli_attach_ok.png");
+        let image_arg = image.to_str().unwrap();
+
+        let cli =
+            Cli::try_parse_from(["ostt", "-p", "ctx", "--attach", image_arg]).expect("parse cli");
+        assert_eq!(cli.attach.as_deref(), Some(image.as_path()));
+
+        let cli = Cli::try_parse_from([
+            "ostt",
+            "transcribe",
+            "audio.wav",
+            "-p",
+            "ctx",
+            "--attach",
+            image_arg,
+        ])
+        .expect("parse cli");
+        match cli.command {
+            Some(Commands::Transcribe { attach, .. }) => {
+                assert_eq!(attach.as_deref(), Some(image.as_path()));
+            }
+            _ => panic!("expected transcribe command"),
+        }
+        fs::remove_file(image).ok();
+    }
+
+    fn parse_error(args: &[&str]) -> String {
+        match Cli::try_parse_from(args) {
+            Ok(_) => panic!("expected {args:?} to be rejected"),
+            Err(e) => e.to_string(),
+        }
+    }
+
+    /// An attachment without an action would be silently ignored.
+    #[test]
+    fn cli_rejects_attach_without_process() {
+        let image = temp_image("ostt_cli_attach_noprocess.png");
+        let err = parse_error(&[
+            "ostt",
+            "transcribe",
+            "audio.wav",
+            "--attach",
+            image.to_str().unwrap(),
+        ]);
+        fs::remove_file(image).ok();
+        assert!(err.contains("--process"), "got: {err}");
+    }
+
+    /// Bad attachments fail before recording or transcribing, not after.
+    #[test]
+    fn cli_rejects_missing_or_non_image_attachment() {
+        let err = parse_error(&["ostt", "-p", "ctx", "--attach", "/nonexistent/a.png"]);
+        assert!(err.contains("file not found"), "got: {err}");
+
+        let text = std::env::temp_dir().join("ostt_cli_attach.txt");
+        fs::write(&text, b"text").unwrap();
+        let err = parse_error(&["ostt", "-p", "ctx", "--attach", text.to_str().unwrap()]);
+        fs::remove_file(text).ok();
+        assert!(err.contains("Unsupported attachment type"), "got: {err}");
+    }
+
+    /// Before a subcommand, a top-level --attach would be silently ignored.
+    #[test]
+    fn top_level_attach_is_rejected_before_a_subcommand() {
+        let image = temp_image("ostt_cli_attach_toplevel.png");
+        let image_arg = image.to_str().unwrap();
+        let before_transcribe = Cli::try_parse_from([
+            "ostt",
+            "--attach",
+            image_arg,
+            "-p",
+            "ctx",
+            "transcribe",
+            "a.wav",
+        ])
+        .expect("parse cli");
+        let default_record =
+            Cli::try_parse_from(["ostt", "--attach", image_arg, "-p", "ctx"]).expect("parse cli");
+        fs::remove_file(image).ok();
+
+        assert!(check_top_level_attach(&before_transcribe).is_err());
+        assert!(check_top_level_attach(&default_record).is_ok());
+    }
+
+    /// `ostt launch` hands the path to a popup that may start elsewhere.
+    #[test]
+    fn attachment_path_is_made_absolute() {
+        let name = "ostt_cli_attach_relative.png";
+        fs::write(name, b"png").unwrap();
+        let parsed = parse_attachment(name);
+        fs::remove_file(name).ok();
+        assert_eq!(parsed.unwrap(), std::env::current_dir().unwrap().join(name));
     }
 }
