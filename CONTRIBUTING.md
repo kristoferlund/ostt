@@ -4,6 +4,8 @@ Thank you for contributing. OSTT is a terminal-native speech-to-text tool for
 Linux and macOS, with cloud providers, local inference, and scriptable output
 and processing workflows.
 
+Report security problems privately, not in an issue. See [SECURITY.md](SECURITY.md).
+
 ## An issue is required before implementation
 
 **You must open an issue before starting implementation and before submitting
