@@ -29,12 +29,10 @@ enum Msg {
 fn run_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
     // An action's description, when any action has one, is a muted second line.
     let with_descriptions = actions.iter().any(|action| action.description.is_some());
-    let rows: Vec<String> = actions
+    let rows: Vec<String> = actions.iter().map(|action| action.name.clone()).collect();
+    let descriptions: Vec<String> = actions
         .iter()
-        .map(|action| match &action.description {
-            Some(description) => format!("{}\n{description}", action.name),
-            None => action.name.clone(),
-        })
+        .map(|action| action.description.clone().unwrap_or_default())
         .collect();
     let mut session = session::open()?;
     let mut ratcn = Ratcn::new().focus(|state: &State| &state.focus, Msg::Focus);
@@ -58,11 +56,11 @@ fn run_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
                 Msg::Confirm,
             );
             let list = if with_descriptions {
+                let descriptions = descriptions.clone();
                 list.paint_item(move |_, row| {
-                    let (title, detail) = row.label.split_once('\n').unwrap_or((row.label, ""));
                     Text::from(vec![
-                        Line::styled(format!(" {title}"), name),
-                        Line::styled(format!(" {detail}"), description),
+                        Line::styled(format!(" {}", row.label), name),
+                        Line::styled(format!(" {}", descriptions[row.index]), description),
                     ])
                 })
             } else {

@@ -35,6 +35,7 @@ pub async fn handle_transcribe(
         param_overrides,
     } = options;
 
+    process::check_requested_action(&config_data.process, process.as_deref())?;
     // Validate the input file exists
     if !file.exists() {
         return Err(anyhow::anyhow!("Audio file not found: {}", file.display()));
@@ -57,24 +58,24 @@ pub async fn handle_transcribe(
     tracing::debug!("Transcription completed: {}", transcription_text);
 
     history::save_transcription(&transcription_text)?;
-    let output_text = process::apply_requested_action(
+    let processed = process::apply_requested_action(
         &config_data.process,
         &transcription_text,
         &context.keywords,
         process.as_deref(),
         attachment,
     )
-    .await?;
-    output::write_text(
-        &output_text,
-        output_file,
-        clipboard,
-        paste,
-        &config_data.output.paste,
-        "Output text",
-    )?;
-
-    Ok(())
+    .await;
+    process::output_processed(processed, &transcription_text, |text| {
+        output::write_text(
+            text,
+            output_file,
+            clipboard,
+            paste,
+            &config_data.output.paste,
+            "Output text",
+        )
+    })
 }
 
 pub struct TranscribeOptions<'a> {

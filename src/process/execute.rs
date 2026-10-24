@@ -5,6 +5,7 @@
 //! `execute_action_with_animation` which wraps the action in an animated
 //! progress indicator.
 
+use crate::config::agents::UserAgents;
 use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::session;
@@ -17,6 +18,7 @@ use std::path::Path;
 /// For AI actions: resolves inputs, invokes the configured CLI tool, returns response.
 ///
 /// # Arguments
+/// * `agents` - The user's agents, for an AI action's agent
 /// * `action` - The action configuration to execute
 /// * `transcription` - The raw transcription text
 /// * `keywords` - The user's keyword list (for AI actions that reference keywords)
@@ -27,6 +29,7 @@ use std::path::Path;
 /// - If the action type is AI and the CLI tool invocation fails
 /// - If input resolution fails (missing file, etc.)
 pub async fn execute_action(
+    agents: &UserAgents,
     action: &ProcessAction,
     transcription: &str,
     keywords: &[String],
@@ -48,21 +51,26 @@ pub async fn execute_action(
             inputs,
             tool_binary,
             tool_args,
+            timeout_secs,
         } => {
             let messages = super::input::resolve_inputs(inputs, transcription, keywords)?;
             let tool = tool
-                .as_ref()
+                .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no tool", action.id))?;
             let model = model
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no model", action.id))?;
             super::ai::execute_ai_action(
-                tool,
+                agents.resolve(tool)?,
                 model,
                 &messages,
-                tool_binary.as_deref(),
-                tool_args.as_deref(),
-                attachment,
+                super::ai::RunOptions {
+                    tool_binary: tool_binary.as_deref(),
+                    tool_args: tool_args.as_deref(),
+                    timeout: timeout_secs
+                        .map_or(super::ai::DEFAULT_TIMEOUT, std::time::Duration::from_secs),
+                    attachment,
+                },
             )
             .await
         }
@@ -101,6 +109,27 @@ where
     }
 }
 
+/// A processing action failed, and the unprocessed transcription was output
+/// in its place so the words are not lost. ostt exits with status 3 for it,
+/// which tells callers that output was still written.
+#[derive(Debug, thiserror::Error)]
+#[error("Processing failed, so the transcription was output unprocessed")]
+pub struct ProcessingFailed(#[source] pub anyhow::Error);
+
+/// Exit status for [`ProcessingFailed`].
+pub const PROCESSING_FAILED_EXIT: u8 = 3;
+
+/// Writes the processed text with `write`, or the unprocessed text if
+/// processing failed, in which case it returns [`ProcessingFailed`].
+pub fn output_processed(
+    processed: anyhow::Result<String>,
+    unprocessed: &str,
+    write: impl FnOnce(&str) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
+    write(processed.as_deref().unwrap_or(unprocessed))?;
+    processed.map(drop).map_err(|e| ProcessingFailed(e).into())
+}
+
 pub async fn apply_requested_action(
     process_config: &ProcessConfig,
     transcription: &str,
@@ -109,8 +138,9 @@ pub async fn apply_requested_action(
     attachment: Option<&Path>,
 ) -> anyhow::Result<String> {
     if process_arg.is_some() && transcription.trim().is_empty() {
+        // As in the record flow: nothing to process, so the text is output as is.
         tracing::info!("Transcription is empty; skipping processing");
-        return Ok(String::new());
+        return Ok(transcription.to_string());
     }
 
     let Some(action) = select_requested_action(process_config, process_arg, |actions| {
@@ -124,15 +154,42 @@ pub async fn apply_requested_action(
     };
 
     if process_arg == Some("") {
-        return match execute_action_with_animation(&action, transcription, keywords, attachment)
-            .await?
+        return match execute_action_with_animation(
+            &process_config.agents,
+            &action,
+            transcription,
+            keywords,
+            attachment,
+        )
+        .await?
         {
             Some(result) => Ok(result),
             None => Ok(transcription.to_string()),
         };
     }
 
-    execute_action(&action, transcription, keywords, attachment).await
+    execute_action(
+        &process_config.agents,
+        &action,
+        transcription,
+        keywords,
+        attachment,
+    )
+    .await
+}
+
+/// Fails for a named action that does not exist, so a mistyped `--process`
+/// is reported before recording or transcribing rather than after.
+pub fn check_requested_action(
+    process_config: &ProcessConfig,
+    process_arg: Option<&str>,
+) -> anyhow::Result<()> {
+    match process_arg {
+        Some(action_id) if !action_id.is_empty() => {
+            find_action(process_config, action_id).map(drop)
+        }
+        _ => Ok(()),
+    }
 }
 
 fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Result<ProcessAction> {
@@ -156,6 +213,7 @@ fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Resul
 /// - `Ok(None)` — user cancelled during processing
 /// - `Err(...)` — action failed
 pub async fn execute_action_with_animation(
+    agents: &UserAgents,
     action: &ProcessAction,
     transcription: &str,
     keywords: &[String],
@@ -168,6 +226,7 @@ pub async fn execute_action_with_animation(
     animation.set_status_label("Processing...");
 
     // Clone data for the spawned task
+    let agents_clone = agents.clone();
     let action_clone = action.clone();
     let transcription_clone = transcription.to_string();
     let keywords_clone = keywords.to_vec();
@@ -175,6 +234,7 @@ pub async fn execute_action_with_animation(
 
     let task_handle = tokio::spawn(async move {
         execute_action(
+            &agents_clone,
             &action_clone,
             &transcription_clone,
             &keywords_clone,
@@ -237,6 +297,102 @@ mod tests {
     // 3.2 — Action dispatcher tests
     // ═══════════════════════════════════════════════════════════════════
 
+    /// An action whose agent the user defined but broke must say so, not
+    /// claim the agent is unknown or run a built-in one instead.
+    #[tokio::test]
+    async fn action_with_invalid_agent_reports_why() {
+        let config: ProcessConfig = toml::from_str(
+            r#"
+            [agents.claude-code]
+            name = "My Claude"
+            comand = ["/opt/claude"]
+
+            [actions.a]
+            name = "A"
+            type = "ai"
+            tool = "claude-code"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let err = execute_action(&config.agents, &config.actions[0], "words", &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not valid"), "{err}");
+        assert!(err.contains("command"), "{err}");
+    }
+
+    /// An action's own timeout bounds a hung agent, so dictation does not
+    /// wait the default five minutes.
+    #[tokio::test]
+    async fn action_timeout_stops_a_hung_agent() {
+        let config: ProcessConfig = toml::from_str(
+            r#"
+            [agents.slow]
+            name = "Slow"
+            command = ["sh", "-c", "sleep 10"]
+
+            [actions.a]
+            name = "A"
+            type = "ai"
+            tool = "slow"
+            model = "m"
+            timeout_secs = 1
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let started = std::time::Instant::now();
+        let err = execute_action(&config.agents, &config.actions[0], "words", &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("timed out after 1s"), "{err}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    /// A failed action must not lose the words: the unprocessed text is
+    /// written, and the error is one main turns into exit status 3.
+    #[test]
+    fn failed_processing_outputs_the_unprocessed_text() {
+        let mut written = String::new();
+        let result = output_processed(Err(anyhow::anyhow!("agent down")), "raw words", |text| {
+            written = text.to_string();
+            Ok(())
+        });
+        assert_eq!(written, "raw words");
+        let err = result.unwrap_err();
+        assert!(err.is::<ProcessingFailed>());
+        assert!(format!("{err:?}").contains("agent down"), "{err:?}");
+
+        let mut written = String::new();
+        output_processed(Ok("processed".into()), "raw words", |text| {
+            written = text.to_string();
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(written, "processed");
+    }
+
+    /// A mistyped action is reported before any recording or transcription;
+    /// an empty one means "show the picker" and is not checked.
+    #[test]
+    fn requested_action_is_checked_up_front() {
+        let config: ProcessConfig = toml::from_str(
+            "[actions.clean]\nname = \"Clean\"\ntype = \"bash\"\ncommand = \"cat\"\n",
+        )
+        .unwrap();
+        assert!(check_requested_action(&config, Some("clean")).is_ok());
+        assert!(check_requested_action(&config, Some("")).is_ok());
+        assert!(check_requested_action(&config, None).is_ok());
+        let err = check_requested_action(&config, Some("claen"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("Unknown action 'claen'"), "{err}");
+    }
+
     /// Helper: create a bash ProcessAction.
     fn bash_action(command: &str) -> ProcessAction {
         ProcessAction {
@@ -252,21 +408,23 @@ mod tests {
     #[tokio::test]
     async fn bash_cat_returns_transcription_as_is() {
         let action = bash_action("cat");
-        let result = execute_action(&action, "hello world", &[], None).await;
+        let result =
+            execute_action(&UserAgents::default(), &action, "hello world", &[], None).await;
         assert_eq!(result.unwrap(), "hello world");
     }
 
     #[tokio::test]
     async fn bash_tr_transforms_text() {
         let action = bash_action("tr '[:lower:]' '[:upper:]'");
-        let result = execute_action(&action, "hello world", &[], None).await;
+        let result =
+            execute_action(&UserAgents::default(), &action, "hello world", &[], None).await;
         assert_eq!(result.unwrap(), "HELLO WORLD");
     }
 
     #[tokio::test]
     async fn bash_failure_returns_error() {
         let action = bash_action("echo err >&2; exit 1");
-        let result = execute_action(&action, "", &[], None).await;
+        let result = execute_action(&UserAgents::default(), &action, "", &[], None).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(
@@ -283,6 +441,6 @@ mod tests {
             ..Default::default()
         };
         let result = apply_requested_action(&config, "  \n", &[], Some("test"), None).await;
-        assert_eq!(result.unwrap(), "");
+        assert_eq!(result.unwrap(), "  \n");
     }
 }

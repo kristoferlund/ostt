@@ -1,0 +1,222 @@
+# Built-in agents for AI processing actions.
+#
+# Each entry says how to run an agent non-interactively. An action names one
+# with `tool = "<id>"`, and `[process.agents.<id>]` in ostt.toml adds an agent
+# or replaces one of these. ostt runs the agent in a new empty directory, writes
+# the prompt to its stdin, and reads the answer from its stdout.
+#
+# Every agent here runs with all its tools switched off: the prompt and the
+# screenshot can contain text written by other people, which must not be able
+# to make the agent run commands or read and change files.
+#
+# Fields:
+#   name             Display name.
+#   command          Program and arguments. {model} is the action's model,
+#                    {workdir} the agent's empty working directory, and
+#                    {prompt} the prompt, for agents that take it as an
+#                    argument; without {prompt} it goes to stdin. A prompt in
+#                    an argument is limited to 128 KB and visible to other
+#                    local users (in /proc) while the agent runs.
+#   format           "text" (default): plain prompt in, answer on stdout.
+#                    "claude-stream-json": Claude Code's stream-json messages,
+#                    which carry the image in the message itself.
+#   image_args       Arguments added when an image is attached; {image} is its
+#                    path. Without image_args or image_prompt (or the Claude
+#                    format), the agent takes no images.
+#   image_prompt     Text added to the end of the prompt to attach the image.
+#   env              Environment variables for the agent.
+#   files            Files written into the working directory before it runs,
+#                    by relative path.
+#   models           Models to offer when setting up an action (`ostt agent
+#                    models <id>`), for agents with a short fixed list.
+#   models_command   Command that prints the agent's models, one per line.
+#
+# Agents marked "ran it" were run through ostt with these settings: a text
+# prompt, an image, and an attempt to make them create a file and read
+# /etc/hostname, which found no tools. Agents marked "checked against the
+# docs" were not signed in on the machine they were added on: their flags were
+# checked against the installed CLI's --help (and parsed by it, where it was
+# installed) and their official documentation.
+#
+# Not included: Crush, whose `crush run` approves every tool and has no way to
+# switch off all MCP servers without also dropping the user's credentials; and
+# Muse Code, which has no official documentation of its headless mode.
+
+# Ran it with 2.1.309: text, image, and a touch/read attempt that found no
+# tools. `--tools ""` removes every built-in tool; the empty strict MCP config
+# removes MCP servers.
+[claude-code]
+name = "Claude Code"
+format = "claude-stream-json"
+command = [
+  "claude", "-p", "--model", "{model}", "--no-session-persistence",
+  "--tools", "", "--mcp-config", '{"mcpServers":{}}', "--strict-mcp-config",
+  "--disable-slash-commands",
+  "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+]
+models = ["haiku", "sonnet", "opus"]
+
+# Ran it with 0.163.0: text, image, and a touch/read attempt with no shell or
+# file tool available. Codex has no single switch for tools, so each feature
+# that provides one is disabled. What the model is still offered (from the
+# request in Codex's trace log): `exec`, JavaScript in an isolate with no file
+# system or network whose nested tools are apply_patch, stopped by the
+# read-only sandbox, MCP resources, of which `--ignore-user-config` leaves
+# none, and the clock; sub-agents with these same settings; and asking the
+# user, which `exec` mode cannot do.
+[codex-cli]
+name = "Codex"
+command = [
+  "codex", "exec", "--skip-git-repo-check", "--ephemeral",
+  "--ignore-user-config", "--ignore-rules", "--sandbox", "read-only",
+  "--disable", "shell_tool", "--disable", "unified_exec",
+  "--disable", "view_image", "--disable", "apps", "--disable", "plugins",
+  "--disable", "multi_agent", "--disable", "goals",
+  "--disable", "image_generation", "--disable", "browser_use",
+  "--disable", "computer_use", "--disable", "hooks", "--disable", "sleep_tool",
+  "-c", 'web_search="disabled"',
+  "--model", "{model}",
+]
+# --image takes several values, so the path is joined to the flag.
+image_args = ["--image={image}"]
+
+# Ran it with 2.1.3: text, image, and a touch attempt refused for lack of
+# tools. The agent defined in OPENCODE_CONFIG_CONTENT denies every permission;
+# `--standalone` makes run read it instead of using a running OpenCode server.
+[opencode]
+name = "OpenCode"
+command = ["opencode", "run", "--standalone", "--agent", "ostt", "--model", "{model}"]
+image_args = ["--file={image}"]
+models_command = ["opencode", "models"]
+env = { OPENCODE_CONFIG_CONTENT = '{"agents":{"ostt":{"mode":"primary","description":"Processes dictation without tools","permissions":[{"action":"*","resource":"*","effect":"deny"}]}}}' }
+
+# Ran it with 0.65.0: text, image, and touch/read/fetch attempts with no tool
+# calls made. The policy denies every tool and MCP tool. The CLI reads an
+# `@path` in the prompt itself, not through a tool, so the image still works;
+# it must be inside the working directory, where ostt puts it. An `@path` in
+# the dictated text is read the same way, but only inside that directory,
+# which holds just the policy and the image (checked: `@/etc/hostname` was
+# not read).
+[gemini-cli]
+name = "Gemini CLI"
+command = [
+  "gemini", "--skip-trust", "-m", "{model}",
+  "--policy", "{workdir}/ostt-policy.toml", "-o", "text", "-p", "",
+]
+image_prompt = "@{image}"
+
+[gemini-cli.files]
+"ostt-policy.toml" = '''
+[[rule]]
+toolName = "*"
+decision = "deny"
+priority = 999
+
+[[rule]]
+toolName = "*"
+mcpName = "*"
+decision = "deny"
+priority = 999
+'''
+
+# Ran it with 1.4.0 against a mock provider: the request declared no tools
+# and a forced tool call was refused; the image arrived as an image part.
+# `--no-tools` removes built-in, extension and MCP tools.
+[pi]
+name = "Pi"
+command = [
+  "pi", "-p", "--no-session", "--no-tools", "--no-extensions", "--no-mcp",
+  "--no-skills", "--no-prompt-templates", "--no-themes", "--no-context-files",
+  "--no-approve", "--model", "{model}",
+]
+image_args = ["@{image}"]
+
+# Ran it with 18.12.6 against a mock provider, as for Pi. `--no-tools` keeps
+# MCP tools, so the config overlay turns off MCP and every source of
+# extensions and context.
+[oh-my-pi]
+name = "Oh My Pi"
+command = [
+  "omp", "-p", "--no-session", "--no-tools", "--no-lsp", "--no-extensions",
+  "--no-skills", "--no-rules", "--no-title",
+  "--config", "{workdir}/ostt.yml", "--model", "{model}",
+]
+image_args = ["@{image}"]
+
+[oh-my-pi.files]
+"ostt.yml" = '''
+mcp:
+  enableProjectConfig: false
+disabledProviders: [native, omp-plugins, claude, agent-plugins, codex, agents, claude-plugins, gemini, opencode, cursor, windsurf, cline, github, vscode, agents-md, claude-md, custom-context, mcp-json, ssh-json, builtin-defaults]
+'''
+
+# Ran it with 0.21.3: text, and a touch attempt that found no tools. The
+# bot_room toolset has no tools and keeps MCP servers out. Images are left out:
+# whether Hermes sends one to the model depends on the user's Hermes config,
+# and otherwise it is silently replaced by a description.
+[hermes]
+name = "Hermes"
+command = [
+  "hermes", "chat", "-Q", "--query-file", "-", "-t", "bot_room",
+  "--ignore-rules", "--source", "tool", "-m", "{model}",
+]
+
+# Checked against the docs (docs.github.com Copilot CLI reference and "Allowing
+# tools") and the --help of 1.0.103; it accepted these arguments. `--available-tools` leaves the model only
+# the listed tools ("won't be able to use it at all" otherwise), and the only
+# one listed, ask_user, is then disabled. Deny rules cover the rest and win
+# over `--allow-all-tools`, which non-interactive mode requires. --attachment
+# is documented for -p, hence the prompt as an argument.
+[copilot]
+name = "GitHub Copilot"
+command = [
+  "copilot", "-p", "{prompt}", "-s", "--model", "{model}",
+  "--available-tools=ask_user", "--no-ask-user", "--allow-all-tools",
+  "--deny-tool=shell", "--deny-tool=write", "--deny-tool=read",
+  "--deny-tool=url", "--deny-tool=memory",
+  "--disable-builtin-mcps", "--no-custom-instructions", "--no-auto-update",
+]
+image_args = ["--attachment={image}"]
+
+# Checked against the docs bundled with Grok CLI (headless mode, permissions
+# and sandbox) and the --help of 1.0.70, which parsed these arguments. "A bare
+# `*` rule matches every tool" and deny rules always win; the strict sandbox
+# limits reads to the working directory and system paths. Text only: images
+# can only be passed as base64 in an argument.
+[grok]
+name = "Grok"
+command = [
+  "grok", "-p", "{prompt}", "-m", "{model}", "--output-format", "plain",
+  "--no-auto-update", "--deny", "*", "--disallowed-tools", "Agent",
+  "--disable-web-search", "--no-subagents", "--no-plan", "--sandbox", "strict",
+]
+
+# Checked against cursor.com/docs/cli (headless, permissions, parameters) and
+# the --help of 2026.10.22, which accepted these arguments and this project
+# config (it validates the file, so `allow` must be present). Without --force nothing is applied; ask mode is
+# read-only; the project permissions deny every tool kind, MCP included, and
+# MCP servers are not approved. Text only: Cursor reads images through its
+# file tool, which is denied.
+[cursor]
+name = "Cursor"
+command = [
+  "cursor-agent", "-p", "--output-format", "text", "--mode", "ask",
+  "--sandbox", "enabled", "--trust", "--workspace", "{workdir}",
+  "--model", "{model}", "{prompt}",
+]
+
+[cursor.files]
+".cursor/cli.json" = '{"permissions":{"allow":[],"deny":["Shell(*)","Read(**)","Read(/**)","Write(**)","Write(/**)","WebFetch(*)","Mcp(*:*)"]}}'
+
+# Checked against docs.openclaw.ai (agent exec, tool policy); not installed on
+# the machine it was added on. `agent exec` runs one turn in a temporary state
+# directory and prints only the answer. The deny list covers every tool by
+# wildcard, and plugin tools, which include MCP servers, by group. Text only:
+# no documented way to attach an image.
+[openclaw]
+name = "OpenClaw"
+command = [
+  "openclaw", "agent", "exec", "--message-file", "-", "--cwd", "{workdir}",
+  "--model", "{model}",
+  "--config-override", '{"tools":{"deny":["*","group:plugins","bundle-mcp"]}}',
+]

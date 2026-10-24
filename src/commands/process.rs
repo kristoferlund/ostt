@@ -17,16 +17,13 @@ use crate::process;
 /// # Arguments
 /// * `index` - History index (1 = most recent, None = most recent)
 /// * `action_id` - Optional positional action ID to skip the picker
-/// * `list` - If true, list configured actions and exit
 /// * `clipboard` - If true, copy result to clipboard instead of stdout
 /// * `output_file` - Optional file path to write result to instead of stdout
 /// * `attachment` - Optional image passed to an AI action along with the text
-#[allow(clippy::too_many_arguments)]
 pub async fn handle_process(
     config_data: &config::OsttConfig,
     index: Option<usize>,
     action_id: Option<String>,
-    list: bool,
     clipboard: bool,
     paste: bool,
     output_file: Option<String>,
@@ -38,14 +35,6 @@ pub async fn handle_process(
         return Err(anyhow::anyhow!(
             "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
         ));
-    }
-
-    // --list mode: print configured actions and exit
-    if list {
-        for action in &config_data.process.actions {
-            println!("{} \u{2014} {}", action.id, action.name);
-        }
-        return Ok(());
     }
 
     // Load transcription from history
@@ -99,6 +88,7 @@ pub async fn handle_process(
     // otherwise execute directly (no TUI was started)
     let result = if picker_was_shown {
         match process::execute_action_with_animation(
+            &config_data.process.agents,
             &action,
             &transcription.text,
             &keywords,
@@ -113,7 +103,14 @@ pub async fn handle_process(
             }
         }
     } else {
-        process::execute_action(&action, &transcription.text, &keywords, attachment).await?
+        process::execute_action(
+            &config_data.process.agents,
+            &action,
+            &transcription.text,
+            &keywords,
+            attachment,
+        )
+        .await?
     };
 
     output::write_text(
@@ -133,30 +130,41 @@ pub fn handle_process_list(
     config_data: &config::OsttConfig,
     json: bool,
 ) -> Result<(), anyhow::Error> {
-    if config_data.process.actions.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
-        ));
-    }
+    let process = &config_data.process;
 
+    // A JSON list is empty rather than an error, for programs reading it.
     if json {
-        let actions: Vec<_> = config_data
-            .process
+        let actions: Vec<_> = process
             .actions
             .iter()
             .map(|action| {
-                serde_json::json!({
+                let mut entry = serde_json::json!({
                     "id": action.id,
                     "name": action.name,
                     "description": action.description,
-                })
+                    "images": process.takes_images(action),
+                });
+                if let crate::config::ActionDetails::Ai {
+                    tool: Some(tool), ..
+                } = &action.details
+                {
+                    if let Err(error) = process.agents.resolve(tool) {
+                        entry["error"] = error.to_string().into();
+                    }
+                }
+                entry
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&actions)?);
         return Ok(());
     }
 
-    for action in &config_data.process.actions {
+    if process.actions.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
+        ));
+    }
+    for action in &process.actions {
         println!("{} — {}", action.id, action.name);
     }
 

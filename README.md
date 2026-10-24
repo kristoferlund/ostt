@@ -58,7 +58,7 @@ Start here:
 - [Processing Actions](https://ostt.ai/guide/processing)
 - [Configuration](https://ostt.ai/guide/configuration)
 - [Why OSTT?](https://ostt.ai/guide/why-ostt)
-- [Platform Setup](https://ostt.ai/guide/platforms)
+- Platform setup: [macOS](https://ostt.ai/guide/platforms/macos), [Omarchy / Hyprland](https://ostt.ai/guide/platforms/hyprland), [GNOME](https://ostt.ai/guide/platforms/gnome), [KDE Plasma](https://ostt.ai/guide/platforms/kde)
 - [Providers and Models](https://ostt.ai/reference/providers)
 
 ## Install
@@ -74,8 +74,8 @@ If you prefer platform package managers, see the docs for Homebrew, AUR, `.deb`,
 ## Quick Start
 
 ```bash
-ostt auth           # Save cloud provider credentials
-ostt model          # Choose cloud or local transcription model
+ostt model          # Choose a local or cloud transcription model
+ostt auth           # Save cloud provider credentials (cloud models only)
 ostt                # Record, transcribe, print to stdout
 ostt -c             # Record, transcribe, copy to clipboard
 ostt -m deepgram/nova-3 -c
@@ -98,9 +98,23 @@ ostt process clean            # Process most recent history item with clean acti
 ostt process 3 clean -c       # Process history item #3 with clean action
 ostt process clean --attach screen.png  # Send an image to the AI action too
 ostt process list             # List configured actions
+ostt agent list               # List the agents AI actions can run
 ```
 
-Actions are configured in `~/.config/ostt/ostt.toml` and can run either bash commands or AI CLI tools. See [Processing Actions](https://ostt.ai/guide/processing) for examples.
+Actions are configured in `~/.config/ostt/ostt.toml` and can run either bash commands or AI agents (Claude Code, Codex, OpenCode, Gemini CLI and others; `ostt agent list` shows them). Agents run with their tools switched off, in an empty working directory. `[process.agents.<id>]` adds an agent or replaces a built-in one; the built-in ones are in [`src/config/agents.toml`](src/config/agents.toml). See [Processing Actions](https://ostt.ai/guide/processing) for examples.
+
+If an action fails while recording, transcribing or retrying, the unprocessed transcription is output instead, so the words are not lost.
+
+### Scripting
+
+Other programs can rely on:
+
+- **Exit status:** 0 on success; 3 when `record`, `transcribe` or `retry` output the unprocessed transcription because processing failed; 2 when the command line cannot be parsed; 1 for any other failure. `ostt launch` exits 0 once the popup is open.
+- **Errors** on stderr, starting with `Error: ` and followed by the causes (`Caused by:`); a command line that cannot be parsed starts with `error: ` instead.
+- **JSON lists** with `--format json`, an empty list when there is nothing to list:
+  - `ostt process list`: `id`, `name`, `description`, `images` (whether `--attach` works with the action), and `error` when the action's agent is unknown or not valid.
+  - `ostt agent list`: `id`, `name`, `installed`, `path`, `images`, `builtin`; an agent defined but not valid has `id`, `name` and `error`.
+- **`ostt agent models <id>`:** the models an agent offers, one per line; nothing for an agent with no list, and an error when its models command fails.
 
 ## Common Commands
 
@@ -114,7 +128,7 @@ ostt launch -c               # Open popup recorder
 ostt transcribe file.mp3 -m deepinfra/openai/whisper-large-v3
 ostt retry 2 -m groq/whisper-large-v3 -c
 ostt replay                  # Play most recent recording
-ostt model                   # Choose cloud or local transcription model
+ostt model                   # Choose a local or cloud transcription model
 ostt model params whisper/turbo  # List supported params for a model
 ostt history                 # Browse transcription history
 ostt keyword                 # Manage transcription keywords
@@ -135,7 +149,7 @@ OSTT is bring-your-own-API-key and currently supports OpenAI, Deepgram, DeepInfr
 
 Run `ostt auth` to select your provider/model and save credentials securely.
 
-Run `ostt model` to switch between authenticated cloud models and local models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs. See [Local Models](https://ostt.ai/guide/local-models) for the Parakeet and Whisper models.
+Run `ostt model` to switch between local models and authenticated cloud models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs. See [Local Models](https://ostt.ai/guide/local-models) for the Parakeet and Whisper models.
 
 Per-provider and per-model params are configured under `[provider.params]` and `[provider."model".params]`, or passed per run with `--param key=value`. See [Providers and Models](https://ostt.ai/reference/providers) and [Configuration](https://ostt.ai/guide/configuration) for supported params.
 

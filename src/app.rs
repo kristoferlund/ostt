@@ -82,7 +82,8 @@ struct Cli {
     #[arg(short, long, value_name = "FILE")]
     output: Option<String>,
 
-    /// Enable processing after transcription
+    /// Enable processing after transcription. If the action fails, the unprocessed
+    /// transcription is output instead and ostt exits with status 3.
     #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
     process: Option<String>,
 
@@ -136,6 +137,7 @@ enum Commands {
         output: Option<String>,
 
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        /// If the action fails, the unprocessed transcription is output instead and ostt exits with status 3.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
 
@@ -171,6 +173,7 @@ enum Commands {
         output: Option<String>,
 
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        /// If the action fails, the unprocessed transcription is output instead and ostt exits with status 3.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
 
@@ -213,6 +216,7 @@ enum Commands {
         output: Option<String>,
 
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        /// If the action fails, the unprocessed transcription is output instead and ostt exits with status 3.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
 
@@ -282,6 +286,15 @@ enum Commands {
     /// Configure final-text replace rules for casing, acronyms, product names,
     /// and common transcription corrections.
     Replace,
+
+    /// List the agents AI processing actions can run
+    ///
+    /// Built-in agents, and those added or replaced in [process.agents] in
+    /// ostt.toml. An AI action names one with `tool = "<id>"`.
+    Agent {
+        #[command(subcommand)]
+        command: AgentCommand,
+    },
 
     /// Open configuration file in your preferred editor
     ///
@@ -447,6 +460,21 @@ enum LocalModelCommand {
     Remove {
         #[arg(value_name = "MODEL_ID|PROVIDER/MODEL")]
         model_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum AgentCommand {
+    /// List agents, whether each is installed and takes images
+    List {
+        /// Output format
+        #[arg(long, value_enum, default_value_t = ListFormat::Table)]
+        format: ListFormat,
+    },
+    /// List the models an agent offers, one per line, if it can list them
+    Models {
+        /// Agent id, as in `ostt agent list`
+        id: String,
     },
 }
 
@@ -757,13 +785,15 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 .transpose()?;
             commands::handle_record(
                 &config_data,
-                clipboard,
-                paste,
-                output,
-                process,
-                attach.as_deref(),
-                model_override,
-                &cli.params,
+                commands::record::RecordOptions {
+                    clipboard,
+                    paste,
+                    output_file: output,
+                    process,
+                    attachment: attach.as_deref(),
+                    model_override,
+                    param_overrides: &cli.params,
+                },
             )
             .await?;
         }
@@ -897,6 +927,14 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
         },
         Some(Commands::Replace) => commands::handle_replace().await?,
+        Some(Commands::Agent { command }) => match command {
+            AgentCommand::List { format } => {
+                commands::agent::handle_agent_list(&config_data, format.is_json())?
+            }
+            AgentCommand::Models { id } => {
+                commands::agent::handle_agent_models(&config_data, &id).await?
+            }
+        },
         Some(Commands::Config { command }) => match command {
             None => commands::handle_config()?,
             Some(ConfigCommand::Path) => commands::config::handle_config_path()?,
@@ -925,7 +963,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 &config_data,
                 index,
                 action,
-                false,
                 clipboard,
                 paste,
                 output,
@@ -1362,15 +1399,17 @@ mod tests {
         assert_eq!(cli.params, vec!["language=sv"]);
     }
 
-    fn temp_image(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(name);
+    /// An image file in a temp dir that is removed when dropped.
+    fn temp_image() -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("image.png");
         fs::write(&path, b"png").unwrap();
-        path
+        (dir, path)
     }
 
     #[test]
     fn cli_accepts_attach_with_process_on_default_record_and_transcribe() {
-        let image = temp_image("ostt_cli_attach_ok.png");
+        let (_dir, image) = temp_image();
         let image_arg = image.to_str().unwrap();
 
         let cli =
@@ -1393,7 +1432,6 @@ mod tests {
             }
             _ => panic!("expected transcribe command"),
         }
-        fs::remove_file(image).ok();
     }
 
     fn parse_error(args: &[&str]) -> String {
@@ -1406,7 +1444,7 @@ mod tests {
     /// An attachment without an action would be silently ignored.
     #[test]
     fn cli_rejects_attach_without_process() {
-        let image = temp_image("ostt_cli_attach_noprocess.png");
+        let (_dir, image) = temp_image();
         let err = parse_error(&[
             "ostt",
             "transcribe",
@@ -1414,7 +1452,6 @@ mod tests {
             "--attach",
             image.to_str().unwrap(),
         ]);
-        fs::remove_file(image).ok();
         assert!(err.contains("--process"), "got: {err}");
     }
 
@@ -1424,17 +1461,17 @@ mod tests {
         let err = parse_error(&["ostt", "-p", "ctx", "--attach", "/nonexistent/a.png"]);
         assert!(err.contains("file not found"), "got: {err}");
 
-        let text = std::env::temp_dir().join("ostt_cli_attach.txt");
+        let dir = tempfile::tempdir().unwrap();
+        let text = dir.path().join("notes.txt");
         fs::write(&text, b"text").unwrap();
         let err = parse_error(&["ostt", "-p", "ctx", "--attach", text.to_str().unwrap()]);
-        fs::remove_file(text).ok();
         assert!(err.contains("Unsupported attachment type"), "got: {err}");
     }
 
     /// Before a subcommand, a top-level --attach would be silently ignored.
     #[test]
     fn top_level_attach_is_rejected_before_a_subcommand() {
-        let image = temp_image("ostt_cli_attach_toplevel.png");
+        let (_dir, image) = temp_image();
         let image_arg = image.to_str().unwrap();
         let before_transcribe = Cli::try_parse_from([
             "ostt",
@@ -1448,7 +1485,6 @@ mod tests {
         .expect("parse cli");
         let default_record =
             Cli::try_parse_from(["ostt", "--attach", image_arg, "-p", "ctx"]).expect("parse cli");
-        fs::remove_file(image).ok();
 
         assert!(check_top_level_attach(&before_transcribe).is_err());
         assert!(check_top_level_attach(&default_record).is_ok());
@@ -1457,10 +1493,14 @@ mod tests {
     /// `ostt launch` hands the path to a popup that may start elsewhere.
     #[test]
     fn attachment_path_is_made_absolute() {
-        let name = "ostt_cli_attach_relative.png";
-        fs::write(name, b"png").unwrap();
-        let parsed = parse_attachment(name);
-        fs::remove_file(name).ok();
-        assert_eq!(parsed.unwrap(), std::env::current_dir().unwrap().join(name));
+        // A relative path needs a file under the working directory: a uniquely
+        // named temp dir there, removed when dropped.
+        let cwd = std::env::current_dir().unwrap();
+        let dir = tempfile::tempdir_in(&cwd).unwrap();
+        let image = dir.path().join("image.png");
+        fs::write(&image, b"png").unwrap();
+        let relative = image.strip_prefix(&cwd).unwrap();
+        assert!(relative.is_relative());
+        assert_eq!(parse_attachment(relative.to_str().unwrap()).unwrap(), image);
     }
 }
