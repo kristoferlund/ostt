@@ -148,6 +148,7 @@ pub fn handle_process_list(
                 serde_json::json!({
                     "id": action.id,
                     "name": action.name,
+                    "description": action.description,
                 })
             })
             .collect();
