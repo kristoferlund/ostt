@@ -366,6 +366,9 @@ pub enum ActionDetails {
         /// Allows pro users to pass additional flags without modifying OSTT.
         #[serde(default)]
         tool_args: Option<Vec<String>>,
+        /// How long the agent may take, in seconds (default 300).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_secs: Option<u64>,
     },
 }
 

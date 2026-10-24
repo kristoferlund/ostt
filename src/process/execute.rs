@@ -50,6 +50,7 @@ pub async fn execute_action(
             inputs,
             tool_binary,
             tool_args,
+            timeout_secs,
         } => {
             let messages = super::input::resolve_inputs(inputs, transcription, keywords)?;
             let agent = process
@@ -64,9 +65,13 @@ pub async fn execute_action(
                 agent,
                 model,
                 &messages,
-                tool_binary.as_deref(),
-                tool_args.as_deref(),
-                attachment,
+                super::ai::RunOptions {
+                    tool_binary: tool_binary.as_deref(),
+                    tool_args: tool_args.as_deref(),
+                    timeout: timeout_secs
+                        .map_or(super::ai::DEFAULT_TIMEOUT, std::time::Duration::from_secs),
+                    attachment,
+                },
             )
             .await
         }
@@ -310,6 +315,35 @@ mod tests {
             .to_string();
         assert!(err.contains("not valid"), "{err}");
         assert!(err.contains("command"), "{err}");
+    }
+
+    /// An action's own timeout bounds a hung agent, so dictation does not
+    /// wait the default five minutes.
+    #[tokio::test]
+    async fn action_timeout_stops_a_hung_agent() {
+        let config: ProcessConfig = toml::from_str(
+            r#"
+            [agents.slow]
+            name = "Slow"
+            command = ["sh", "-c", "sleep 10"]
+
+            [actions.a]
+            name = "A"
+            type = "ai"
+            tool = "slow"
+            model = "m"
+            timeout_secs = 1
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let started = std::time::Instant::now();
+        let err = execute_action(&config, &config.actions[0], "words", &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("timed out after 1 seconds"), "{err}");
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
     /// A failed action must not lose the words: the unprocessed text is

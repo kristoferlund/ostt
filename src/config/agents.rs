@@ -32,6 +32,13 @@ pub struct AgentSpec {
     /// relative path.
     #[serde(default)]
     pub files: IndexMap<String, String>,
+    /// Models to offer when setting up an action, for agents with a short
+    /// fixed list.
+    #[serde(default)]
+    pub models: Vec<String>,
+    /// Command that prints the agent's models, one per line.
+    #[serde(default)]
+    pub models_command: Option<Vec<String>>,
     /// Lowest version, as printed by `<program> --version`, the arguments work with.
     #[serde(default)]
     pub minimum_version: Option<String>,

@@ -98,9 +98,23 @@ ostt process clean            # Process most recent history item with clean acti
 ostt process 3 clean -c       # Process history item #3 with clean action
 ostt process clean --attach screen.png  # Send an image to the AI action too
 ostt process list             # List configured actions
+ostt agent list               # List the agents AI actions can run
 ```
 
-Actions are configured in `~/.config/ostt/ostt.toml` and can run either bash commands or AI CLI tools. See [Processing Actions](https://ostt.ai/guide/processing) for examples.
+Actions are configured in `~/.config/ostt/ostt.toml` and can run either bash commands or AI agents (Claude Code, Codex, OpenCode, Gemini CLI and others; `ostt agent list` shows them). Agents run with their tools switched off, in an empty working directory. `[process.agents.<id>]` adds an agent or replaces a built-in one; the built-in ones are in [`src/config/agents.toml`](src/config/agents.toml). See [Processing Actions](https://ostt.ai/guide/processing) for examples.
+
+If an action fails, the unprocessed transcription is output instead, so the words are not lost.
+
+### Scripting
+
+Other programs can rely on:
+
+- **Exit status:** 0 on success; 3 when processing failed and the unprocessed transcription was output instead; 2 for invalid arguments; 1 for any other failure.
+- **Errors** on stderr, starting with `Error: `, followed by the causes.
+- **JSON lists** with `--format json`, an empty list when there is nothing to list:
+  - `ostt process list`: `id`, `name`, `description`, `images` (whether `--attach` works with the action), and `error` when the action's agent is unknown or not valid.
+  - `ostt agent list`: `id`, `name`, `installed`, `path`, `images`, `builtin`; an agent defined but not valid has `id`, `name` and `error`.
+- **`ostt agent models <id>`:** the models an agent offers, one per line, or nothing if it cannot list them.
 
 ## Common Commands
 

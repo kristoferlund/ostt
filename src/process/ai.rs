@@ -16,8 +16,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-/// Timeout for CLI tool invocations.
-const TOOL_TIMEOUT: Duration = Duration::from_secs(300);
+/// How long an agent may take unless its action says otherwise.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Timeout for `<tool> --version`, which should return at once.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
@@ -280,6 +280,29 @@ fn claude_result(name: &str, stdout: &str) -> Option<anyhow::Result<String>> {
     })
 }
 
+/// How one action runs its agent, beyond the agent's own spec.
+pub struct RunOptions<'a> {
+    /// Program to run instead of the agent's.
+    pub tool_binary: Option<&'a str>,
+    /// Arguments added after the agent's.
+    pub tool_args: Option<&'a [String]>,
+    /// How long the agent may take.
+    pub timeout: Duration,
+    /// Image sent along with the prompt.
+    pub attachment: Option<&'a Path>,
+}
+
+impl Default for RunOptions<'_> {
+    fn default() -> Self {
+        Self {
+            tool_binary: None,
+            tool_args: None,
+            timeout: DEFAULT_TIMEOUT,
+            attachment: None,
+        }
+    }
+}
+
 /// Executes an AI action by running its agent non-interactively.
 ///
 /// Constructs a prompt from the resolved messages, passes it to the agent on
@@ -292,9 +315,7 @@ fn claude_result(name: &str, stdout: &str) -> Option<anyhow::Result<String>> {
 /// * `agent` - How to run the agent
 /// * `model` - Model identifier (passed through to the agent as-is)
 /// * `messages` - Resolved input messages (from input resolution)
-/// * `tool_binary` - Optional program path override (defaults to the agent's)
-/// * `tool_args` - Optional extra CLI arguments appended after the agent's
-/// * `attachment` - Optional image sent along with the prompt
+/// * `options` - The action's program override, extra arguments, timeout and image
 ///
 /// # Errors
 /// - If the agent takes no images and one is attached
@@ -308,10 +329,14 @@ pub async fn execute_ai_action(
     agent: &AgentSpec,
     model: &str,
     messages: &[ResolvedMessage],
-    tool_binary: Option<&str>,
-    tool_args: Option<&[String]>,
-    attachment: Option<&Path>,
+    options: RunOptions<'_>,
 ) -> anyhow::Result<String> {
+    let RunOptions {
+        tool_binary,
+        tool_args,
+        timeout: limit,
+        attachment,
+    } = options;
     if attachment.is_some() && !agent.takes_images() {
         bail!("{} ({agent_id}) does not take images", agent.name);
     }
@@ -432,16 +457,16 @@ pub async fn execute_ai_action(
         written.context("failed to write the prompt to the agent")?;
         output.context("failed to wait for the agent")
     };
-    let output = timeout(TOOL_TIMEOUT, run).await.map_err(|_| {
+    let output = timeout(limit, run).await.map_err(|_| {
         tracing::error!(
             "Agent '{}' timed out after {} seconds",
             binary,
-            TOOL_TIMEOUT.as_secs()
+            limit.as_secs()
         );
         anyhow::anyhow!(
             "Agent '{}' timed out after {} seconds",
             binary,
-            TOOL_TIMEOUT.as_secs()
+            limit.as_secs()
         )
     })??;
 
@@ -680,9 +705,10 @@ mod tests {
             &agent("claude-code"),
             "test-model",
             &messages,
-            Some("/nonexistent/custom-binary"),
-            None,
-            None,
+            RunOptions {
+                tool_binary: Some("/nonexistent/custom-binary"),
+                ..RunOptions::default()
+            },
         )
         .await;
 
@@ -707,9 +733,10 @@ mod tests {
             &agent("pi"),
             "test-model",
             &messages,
-            Some("nonexistent-tool-binary-xyz"),
-            None,
-            None,
+            RunOptions {
+                tool_binary: Some("nonexistent-tool-binary-xyz"),
+                ..RunOptions::default()
+            },
         )
         .await;
 
@@ -748,7 +775,7 @@ mod tests {
     async fn non_zero_exit_returns_error_with_stderr() {
         let (_dir, spec) = fake_agent(&agent("pi"), "echo 'custom error output' >&2\nexit 1\n");
         let messages = vec![msg(InputRole::User, "test")];
-        let err = execute_ai_action("pi", &spec, "m", &messages, None, None, None)
+        let err = execute_ai_action("pi", &spec, "m", &messages, RunOptions::default())
             .await
             .unwrap_err()
             .to_string();
@@ -788,7 +815,7 @@ mod tests {
             "printf '%s' \"$2\" | grep -q 'spoken words' && [ -z \"$(cat)\" ] && echo ok\n",
         );
         let messages = vec![msg(InputRole::User, "spoken words")];
-        let result = execute_ai_action("a", &spec, "m", &messages, None, None, None).await;
+        let result = execute_ai_action("a", &spec, "m", &messages, RunOptions::default()).await;
         assert_eq!(result.unwrap(), "ok");
     }
 
@@ -802,9 +829,10 @@ mod tests {
             &agent("grok"),
             "m",
             &messages,
-            Some("/nonexistent/grok"),
-            None,
-            None,
+            RunOptions {
+                tool_binary: Some("/nonexistent/grok"),
+                ..RunOptions::default()
+            },
         )
         .await
         .unwrap_err()
@@ -838,9 +866,11 @@ mod tests {
             &agent("hermes"),
             "unused",
             &messages,
-            Some("/nonexistent/hermes"),
-            None,
-            Some(Path::new("/tmp/context.png")),
+            RunOptions {
+                tool_binary: Some("/nonexistent/hermes"),
+                attachment: Some(Path::new("/tmp/context.png")),
+                ..RunOptions::default()
+            },
         )
         .await;
         let err = result.unwrap_err().to_string();
@@ -873,8 +903,17 @@ mod tests {
         let image = dir.path().join("shot.jpg");
         std::fs::write(&image, b"jpeg bytes").unwrap();
         let messages = vec![msg(InputRole::User, "spoken words")];
-        let result =
-            execute_ai_action("fake", &spec, "m1", &messages, None, None, Some(&image)).await;
+        let result = execute_ai_action(
+            "fake",
+            &spec,
+            "m1",
+            &messages,
+            RunOptions {
+                attachment: Some(&image),
+                ..RunOptions::default()
+            },
+        )
+        .await;
         let lines: Vec<String> = std::fs::read_to_string(report.path())
             .unwrap()
             .lines()
@@ -925,9 +964,10 @@ mod tests {
             &spec,
             "m",
             &messages,
-            None,
-            None,
-            Some(&image),
+            RunOptions {
+                attachment: Some(&image),
+                ..RunOptions::default()
+            },
         )
         .await;
         let sent: serde_json::Value =
@@ -974,7 +1014,7 @@ mod tests {
         );
         let messages = vec![msg(InputRole::User, "words")];
         let result =
-            execute_ai_action("claude-code", &spec, "m", &messages, None, None, None).await;
+            execute_ai_action("claude-code", &spec, "m", &messages, RunOptions::default()).await;
         assert_eq!(
             result.unwrap_err().to_string(),
             "Claude Code failed: model not found"
@@ -997,9 +1037,10 @@ mod tests {
             &spec,
             "m",
             &messages,
-            None,
-            None,
-            Some(&image),
+            RunOptions {
+                attachment: Some(&image),
+                ..RunOptions::default()
+            },
         )
         .await;
         let err = result.unwrap_err().to_string();

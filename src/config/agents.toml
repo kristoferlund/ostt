@@ -28,6 +28,9 @@
 #   files            Files written into the working directory before it runs,
 #                    by relative path.
 #   minimum_version  Lowest `<program> --version` the arguments work with.
+#   models           Models to offer when setting up an action (`ostt agent
+#                    models <id>`), for agents with a short fixed list.
+#   models_command   Command that prints the agent's models, one per line.
 #
 # Agents marked "ran it" were run through ostt with these settings: a text
 # prompt, an image, and an attempt to make them create a file and read
@@ -52,6 +55,7 @@ command = [
   "--disable-slash-commands",
   "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
 ]
+models = ["haiku", "sonnet", "opus"]
 
 # Ran it with 0.163.0: text, image, and a touch/read attempt with no shell or
 # file tool available. Codex has no single switch for tools, so each feature
@@ -80,6 +84,7 @@ image_args = ["--image={image}"]
 name = "OpenCode"
 command = ["opencode", "run", "--standalone", "--agent", "ostt", "--model", "{model}"]
 image_args = ["--file={image}"]
+models_command = ["opencode", "models"]
 env = { OPENCODE_CONFIG_CONTENT = '{"agents":{"ostt":{"mode":"primary","description":"Processes dictation without tools","permissions":[{"action":"*","resource":"*","effect":"deny"}]}}}' }
 minimum_version = "2.0.0"
 

@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Agents that take images receive it (Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi and GitHub Copilot); bash actions get its path in `$OSTT_ATTACHMENT`.
-- Agents for AI actions are now data instead of code. ostt ships built-in agents for Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi, Hermes, GitHub Copilot, Grok, Cursor and OpenClaw, and `[process.agents.<id>]` in `ostt.toml` adds an agent or replaces a built-in one: its command with `{model}`, `{workdir}` and `{prompt}` placeholders, how it takes an image, and the environment variables and files it needs. An action's `tool` names any agent id; the existing ids keep working. `ostt agent list [--format json]` lists agents, whether each is installed, and whether it takes images; `ostt process list --format json` says for each action whether it takes an image (`images`).
+- Agents for AI actions are now data instead of code. ostt ships built-in agents for Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi, Hermes, GitHub Copilot, Grok, Cursor and OpenClaw, and `[process.agents.<id>]` in `ostt.toml` adds an agent or replaces a built-in one: its command with `{model}`, `{workdir}` and `{prompt}` placeholders, how it takes an image, and the environment variables and files it needs. An action's `tool` names any agent id; the existing ids keep working. `ostt agent list [--format json]` lists agents, whether each is installed (and where), and whether it takes images; `ostt agent models <id>` lists the models an agent offers. `ostt process list --format json` says for each action whether it takes an image (`images`) and why its agent can't run (`error`), and prints `[]` when there are no actions. AI actions take an optional `timeout_secs` (default 300).
 - Processing actions take an optional `description`, a one-line explanation shown under the action's name in the action picker and included in `ostt process list --format json`.
 
 ### Changed
@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agents now run in a new empty working directory instead of ostt's, so `tool_args` with relative paths or that rely on project files (AGENTS.md, CLAUDE.md, `.codex`) behave differently. Codex runs with `--ignore-user-config`, so its `model_provider` and profiles in `~/.codex/config.toml` no longer apply, and OpenCode actions need OpenCode 2.0 or later. To keep the old behaviour, replace the agent in `[process.agents]`.
 - Claude Code actions now read Claude's structured output, so a failure shows Claude's reason instead of raw output.
 - An empty transcription is no longer sent to the processing action.
+- A `--process` action that does not exist is reported before recording or transcribing, not after.
 - When a processing action fails, `record`, `transcribe` and `retry` output the unprocessed transcription instead (stdout, file, clipboard or paste), so the words are not lost, and exit with status 3 to show that processing failed.
 
 ### Fixed

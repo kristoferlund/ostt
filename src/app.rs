@@ -471,6 +471,11 @@ enum AgentCommand {
         #[arg(long, value_enum, default_value_t = ListFormat::Table)]
         format: ListFormat,
     },
+    /// List the models an agent offers, one per line, if it can list them
+    Models {
+        /// Agent id, as in `ostt agent list`
+        id: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -922,9 +927,14 @@ pub async fn run() -> Result<(), anyhow::Error> {
             }
         },
         Some(Commands::Replace) => commands::handle_replace().await?,
-        Some(Commands::Agent {
-            command: AgentCommand::List { format },
-        }) => commands::agent::handle_agent_list(&config_data, format.is_json())?,
+        Some(Commands::Agent { command }) => match command {
+            AgentCommand::List { format } => {
+                commands::agent::handle_agent_list(&config_data, format.is_json())?
+            }
+            AgentCommand::Models { id } => {
+                commands::agent::handle_agent_models(&config_data, &id).await?
+            }
+        },
         Some(Commands::Config { command }) => match command {
             None => commands::handle_config()?,
             Some(ConfigCommand::Path) => commands::config::handle_config_path()?,
