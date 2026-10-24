@@ -17,16 +17,13 @@ use crate::process;
 /// # Arguments
 /// * `index` - History index (1 = most recent, None = most recent)
 /// * `action_id` - Optional positional action ID to skip the picker
-/// * `list` - If true, list configured actions and exit
 /// * `clipboard` - If true, copy result to clipboard instead of stdout
 /// * `output_file` - Optional file path to write result to instead of stdout
 /// * `attachment` - Optional image passed to an AI action along with the text
-#[allow(clippy::too_many_arguments)]
 pub async fn handle_process(
     config_data: &config::OsttConfig,
     index: Option<usize>,
     action_id: Option<String>,
-    list: bool,
     clipboard: bool,
     paste: bool,
     output_file: Option<String>,
@@ -38,14 +35,6 @@ pub async fn handle_process(
         return Err(anyhow::anyhow!(
             "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
         ));
-    }
-
-    // --list mode: print configured actions and exit
-    if list {
-        for action in &config_data.process.actions {
-            println!("{} \u{2014} {}", action.id, action.name);
-        }
-        return Ok(());
     }
 
     // Load transcription from history
@@ -99,6 +88,7 @@ pub async fn handle_process(
     // otherwise execute directly (no TUI was started)
     let result = if picker_was_shown {
         match process::execute_action_with_animation(
+            &config_data.process,
             &action,
             &transcription.text,
             &keywords,
@@ -113,7 +103,14 @@ pub async fn handle_process(
             }
         }
     } else {
-        process::execute_action(&action, &transcription.text, &keywords, attachment).await?
+        process::execute_action(
+            &config_data.process,
+            &action,
+            &transcription.text,
+            &keywords,
+            attachment,
+        )
+        .await?
     };
 
     output::write_text(
@@ -129,91 +126,42 @@ pub async fn handle_process(
     Ok(())
 }
 
-/// Whether `--attach` works with the action: bash actions get the image's
-/// path, AI actions need an agent that takes images.
-fn takes_images(action: &config::ProcessAction) -> bool {
-    match &action.details {
-        config::ActionDetails::Bash { .. } => true,
-        config::ActionDetails::Ai { agent, .. } => {
-            matches!(agent, config::agents::AgentLookup::Found(spec) if spec.takes_images())
-        }
-    }
-}
-
 pub fn handle_process_list(
     config_data: &config::OsttConfig,
     json: bool,
 ) -> Result<(), anyhow::Error> {
-    if config_data.process.actions.is_empty() {
-        return Err(anyhow::anyhow!(
-            "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
-        ));
-    }
+    let process = &config_data.process;
 
+    // A JSON list is empty rather than an error, for programs reading it.
     if json {
-        let actions: Vec<_> = config_data
-            .process
+        let actions: Vec<_> = process
             .actions
             .iter()
             .map(|action| {
-                serde_json::json!({
+                let mut entry = serde_json::json!({
                     "id": action.id,
                     "name": action.name,
                     "description": action.description,
-                    "images": takes_images(action),
-                })
+                    "images": process.takes_images(action),
+                });
+                if let Err(error) = process.agent_for(action) {
+                    entry["error"] = error.into();
+                }
+                entry
             })
             .collect();
         println!("{}", serde_json::to_string_pretty(&actions)?);
         return Ok(());
     }
 
-    for action in &config_data.process.actions {
+    if process.actions.is_empty() {
+        return Err(anyhow::anyhow!(
+            "No process actions configured. Add actions to ~/.config/ostt/ostt.toml"
+        ));
+    }
+    for action in &process.actions {
         println!("{} — {}", action.id, action.name);
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Integrations offer a screenshot only for actions that can use one, so
-    /// an action whose agent takes no images must say so.
-    #[test]
-    fn images_follow_the_actions_agent() {
-        let config: config::ProcessConfig = toml::from_str(
-            r#"
-            [actions.copy]
-            name = "Copy"
-            type = "bash"
-            command = "cat"
-
-            [actions.claude]
-            name = "Claude"
-            type = "ai"
-            tool = "claude-code"
-            model = "haiku"
-            inputs = [{ role = "user", source = "transcription" }]
-
-            [actions.hermes]
-            name = "Hermes"
-            type = "ai"
-            tool = "hermes"
-            model = "m"
-            inputs = [{ role = "user", source = "transcription" }]
-
-            [actions.unknown]
-            name = "Unknown"
-            type = "ai"
-            tool = "nope"
-            model = "m"
-            inputs = [{ role = "user", source = "transcription" }]
-            "#,
-        )
-        .unwrap();
-        let images: Vec<bool> = config.actions.iter().map(takes_images).collect();
-        assert_eq!(images, [true, true, false, false]);
-    }
 }

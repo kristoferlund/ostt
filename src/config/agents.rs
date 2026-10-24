@@ -5,11 +5,11 @@
 //! or replaces built-in ones by id.
 
 use indexmap::IndexMap;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::OnceLock;
 
 /// How ostt calls one agent non-interactively.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct AgentSpec {
     /// Display name.
     pub name: String,
@@ -17,28 +17,28 @@ pub struct AgentSpec {
     /// placeholders. Without `{prompt}`, the prompt goes to stdin.
     pub command: Vec<String>,
     /// How the prompt and the answer are encoded.
-    #[serde(default, skip_serializing_if = "AgentFormat::is_text")]
+    #[serde(default)]
     pub format: AgentFormat,
     /// Arguments added when an image is attached, with an `{image}` placeholder.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub image_args: Option<Vec<String>>,
     /// Text added to the end of the prompt to attach an image, with `{image}`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub image_prompt: Option<String>,
     /// Environment variables for the agent, with `{workdir}`.
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub env: IndexMap<String, String>,
     /// Files written into the agent's working directory before it runs, by
     /// relative path.
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    #[serde(default)]
     pub files: IndexMap<String, String>,
     /// Lowest version, as printed by `<program> --version`, the arguments work with.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub minimum_version: Option<String>,
 }
 
 /// How the prompt goes in and the answer comes out.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AgentFormat {
     /// The prompt as plain text on stdin; the answer is stdout.
@@ -47,12 +47,6 @@ pub enum AgentFormat {
     /// Claude Code's stream-json: a user message on stdin that can carry an
     /// image, and a result event on stdout.
     ClaudeStreamJson,
-}
-
-impl AgentFormat {
-    fn is_text(&self) -> bool {
-        matches!(self, AgentFormat::Text)
-    }
 }
 
 impl AgentSpec {
@@ -89,15 +83,14 @@ pub(crate) fn check_file_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// What an action's `tool` id refers to.
-#[derive(Debug, Clone, Default)]
-pub enum AgentLookup {
+/// What an agent id refers to.
+#[derive(Debug, Clone, Copy)]
+pub enum AgentLookup<'a> {
     /// No agent has that id.
-    #[default]
     Unknown,
-    Found(Box<AgentSpec>),
+    Found(&'a AgentSpec),
     /// The user defines that agent, but not validly; why.
-    Invalid(String),
+    Invalid(&'a str),
 }
 
 /// The user's own agents from `[process.agents]`.
@@ -111,12 +104,12 @@ pub struct UserAgents {
 
 impl UserAgents {
     /// Looks up an agent: the user's own first, then the built-in ones.
-    pub fn lookup(&self, id: &str) -> AgentLookup {
+    pub fn lookup(&self, id: &str) -> AgentLookup<'_> {
         if let Some(reason) = self.invalid.get(id) {
-            return AgentLookup::Invalid(reason.clone());
+            return AgentLookup::Invalid(reason);
         }
         match self.valid.get(id).or_else(|| builtin_agents().get(id)) {
-            Some(spec) => AgentLookup::Found(Box::new(spec.clone())),
+            Some(spec) => AgentLookup::Found(spec),
             None => AgentLookup::Unknown,
         }
     }

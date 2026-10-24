@@ -366,9 +366,6 @@ pub enum ActionDetails {
         /// Allows pro users to pass additional flags without modifying OSTT.
         #[serde(default)]
         tool_args: Option<Vec<String>>,
-        /// The agent `tool` names, resolved when the config loads.
-        #[serde(skip)]
-        agent: AgentLookup,
     },
 }
 
@@ -474,10 +471,7 @@ impl<'de> Deserialize<'de> for ProcessConfig {
             .into_iter()
             .map(|(id, action)| {
                 let mut details = action.details;
-                if let ActionDetails::Ai {
-                    tool, model, agent, ..
-                } = &mut details
-                {
+                if let ActionDetails::Ai { tool, model, .. } = &mut details {
                     if tool.is_none() {
                         *tool = raw.default_tool.clone();
                     }
@@ -485,8 +479,7 @@ impl<'de> Deserialize<'de> for ProcessConfig {
                         *model = raw.default_model.clone();
                     }
                     if let Some(agent_id) = tool.as_deref() {
-                        *agent = agents.lookup(agent_id);
-                        if matches!(agent, AgentLookup::Unknown) {
+                        if matches!(agents.lookup(agent_id), AgentLookup::Unknown) {
                             tracing::warn!("Process action '{id}' uses unknown agent '{agent_id}'");
                         }
                     }
@@ -510,6 +503,8 @@ impl<'de> Deserialize<'de> for ProcessConfig {
     }
 }
 
+// Agents are not written: ostt writes a whole config only when it creates a
+// new one, and edits an existing one in place.
 impl Serialize for ProcessConfig {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -522,8 +517,6 @@ impl Serialize for ProcessConfig {
             #[serde(skip_serializing_if = "Option::is_none")]
             default_model: &'a Option<String>,
             actions: IndexMap<String, ProcessActionConfigRef<'a>>,
-            #[serde(skip_serializing_if = "IndexMap::is_empty")]
-            agents: &'a IndexMap<String, AgentSpec>,
         }
 
         let actions = self
@@ -545,7 +538,6 @@ impl Serialize for ProcessConfig {
             default_tool: &self.default_tool,
             default_model: &self.default_model,
             actions,
-            agents: &self.agents.valid,
         }
         .serialize(serializer)
     }
@@ -589,6 +581,37 @@ impl ProcessConfig {
     /// Finds an action by its `id` field.
     pub fn get_action(&self, id: &str) -> Option<&ProcessAction> {
         self.actions.iter().find(|a| a.id == id)
+    }
+
+    /// The agent an AI action runs, `None` for a bash action, or why the
+    /// action has no usable agent.
+    pub fn agent_for(&self, action: &ProcessAction) -> Result<Option<&AgentSpec>, String> {
+        let ActionDetails::Ai { tool, .. } = &action.details else {
+            return Ok(None);
+        };
+        let Some(tool) = tool.as_deref() else {
+            return Err(format!("AI action '{}' has no tool", action.id));
+        };
+        match self.agents.lookup(tool) {
+            AgentLookup::Found(spec) => Ok(Some(spec)),
+            AgentLookup::Invalid(reason) => {
+                Err(format!("Agent '{tool}' in [process.agents] is not valid: {reason}"))
+            }
+            AgentLookup::Unknown => Err(format!(
+                "Unknown agent '{tool}' in action '{}'. Use 'ostt agent list' to see available agents.",
+                action.id
+            )),
+        }
+    }
+
+    /// Whether `--attach` works with the action: a bash action gets the
+    /// image's path, an AI action needs an agent that takes images.
+    pub fn takes_images(&self, action: &ProcessAction) -> bool {
+        match self.agent_for(action) {
+            Ok(None) => true,
+            Ok(Some(agent)) => agent.takes_images(),
+            Err(_) => false,
+        }
     }
 }
 
@@ -932,7 +955,7 @@ fn config_to_table(config: &OsttConfig) -> anyhow::Result<toml::Table> {
     if config.output != OutputConfig::default() {
         table.insert("output".to_string(), toml::Value::try_from(&config.output)?);
     }
-    if !config.process.actions.is_empty() || !config.process.agents.valid.is_empty() {
+    if !config.process.actions.is_empty() {
         table.insert(
             "process".to_string(),
             toml::Value::try_from(&config.process)?,
@@ -1518,20 +1541,6 @@ mod tests {
             !saved.contains("description = \"\""),
             "absent description must not be written as empty: {saved}"
         );
-    }
-
-    /// Agents alone, without actions, are still part of the config file ostt
-    /// writes.
-    #[test]
-    fn config_with_only_agents_keeps_them_when_written() {
-        let mut config = OsttConfig::default();
-        config.process = parse_process_config(
-            "[agents.mine]\nname = \"Mine\"\ncommand = [\"my-llm\", \"{model}\"]\n",
-        )
-        .unwrap();
-        let table = config_to_table(&config).unwrap();
-        let written = toml::to_string(&table).unwrap();
-        assert!(written.contains("[process.agents.mine]"), "{written}");
     }
 
     /// `agents` that is not a table must not stop ostt from starting.
@@ -2618,15 +2627,8 @@ mod tests {
     // 2.1.B — Agents and AI config tests
     // ═══════════════════════════════════════════════════════════════════
 
-    fn agent_of(config: &ProcessConfig, id: &str) -> Option<AgentSpec> {
-        match &config.actions.iter().find(|a| a.id == id).unwrap().details {
-            ActionDetails::Ai {
-                agent: AgentLookup::Found(spec),
-                ..
-            } => Some(*spec.clone()),
-            ActionDetails::Ai { .. } => None,
-            _ => panic!("expected Ai variant"),
-        }
+    fn agent_of<'a>(config: &'a ProcessConfig, id: &str) -> Result<Option<&'a AgentSpec>, String> {
+        config.agent_for(config.get_action(id).unwrap())
     }
 
     /// Configs written before agents became data name these four tools; they
@@ -2645,7 +2647,7 @@ mod tests {
             );
             let config = parse_process_config(&toml_str).unwrap();
             assert_eq!(
-                agent_of(&config, "a").unwrap().program(),
+                agent_of(&config, "a").unwrap().unwrap().program(),
                 program,
                 "tool '{tool}'"
             );
@@ -2653,7 +2655,7 @@ mod tests {
     }
 
     /// An unknown agent id must not stop the config from loading; the action
-    /// fails when run instead.
+    /// fails when run instead, naming the agent.
     #[test]
     fn unknown_tool_loads_without_an_agent() {
         let config = parse_process_config(
@@ -2667,11 +2669,12 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert!(agent_of(&config, "a").is_none());
+        let err = agent_of(&config, "a").unwrap_err();
+        assert!(err.contains("Unknown agent 'vim'"), "{err}");
     }
 
     #[test]
-    fn action_uses_an_agent_from_the_config_and_saves_it_back() {
+    fn action_uses_an_agent_from_the_config() {
         let config = parse_process_config(
             r#"
             default_tool = "mine"
@@ -2688,13 +2691,49 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(agent_of(&config, "a").unwrap().program(), "my-llm");
+        assert_eq!(agent_of(&config, "a").unwrap().unwrap().program(), "my-llm");
+    }
 
-        // Only the user's own agents are written back, never the built-in ones.
-        let saved = toml::to_string(&config).unwrap();
-        let reloaded = parse_process_config(&saved).unwrap();
-        assert_eq!(reloaded.agents.valid.keys().collect::<Vec<_>>(), ["mine"]);
-        assert_eq!(agent_of(&reloaded, "a").unwrap().program(), "my-llm");
+    /// Integrations offer a screenshot only for actions that can use one, so
+    /// an action whose agent takes no images, or has no agent, must say so.
+    #[test]
+    fn takes_images_follows_the_actions_agent() {
+        let config = parse_process_config(
+            r#"
+            [actions.copy]
+            name = "Copy"
+            type = "bash"
+            command = "cat"
+
+            [actions.claude]
+            name = "Claude"
+            type = "ai"
+            tool = "claude-code"
+            model = "haiku"
+            inputs = [{ role = "user", source = "transcription" }]
+
+            [actions.hermes]
+            name = "Hermes"
+            type = "ai"
+            tool = "hermes"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+
+            [actions.unknown]
+            name = "Unknown"
+            type = "ai"
+            tool = "nope"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let images: Vec<bool> = config
+            .actions
+            .iter()
+            .map(|a| config.takes_images(a))
+            .collect();
+        assert_eq!(images, [true, true, false, false]);
     }
 
     #[test]

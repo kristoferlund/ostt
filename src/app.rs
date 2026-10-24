@@ -780,13 +780,15 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 .transpose()?;
             commands::handle_record(
                 &config_data,
-                clipboard,
-                paste,
-                output,
-                process,
-                attach.as_deref(),
-                model_override,
-                &cli.params,
+                commands::record::RecordOptions {
+                    clipboard,
+                    paste,
+                    output_file: output,
+                    process,
+                    attachment: attach.as_deref(),
+                    model_override,
+                    param_overrides: &cli.params,
+                },
             )
             .await?;
         }
@@ -951,7 +953,6 @@ pub async fn run() -> Result<(), anyhow::Error> {
                 &config_data,
                 index,
                 action,
-                false,
                 clipboard,
                 paste,
                 output,

@@ -32,6 +32,7 @@ pub async fn handle_retry(
         param_overrides,
     } = options;
 
+    process::check_requested_action(&config_data.process, process.as_deref())?;
     let all_recordings = recording_history::get_all_recordings()?;
 
     if all_recordings.is_empty() {
@@ -77,19 +78,16 @@ pub async fn handle_retry(
                 attachment,
             )
             .await;
-            // A failed action still outputs the words, unprocessed.
-            output::write_text(
-                processed.as_deref().unwrap_or(&transcription_text),
-                output_file,
-                clipboard,
-                paste,
-                &config_data.output.paste,
-                "Output text",
-            )?;
-
-            processed
-                .map(drop)
-                .map_err(|e| process::ProcessingFailed(e).into())
+            process::output_processed(processed, &transcription_text, |text| {
+                output::write_text(
+                    text,
+                    output_file,
+                    clipboard,
+                    paste,
+                    &config_data.output.paste,
+                    "Output text",
+                )
+            })
         }
         Err(e) => {
             tracing::error!("Retry transcription failed: {e}");

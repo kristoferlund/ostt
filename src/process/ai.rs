@@ -22,10 +22,17 @@ const TOOL_TIMEOUT: Duration = Duration::from_secs(300);
 /// Timeout for `<tool> --version`, which should return at once.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
+fn program_not_found(binary: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "Agent program '{binary}' not found. Install it, or make sure it is on the PATH ostt runs with."
+    )
+}
+
 /// Parses an `X.Y.Z` version anywhere in `text`.
 fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
-    let version_re = regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)").unwrap();
-    let caps = version_re.captures(text)?;
+    static VERSION: OnceLock<regex::Regex> = OnceLock::new();
+    let version = VERSION.get_or_init(|| regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)").unwrap());
+    let caps = version.captures(text)?;
     Some((
         caps[1].parse().ok()?,
         caps[2].parse().ok()?,
@@ -55,12 +62,9 @@ async fn validate_tool_version(binary: &str, minimum: &str, limit: Duration) -> 
         .map_err(|_| anyhow::anyhow!("'{binary} --version' did not finish within {limit:?}"))?
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                anyhow::anyhow!(
-                    "CLI tool '{}' not found. Please install it and ensure it's on your PATH.",
-                    binary
-                )
+                program_not_found(binary)
             } else {
-                anyhow::anyhow!("Failed to check '{}' version: {}", binary, e)
+                anyhow::anyhow!("Failed to check '{binary}' version: {e}")
             }
         })?;
 
@@ -77,7 +81,7 @@ async fn validate_tool_version(binary: &str, minimum: &str, limit: Duration) -> 
     if version < minimum_version {
         bail!("'{binary}' version {major}.{minor}.{patch} is too old. Minimum required: {minimum}. Please update.");
     }
-    tracing::debug!("AI tool '{binary}' version {major}.{minor}.{patch} meets minimum {minimum}");
+    tracing::debug!("Agent '{binary}' version {major}.{minor}.{patch} meets minimum {minimum}");
     Ok(())
 }
 
@@ -140,7 +144,8 @@ impl Placeholders<'_> {
                     "model" => Some(self.model.into()),
                     "workdir" => Some(self.workdir.to_string_lossy()),
                     "image" => self.image.map(Path::to_string_lossy),
-                    _ => self.prompt.map(Into::into),
+                    "prompt" => self.prompt.map(Into::into),
+                    _ => unreachable!("the pattern matches only these names"),
                 };
                 value.map_or_else(|| caps[0].to_string(), |v| v.into_owned())
             })
@@ -165,8 +170,10 @@ fn command_args(
         (Some(_), Some(args)) => args.as_slice(),
         _ => &[],
     };
-    agent.command[1..]
+    agent
+        .command
         .iter()
+        .skip(1)
         .chain(image_args)
         .map(|arg| placeholders.fill(arg))
         .chain(tool_args.unwrap_or_default().iter().cloned())
@@ -353,14 +360,19 @@ pub async fn execute_ai_action(
         ..placeholders
     };
     let args = command_args(agent, &placeholders, tool_args);
+    let env: Vec<(&String, String)> = agent
+        .env
+        .iter()
+        .map(|(key, value)| (key, placeholders.fill(value)))
+        .collect();
     let stdin_content = match agent.format {
         _ if in_args => String::new(),
         AgentFormat::ClaudeStreamJson => claude_message(&prompt, image.as_deref())?,
-        AgentFormat::Text => prompt.clone(),
+        AgentFormat::Text => prompt,
     };
 
     tracing::info!(
-        "Invoking AI tool: {} {}",
+        "Invoking agent: {} {}",
         binary,
         args.iter()
             .map(|a| {
@@ -380,12 +392,7 @@ pub async fn execute_ai_action(
     let mut child = Command::new(&binary)
         .args(&args)
         .current_dir(workdir.path())
-        .envs(
-            agent
-                .env
-                .iter()
-                .map(|(key, value)| (key, placeholders.fill(value))),
-        )
+        .envs(env)
         .env("TERM", "dumb")
         .env("NO_COLOR", "1")
         .stdin(if in_args {
@@ -399,14 +406,9 @@ pub async fn execute_ai_action(
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                tracing::error!("AI tool '{}' not found on PATH", binary);
-                anyhow::anyhow!(
-                    "CLI tool '{}' not found. Please install it and ensure it's on your PATH.",
-                    binary
-                )
+                program_not_found(&binary)
             } else {
-                tracing::error!("Failed to spawn AI tool '{}': {}", binary, e);
-                anyhow::anyhow!("Failed to spawn '{}': {}", binary, e)
+                anyhow::anyhow!("Failed to start agent '{binary}': {e}")
             }
         })?;
 
@@ -427,17 +429,17 @@ pub async fn execute_ai_action(
     };
     let run = async {
         let (written, output) = tokio::join!(write, child.wait_with_output());
-        written.context("failed to write the prompt to the AI tool")?;
-        output.context("failed to wait for AI tool process")
+        written.context("failed to write the prompt to the agent")?;
+        output.context("failed to wait for the agent")
     };
     let output = timeout(TOOL_TIMEOUT, run).await.map_err(|_| {
         tracing::error!(
-            "AI tool '{}' timed out after {} seconds",
+            "Agent '{}' timed out after {} seconds",
             binary,
             TOOL_TIMEOUT.as_secs()
         );
         anyhow::anyhow!(
-            "AI tool '{}' timed out after {} seconds",
+            "Agent '{}' timed out after {} seconds",
             binary,
             TOOL_TIMEOUT.as_secs()
         )
@@ -457,11 +459,11 @@ pub async fn execute_ai_action(
     };
 
     if text.is_empty() {
-        tracing::warn!("AI tool '{}' returned empty output", binary);
-        bail!("AI tool '{}' returned no output", binary);
+        tracing::warn!("Agent '{binary}' returned empty output");
+        bail!("Agent '{binary}' returned no output");
     }
 
-    tracing::info!("AI tool '{}' returned {} bytes", binary, text.len());
+    tracing::info!("Agent '{binary}' returned {} bytes", text.len());
     Ok(text)
 }
 
@@ -476,7 +478,7 @@ fn check_exit_status(binary: &str, output: &std::process::Output) -> anyhow::Res
             .map(|c| c.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         tracing::error!(
-            "AI tool '{}' failed (exit code {}):\nstderr: {}\nstdout: {}",
+            "Agent '{}' failed (exit code {}):\nstderr: {}\nstdout: {}",
             binary,
             code,
             stderr.trim(),
@@ -489,7 +491,7 @@ fn check_exit_status(binary: &str, output: &std::process::Output) -> anyhow::Res
             stderr.trim().to_string()
         };
         bail!(
-            "AI tool '{}' failed (exit code {}):\n{}",
+            "Agent '{}' failed (exit code {}):\n{}",
             binary,
             code,
             error_output
