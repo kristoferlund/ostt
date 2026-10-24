@@ -14,6 +14,7 @@
 //! - `retry`: Retry the last recording with the same transcription model
 //! - `replay`: Replay a previous recording from history
 
+pub mod agent;
 pub mod auth;
 pub mod config;
 pub mod daemon;

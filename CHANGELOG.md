@@ -9,17 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Claude Code, Codex and OpenCode actions receive the image; bash actions get its path in `$OSTT_ATTACHMENT`. Gemini CLI actions do not support attachments yet.
+- `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Agents that take images receive it (Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi and GitHub Copilot); bash actions get its path in `$OSTT_ATTACHMENT`.
+- Agents for AI actions are now data instead of code. ostt ships built-in agents for Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi, Hermes, GitHub Copilot, Grok, Cursor and OpenClaw, and `[process.agents.<id>]` in `ostt.toml` adds an agent or replaces a built-in one: its command with `{model}`, `{workdir}` and `{prompt}` placeholders, how it takes an image, and the environment variables and files it needs. An action's `tool` names any agent id; the existing ids keep working. `ostt agent list [--format json]` lists agents, whether each is installed (and where), and whether it takes images; `ostt agent models <id>` lists the models an agent offers. `ostt process list --format json` says for each action whether it takes an image (`images`) and why its agent can't run (`error`), and prints `[]` when there are no actions. AI actions take an optional `timeout_secs` (default 300).
 - Processing actions take an optional `description`, a one-line explanation shown under the action's name in the action picker and included in `ostt process list --format json`.
 
 ### Changed
 
+- Every built-in agent runs with its tools switched off, in a new empty working directory, so text in a transcript or screenshot cannot make it run commands or read and change files (#119). Claude Code could still use tools that need no approval, such as reading files; Codex, OpenCode and Gemini CLI could use their tools.
+- Agents now run in a new empty working directory instead of ostt's, so `tool_args` with relative paths or that rely on project files (AGENTS.md, CLAUDE.md, `.codex`) behave differently. Codex runs with `--ignore-user-config`, so its `model_provider` and profiles in `~/.codex/config.toml` no longer apply, and OpenCode actions need OpenCode 2.0 or later. To keep the old behaviour, replace the agent in `[process.agents]`.
 - Claude Code actions now read Claude's structured output, so a failure shows Claude's reason instead of raw output.
 - An empty transcription is no longer sent to the processing action.
+- A `--process` action that does not exist is reported before recording or transcribing, not after.
+- ostt no longer runs `<agent> --version` before every AI action to check a minimum version (OpenCode's 1.4.3 check is gone too); that cost up to a second per dictation. An agent too old for the arguments ostt passes fails with its own error, and the words are output unprocessed.
+- `--paste` returns as soon as the text is pasted. The previous clipboard is still restored after `restore_delay_ms`, by a background ostt process, so a dictation popup closes about 750 ms sooner.
+- When a processing action fails, `record`, `transcribe` and `retry` output the unprocessed transcription instead (stdout, file, clipboard or paste), so the words are not lost, and exit with status 3 to show that processing failed.
 
 ### Fixed
 
-- A processing action no longer hangs forever when the tool's `--version` check never returns; it fails after 10 seconds. Tools that time out are now stopped instead of left running.
+- Agents that time out are now stopped, together with any processes they started, instead of left running. When a signal ends ostt while an agent runs (Ctrl+C, or `kill`), ostt stops the agent and removes its working directory first.
 - A large prompt can no longer block a processing action before its timeout starts, and a tool that exits early reports its own error instead of "Broken pipe".
 
 ## 0.0.30 - 2026-10-21

@@ -22,17 +22,16 @@ use std::sync::{
 ///
 /// Records audio with real-time waveform visualization, optionally transcribes the recording,
 /// and saves to history. Supports external triggers via SIGUSR1 signal.
-#[allow(clippy::too_many_arguments)]
-pub async fn handle_record(
-    config: &OsttConfig,
-    clipboard: bool,
-    paste: bool,
-    output_file: Option<String>,
-    process: Option<String>,
-    attachment: Option<&std::path::Path>,
-    model_override: Option<SelectedModel>,
-    param_overrides: &[String],
-) -> anyhow::Result<()> {
+pub async fn handle_record(config: &OsttConfig, options: RecordOptions<'_>) -> anyhow::Result<()> {
+    let RecordOptions {
+        clipboard,
+        paste,
+        output_file,
+        process,
+        attachment,
+        model_override,
+        param_overrides,
+    } = options;
     tracing::info!("=== ostt Audio Recorder Started ===");
     tracing::info!(
         "Configuration loaded: device={}, peak_threshold={}%, reference_level={}",
@@ -44,7 +43,8 @@ pub async fn handle_record(
     let mut tui = RecordingTui::new_pending_audio(config)
         .map_err(|e| anyhow::anyhow!(e.to_string()))
         .context("failed to initialize recording UI")?;
-    run_record_preflight(config, model_override.clone(), param_overrides)
+    process::check_requested_action(&config.process, process.as_deref())
+        .and_then(|()| run_record_preflight(config, model_override.clone(), param_overrides))
         .context("record preflight failed")
         .map_err(|err| show_recording_error(&mut tui, "Setup Error", err))?;
     let term = Arc::new(AtomicBool::new(false));
@@ -132,12 +132,25 @@ pub async fn handle_record(
                 );
             };
 
-            Some(
-                run_process_action_with_animation(&mut tui, action, transcribed_text, attachment)
-                    .await
-                    .context("failed to process transcription")
-                    .map_err(|err| show_recording_error(&mut tui, "Processing Error", err))?,
+            let processed = run_process_action_with_animation(
+                &mut tui,
+                &config.process,
+                action,
+                &transcribed_text,
+                attachment,
             )
+            .await
+            .map_err(|err| show_recording_error(&mut tui, "Processing Error", err));
+            return process::output_processed(processed, &transcribed_text, |text| {
+                finish_recording_with_output(
+                    &mut tui,
+                    text,
+                    output_file,
+                    clipboard,
+                    paste,
+                    &config.output.paste,
+                )
+            });
         }
         Some(transcribed_text) => Some(transcribed_text),
         None => None,
@@ -157,6 +170,16 @@ pub async fn handle_record(
             Ok(())
         }
     }
+}
+
+pub struct RecordOptions<'a> {
+    pub clipboard: bool,
+    pub paste: bool,
+    pub output_file: Option<String>,
+    pub process: Option<String>,
+    pub attachment: Option<&'a std::path::Path>,
+    pub model_override: Option<SelectedModel>,
+    pub param_overrides: &'a [String],
 }
 
 fn show_recording_error(
@@ -477,18 +500,27 @@ fn pick_action_id_with_recording_tui(
 
 async fn run_process_action_with_animation(
     tui: &mut RecordingTui,
+    process_config: &crate::config::ProcessConfig,
     action: ProcessAction,
-    text: String,
+    text: &str,
     attachment: Option<&std::path::Path>,
 ) -> anyhow::Result<String> {
     let keywords = keywords::load_keywords().context("failed to load keywords")?;
     let mut animation = TranscriptionAnimation::new(80);
     animation.set_status_label("Processing...");
 
-    let task_text = text.clone();
+    let task_agents = process_config.agents.clone();
+    let task_text = text.to_string();
     let task_attachment = attachment.map(std::path::Path::to_path_buf);
     let task_handle = tokio::spawn(async move {
-        process::execute_action(&action, &task_text, &keywords, task_attachment.as_deref()).await
+        process::execute_action(
+            &task_agents,
+            &action,
+            &task_text,
+            &keywords,
+            task_attachment.as_deref(),
+        )
+        .await
     });
 
     loop {
@@ -506,7 +538,7 @@ async fn run_process_action_with_animation(
         {
             tracing::info!("Processing cancelled by user");
             task_handle.abort();
-            return Ok(text);
+            return Ok(text.to_string());
         }
     }
 

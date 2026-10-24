@@ -4,6 +4,8 @@
 //! Configuration is stored in the user's config directory.
 
 use indexmap::IndexMap;
+
+use super::agents::{AgentError, UserAgents};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -332,29 +334,6 @@ pub struct ActionInput {
     pub input_content: InputContent,
 }
 
-/// Supported AI CLI tools for executing AI actions.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AiTool {
-    #[serde(rename = "opencode")]
-    OpenCode,
-    ClaudeCode,
-    GeminiCli,
-    CodexCli,
-}
-
-impl AiTool {
-    /// Returns the standard binary name for this AI tool.
-    pub fn default_binary(&self) -> &'static str {
-        match self {
-            AiTool::OpenCode => "opencode",
-            AiTool::ClaudeCode => "claude",
-            AiTool::GeminiCli => "gemini",
-            AiTool::CodexCli => "codex",
-        }
-    }
-}
-
 /// Type-specific fields for a processing action.
 ///
 /// Uses `#[serde(tag = "type")]` so the TOML `type` field drives which variant
@@ -370,22 +349,26 @@ pub enum ActionDetails {
     },
     /// An AI chat completion action
     Ai {
-        /// Which CLI tool to invoke
+        /// Id of the agent to run: a built-in one (see `agents.toml`) or one
+        /// from `[process.agents]`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        tool: Option<AiTool>,
+        tool: Option<String>,
         /// Provider/model string (e.g. "openai/gpt-4o")
         #[serde(default, skip_serializing_if = "Option::is_none")]
         model: Option<String>,
         /// Input messages for the LLM
         inputs: Vec<ActionInput>,
-        /// Override the binary path (e.g., "/usr/local/bin/claude" instead of "claude").
-        /// Defaults to the standard binary name for the selected tool.
+        /// Override the program path (e.g., "/usr/local/bin/claude" instead of "claude").
+        /// Defaults to the program in the agent's command.
         #[serde(default)]
         tool_binary: Option<String>,
         /// Extra CLI arguments appended after the required ones.
         /// Allows pro users to pass additional flags without modifying OSTT.
         #[serde(default)]
         tool_args: Option<Vec<String>>,
+        /// How long the agent may take, in seconds (default 300).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        timeout_secs: Option<u64>,
     },
 }
 
@@ -409,12 +392,15 @@ pub struct ProcessAction {
 /// Top-level process configuration.
 #[derive(Debug, Clone, Default)]
 pub struct ProcessConfig {
-    /// Default AI CLI tool for AI actions that omit `tool`.
-    pub default_tool: Option<AiTool>,
+    /// Default agent for AI actions that omit `tool`.
+    pub default_tool: Option<String>,
     /// Default model for AI actions that omit `model`.
     pub default_model: Option<String>,
     /// List of configured processing actions
     pub actions: Vec<ProcessAction>,
+    /// The user's own agents from `[process.agents]`, which add to or replace
+    /// the built-in ones.
+    pub agents: UserAgents,
 }
 
 #[derive(Deserialize)]
@@ -447,14 +433,26 @@ impl<'de> Deserialize<'de> for ProcessConfig {
         #[derive(Deserialize)]
         struct RawProcessConfig {
             #[serde(default)]
-            default_tool: Option<AiTool>,
+            default_tool: Option<String>,
             #[serde(default)]
             default_model: Option<String>,
             #[serde(default)]
             actions: IndexMap<String, toml::Value>,
+            #[serde(default)]
+            agents: Option<toml::Value>,
         }
 
         let raw = RawProcessConfig::deserialize(deserializer)?;
+        let agents = match raw.agents {
+            None => UserAgents::default(),
+            Some(toml::Value::Table(table)) => {
+                super::agents::parse_user_agents(table.into_iter().collect())
+            }
+            Some(_) => {
+                tracing::warn!("Ignoring [process] agents: it must be a table of agents");
+                UserAgents::default()
+            }
+        };
         let mut parsed = Vec::with_capacity(raw.actions.len());
         for (id, value) in raw.actions {
             // An action type this OSTT version does not know (for example one
@@ -483,6 +481,11 @@ impl<'de> Deserialize<'de> for ProcessConfig {
                     if model.is_none() {
                         *model = raw.default_model.clone();
                     }
+                    if let Some(agent_id) = tool.as_deref() {
+                        if let Err(AgentError::Unknown(_)) = agents.resolve(agent_id) {
+                            tracing::warn!("Process action '{id}' uses unknown agent '{agent_id}'");
+                        }
+                    }
                 }
 
                 ProcessAction {
@@ -498,10 +501,13 @@ impl<'de> Deserialize<'de> for ProcessConfig {
             default_tool: raw.default_tool,
             default_model: raw.default_model,
             actions,
+            agents,
         })
     }
 }
 
+// Agents are not written: ostt writes a whole config only when it creates a
+// new one, and edits an existing one in place.
 impl Serialize for ProcessConfig {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -510,7 +516,7 @@ impl Serialize for ProcessConfig {
         #[derive(Serialize)]
         struct RawProcessConfig<'a> {
             #[serde(skip_serializing_if = "Option::is_none")]
-            default_tool: &'a Option<AiTool>,
+            default_tool: &'a Option<String>,
             #[serde(skip_serializing_if = "Option::is_none")]
             default_model: &'a Option<String>,
             actions: IndexMap<String, ProcessActionConfigRef<'a>>,
@@ -578,6 +584,18 @@ impl ProcessConfig {
     /// Finds an action by its `id` field.
     pub fn get_action(&self, id: &str) -> Option<&ProcessAction> {
         self.actions.iter().find(|a| a.id == id)
+    }
+
+    /// Whether `--attach` works with the action: a bash action gets the
+    /// image's path, an AI action needs an agent that takes images.
+    pub fn takes_images(&self, action: &ProcessAction) -> bool {
+        match &action.details {
+            ActionDetails::Bash { .. } => true,
+            ActionDetails::Ai { tool, .. } => tool
+                .as_deref()
+                .and_then(|tool| self.agents.resolve(tool).ok())
+                .is_some_and(|agent| agent.takes_images()),
+        }
     }
 }
 
@@ -1438,7 +1456,7 @@ mod tests {
                 inputs,
                 ..
             } => {
-                assert!(matches!(tool, Some(AiTool::OpenCode)));
+                assert_eq!(tool.as_deref(), Some("opencode"));
                 assert_eq!(model.as_deref(), Some("openai/gpt-4o"));
                 assert_eq!(inputs.len(), 2);
             }
@@ -1473,8 +1491,8 @@ mod tests {
         ));
     }
 
-    // The description is optional, and ostt writes the config back (e.g. when
-    // the model changes), so it must survive a load and save as well.
+    // The description is optional, and must survive serializing the config,
+    // which is how ostt writes a whole config file.
     #[test]
     fn action_description_is_optional_and_survives_a_round_trip() {
         let toml_str = r#"
@@ -1507,6 +1525,15 @@ mod tests {
             !saved.contains("description = \"\""),
             "absent description must not be written as empty: {saved}"
         );
+    }
+
+    /// `agents` that is not a table must not stop ostt from starting.
+    #[test]
+    fn agents_that_is_not_a_table_is_ignored() {
+        for value in ["agents = 5", "agents = []"] {
+            let config = parse_process_config(value).unwrap();
+            assert!(config.agents.is_empty(), "{value}");
+        }
     }
 
     #[test]
@@ -2267,7 +2294,7 @@ mod tests {
         );
         match &config.actions[0].details {
             ActionDetails::Ai { tool, model, .. } => {
-                assert!(matches!(tool, Some(AiTool::OpenCode)));
+                assert_eq!(tool.as_deref(), Some("opencode"));
                 assert_eq!(model.as_deref(), Some("anthropic/claude-sonnet-4-6"));
             }
             _ => panic!("expected Ai variant"),
@@ -2337,7 +2364,7 @@ mod tests {
         let config = parse_process_config(toml_str).unwrap();
         match &config.actions[0].details {
             ActionDetails::Ai { tool, model, .. } => {
-                assert!(matches!(tool, Some(AiTool::ClaudeCode)));
+                assert_eq!(tool.as_deref(), Some("claude-code"));
                 assert_eq!(model.as_deref(), Some("haiku"));
             }
             _ => panic!("expected Ai variant"),
@@ -2581,45 +2608,125 @@ mod tests {
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // 2.1.B — AiTool and AI config tests
+    // 2.1.B — Agents and AI config tests
     // ═══════════════════════════════════════════════════════════════════
 
-    /// Helper wrapper for deserializing a bare `AiTool` value from TOML.
-    #[derive(Deserialize)]
-    struct AiToolWrapper {
-        tool: AiTool,
+    fn agent_of<'a>(
+        config: &'a ProcessConfig,
+        id: &str,
+    ) -> Result<&'a super::super::agents::AgentSpec, AgentError> {
+        let ActionDetails::Ai {
+            tool: Some(tool), ..
+        } = &config.get_action(id).unwrap().details
+        else {
+            panic!("'{id}' is not an AI action with a tool");
+        };
+        config.agents.resolve(tool)
     }
 
-    fn parse_ai_tool(toml_str: &str) -> Result<AiTool, toml::de::Error> {
-        let wrapper: AiToolWrapper = toml::from_str(toml_str)?;
-        Ok(wrapper.tool)
-    }
-
+    /// Configs written before agents became data name these four tools; they
+    /// must keep loading and keep running the same programs.
     #[test]
-    fn ai_tool_deserializes_all_kebab_case_variants() {
+    fn existing_tool_ids_resolve_to_builtin_agents() {
         let cases = [
-            ("opencode", "OpenCode"),
-            ("claude-code", "ClaudeCode"),
-            ("gemini-cli", "GeminiCli"),
-            ("codex-cli", "CodexCli"),
+            ("opencode", "opencode"),
+            ("claude-code", "claude"),
+            ("gemini-cli", "gemini"),
+            ("codex-cli", "codex"),
         ];
-        for (kebab, expected_debug) in cases {
-            let toml_str = format!("tool = \"{}\"", kebab);
-            let tool = parse_ai_tool(&toml_str)
-                .unwrap_or_else(|e| panic!("failed to parse '{}': {}", kebab, e));
+        for (tool, program) in cases {
+            let toml_str = format!(
+                "[actions.a]\nname = \"A\"\ntype = \"ai\"\ntool = \"{tool}\"\nmodel = \"m\"\ninputs = [{{ role = \"user\", source = \"transcription\" }}]\n"
+            );
+            let config = parse_process_config(&toml_str).unwrap();
             assert_eq!(
-                format!("{:?}", tool),
-                expected_debug,
-                "variant mismatch for '{}'",
-                kebab
+                agent_of(&config, "a").unwrap().program(),
+                program,
+                "tool '{tool}'"
             );
         }
     }
 
+    /// An unknown agent id must not stop the config from loading; the action
+    /// fails when run instead, naming the agent.
     #[test]
-    fn ai_tool_unknown_variant_fails_deserialization() {
-        let toml_str = r#"tool = "vim""#;
-        assert!(parse_ai_tool(toml_str).is_err());
+    fn unknown_tool_loads_without_an_agent() {
+        let config = parse_process_config(
+            r#"
+            [actions.a]
+            name = "A"
+            type = "ai"
+            tool = "vim"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let err = agent_of(&config, "a").unwrap_err();
+        assert_eq!(err, AgentError::Unknown("vim".to_string()));
+    }
+
+    #[test]
+    fn action_uses_an_agent_from_the_config() {
+        let config = parse_process_config(
+            r#"
+            default_tool = "mine"
+
+            [agents.mine]
+            name = "Mine"
+            command = ["my-llm", "--model", "{model}"]
+
+            [actions.a]
+            name = "A"
+            type = "ai"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        assert_eq!(agent_of(&config, "a").unwrap().program(), "my-llm");
+    }
+
+    /// Integrations offer a screenshot only for actions that can use one, so
+    /// an action whose agent takes no images, or has no agent, must say so.
+    #[test]
+    fn takes_images_follows_the_actions_agent() {
+        let config = parse_process_config(
+            r#"
+            [actions.copy]
+            name = "Copy"
+            type = "bash"
+            command = "cat"
+
+            [actions.claude]
+            name = "Claude"
+            type = "ai"
+            tool = "claude-code"
+            model = "haiku"
+            inputs = [{ role = "user", source = "transcription" }]
+
+            [actions.hermes]
+            name = "Hermes"
+            type = "ai"
+            tool = "hermes"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+
+            [actions.unknown]
+            name = "Unknown"
+            type = "ai"
+            tool = "nope"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let images: Vec<bool> = config
+            .actions
+            .iter()
+            .map(|a| config.takes_images(a))
+            .collect();
+        assert_eq!(images, [true, true, false, false]);
     }
 
     #[test]
@@ -2663,14 +2770,6 @@ mod tests {
             }
             _ => panic!("expected Ai variant"),
         }
-    }
-
-    #[test]
-    fn ai_tool_default_binary_returns_expected_names() {
-        assert_eq!(AiTool::OpenCode.default_binary(), "opencode");
-        assert_eq!(AiTool::ClaudeCode.default_binary(), "claude");
-        assert_eq!(AiTool::GeminiCli.default_binary(), "gemini");
-        assert_eq!(AiTool::CodexCli.default_binary(), "codex");
     }
 
     #[test]

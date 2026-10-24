@@ -133,7 +133,7 @@ mod tests {
         );
     }
 
-    /// Custom agents run as bash actions, so this is how they receive an image.
+    /// Bash actions receive an attached image as its path in OSTT_ATTACHMENT.
     #[tokio::test]
     async fn attachment_path_is_exposed_as_env_var() {
         let path = std::path::Path::new("/tmp/context.png");

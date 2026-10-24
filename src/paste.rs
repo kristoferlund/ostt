@@ -126,23 +126,25 @@ pub(crate) fn paste_text(text: &str, config: &PasteConfig) -> anyhow::Result<()>
         read_clipboard,
         set_clipboard,
         send_paste_key,
-        thread::sleep,
+        |previous| restore_clipboard_later(previous, config.restore_delay_ms),
     )
 }
 
-fn paste_text_with_handlers<R, S, K, L>(
+/// Pastes `text`, then hands the previous clipboard to `restore_later`, so
+/// the caller does not wait out the restore delay.
+fn paste_text_with_handlers<R, S, K, D>(
     text: &str,
     config: &PasteConfig,
     mut read_clipboard: R,
     mut set_clipboard: S,
     mut send_paste_key: K,
-    mut sleep: L,
+    restore_later: D,
 ) -> anyhow::Result<()>
 where
     R: FnMut() -> anyhow::Result<String>,
     S: FnMut(&str) -> anyhow::Result<()>,
     K: FnMut(&str) -> anyhow::Result<()>,
-    L: FnMut(Duration),
+    D: FnOnce(String),
 {
     let previous_clipboard = if config.restore_clipboard {
         match read_clipboard() {
@@ -166,16 +168,28 @@ where
         return Err(err.context(paste_key_failure_message(&config.paste_key)));
     }
 
-    sleep(Duration::from_millis(config.restore_delay_ms));
-
     if let Some(previous_clipboard) = previous_clipboard {
-        if let Err(err) = set_clipboard(&previous_clipboard) {
-            tracing::warn!("Failed to restore clipboard after paste: {err}");
-            eprintln!("Warning: Failed to restore previous clipboard contents after paste.");
-        }
+        restore_later(previous_clipboard);
     }
 
     Ok(())
+}
+
+/// Restores the clipboard once the app has had `delay_ms` to read the pasted
+/// text. A detached helper waits, so OSTT can exit as soon as the text is
+/// pasted; if it cannot start, the restore happens here instead.
+fn restore_clipboard_later(previous: String, delay_ms: u64) {
+    if let Err(err) = spawn_detached_helper(RESTORE_CLIPBOARD_HELPER, &previous) {
+        tracing::warn!("Restoring the clipboard in process: {err:#}");
+        restore_clipboard_after(&previous, delay_ms);
+    }
+}
+
+fn restore_clipboard_after(previous: &str, delay_ms: u64) {
+    thread::sleep(Duration::from_millis(delay_ms));
+    if let Err(err) = set_clipboard(previous) {
+        tracing::warn!("Failed to restore clipboard after paste: {err}");
+    }
 }
 
 fn paste_key_failure_message(paste_key: &str) -> String {
@@ -248,25 +262,37 @@ fn is_gnome_wayland_session() -> bool {
         || std::env::var("GNOME_DESKTOP_SESSION_ID").is_ok()
 }
 
+/// Hidden first arguments that run OSTT as one of its detached helpers.
+pub(crate) const PASTE_HELPER: &str = "paste-helper";
+pub(crate) const RESTORE_CLIPBOARD_HELPER: &str = "restore-clipboard-helper";
+
 pub(crate) fn spawn_detached_paste_helper(text: &str) -> anyhow::Result<()> {
+    spawn_detached_helper(PASTE_HELPER, text)
+}
+
+/// Starts `ostt <helper>` outside this process group, with `input` on its
+/// stdin, and does not wait for it.
+fn spawn_detached_helper(helper: &str, input: &str) -> anyhow::Result<()> {
     let exe = std::env::current_exe().context("failed to resolve ostt executable path")?;
     let mut command = Command::new(exe);
     command
-        .arg("paste-helper")
+        .arg(helper)
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     detach_from_terminal_process_group(&mut command);
 
-    let mut child = command.spawn().context("failed to spawn paste helper")?;
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("failed to spawn {helper}"))?;
 
     let mut stdin = child
         .stdin
         .take()
-        .ok_or_else(|| anyhow::anyhow!("failed to open paste helper stdin"))?;
+        .ok_or_else(|| anyhow::anyhow!("failed to open {helper} stdin"))?;
     stdin
-        .write_all(text.as_bytes())
-        .context("failed to write text to paste helper")?;
+        .write_all(input.as_bytes())
+        .with_context(|| format!("failed to write to {helper}"))?;
     drop(stdin);
     drop(child);
 
@@ -284,14 +310,27 @@ fn detach_from_terminal_process_group(command: &mut Command) {
 fn detach_from_terminal_process_group(_command: &mut Command) {}
 
 pub(crate) fn handle_paste_helper(config: &crate::config::OsttConfig) -> anyhow::Result<()> {
-    let mut text = String::new();
-    std::io::stdin()
-        .read_to_string(&mut text)
-        .context("failed to read paste helper input")?;
+    let text = read_helper_input()?;
     wait_for_focus_after_popup(&config.output.paste);
     paste_text(&text, &config.output.paste).inspect_err(|err| {
         crate::notifier::notify_error_if_popup_context("Paste Failed", &err.to_string());
     })
+}
+
+pub(crate) fn handle_restore_clipboard_helper(
+    config: &crate::config::OsttConfig,
+) -> anyhow::Result<()> {
+    let previous = read_helper_input()?;
+    restore_clipboard_after(&previous, config.output.paste.restore_delay_ms);
+    Ok(())
+}
+
+fn read_helper_input() -> anyhow::Result<String> {
+    let mut input = String::new();
+    std::io::stdin()
+        .read_to_string(&mut input)
+        .context("failed to read helper input")?;
+    Ok(input)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -522,6 +561,52 @@ mod tests {
         assert!(err.to_string().contains("Text was copied to the clipboard"));
         assert!(err.to_string().contains("will stay there"));
         assert_eq!(clipboard_writes.into_inner(), vec!["new text"]);
+    }
+
+    // The restore runs after the delay in a detached helper; doing it here
+    // would keep OSTT (and the popup waiting on it) open for the delay.
+    #[test]
+    fn successful_paste_defers_the_clipboard_restore() {
+        let config = PasteConfig {
+            restore_clipboard: true,
+            ..PasteConfig::default()
+        };
+        let clipboard_writes = RefCell::new(Vec::new());
+        let restored = RefCell::new(None);
+
+        paste_text_with_handlers(
+            "new text",
+            &config,
+            || Ok("old text".to_string()),
+            |value| {
+                clipboard_writes.borrow_mut().push(value.to_string());
+                Ok(())
+            },
+            |_| Ok(()),
+            |previous| *restored.borrow_mut() = Some(previous),
+        )
+        .unwrap();
+
+        assert_eq!(clipboard_writes.into_inner(), vec!["new text"]);
+        assert_eq!(restored.into_inner().as_deref(), Some("old text"));
+    }
+
+    #[test]
+    fn paste_without_restore_leaves_the_text_in_the_clipboard() {
+        let config = PasteConfig {
+            restore_clipboard: false,
+            ..PasteConfig::default()
+        };
+
+        paste_text_with_handlers(
+            "new text",
+            &config,
+            || panic!("the clipboard is not read when it is not restored"),
+            |_| Ok(()),
+            |_| Ok(()),
+            |_| panic!("nothing to restore"),
+        )
+        .unwrap();
     }
 
     #[test]
