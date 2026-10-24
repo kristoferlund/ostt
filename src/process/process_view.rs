@@ -4,6 +4,8 @@ use crate::config::file::ProcessAction;
 use crate::ui::components::list::{clamp_selection, selection_list};
 use crate::ui::session::{self, Chrome, Routed};
 use anyhow::Result;
+use ratatui::style::Style;
+use ratatui::text::{Line, Text};
 use ratcn::runtime::{FocusState, Ratcn};
 
 /// Result of the action picker interaction.
@@ -25,7 +27,15 @@ enum Msg {
 }
 
 fn run_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
-    let rows: Vec<String> = actions.iter().map(|action| action.name.clone()).collect();
+    // An action's description, when any action has one, is a muted second line.
+    let with_descriptions = actions.iter().any(|action| action.description.is_some());
+    let rows: Vec<String> = actions
+        .iter()
+        .map(|action| match &action.description {
+            Some(description) => format!("{}\n{description}", action.name),
+            None => action.name.clone(),
+        })
+        .collect();
     let mut session = session::open()?;
     let mut ratcn = Ratcn::new().focus(|state: &State| &state.focus, Msg::Focus);
     let mut state = State::default();
@@ -37,7 +47,27 @@ fn run_picker(actions: &[ProcessAction]) -> Result<PickerResult> {
             toasts: None,
         };
         session::draw(&mut session, &mut ratcn, &state, chrome, |ctx, body| {
-            let list = selection_list(&rows, 1, |s: &State| s.selected, Msg::Select, Msg::Confirm);
+            let name = Style::default().fg(ctx.theme.foreground);
+            let description = Style::default().fg(ctx.theme.muted_foreground);
+            let row_height = if with_descriptions { 2 } else { 1 };
+            let list = selection_list(
+                &rows,
+                row_height,
+                |s: &State| s.selected,
+                Msg::Select,
+                Msg::Confirm,
+            );
+            let list = if with_descriptions {
+                list.paint_item(move |_, row| {
+                    let (title, detail) = row.label.split_once('\n').unwrap_or((row.label, ""));
+                    Text::from(vec![
+                        Line::styled(format!(" {title}"), name),
+                        Line::styled(format!(" {detail}"), description),
+                    ])
+                })
+            } else {
+                list
+            };
             ctx.component("list", list, body);
         })?;
         let Some(event) = session::next_event(&mut session, None)? else {

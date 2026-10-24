@@ -242,6 +242,7 @@ mod tests {
         ProcessAction {
             id: "test".to_string(),
             name: "Test Action".to_string(),
+            description: None,
             details: ActionDetails::Bash {
                 command: command.to_string(),
             },
