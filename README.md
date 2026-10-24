@@ -110,7 +110,7 @@ If an action fails, the unprocessed transcription is output instead, so the word
 Other programs can rely on:
 
 - **Exit status:** 0 on success; 3 when processing failed and the unprocessed transcription was output instead; 2 for invalid arguments; 1 for any other failure.
-- **Errors** on stderr, starting with `Error: `, followed by the causes.
+- **Errors** on stderr, starting with `Error: ` and followed by the causes (`Caused by:`); invalid arguments start with `error: ` instead.
 - **JSON lists** with `--format json`, an empty list when there is nothing to list:
   - `ostt process list`: `id`, `name`, `description`, `images` (whether `--attach` works with the action), and `error` when the action's agent is unknown or not valid.
   - `ostt agent list`: `id`, `name`, `installed`, `path`, `images`, `builtin`; an agent defined but not valid has `id`, `name` and `error`.

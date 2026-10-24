@@ -164,6 +164,7 @@ pub(crate) fn parse_user_agents(raw: IndexMap<String, toml::Value>) -> UserAgent
                 agents.valid.insert(id, spec);
             }
             Err(reason) => {
+                let reason = reason.trim().to_string();
                 tracing::warn!("Process agent '{id}' is not valid: {reason}");
                 agents.invalid.insert(id, reason);
             }

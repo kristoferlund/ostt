@@ -458,16 +458,8 @@ pub async fn execute_ai_action(
         output.context("failed to wait for the agent")
     };
     let output = timeout(limit, run).await.map_err(|_| {
-        tracing::error!(
-            "Agent '{}' timed out after {} seconds",
-            binary,
-            limit.as_secs()
-        );
-        anyhow::anyhow!(
-            "Agent '{}' timed out after {} seconds",
-            binary,
-            limit.as_secs()
-        )
+        tracing::error!("Agent '{}' timed out after {}s", binary, limit.as_secs());
+        anyhow::anyhow!("Agent '{}' timed out after {}s", binary, limit.as_secs())
     })??;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1059,13 +1051,22 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let result = validate_tool_version(
-            script.to_str().unwrap(),
-            "1.0.0",
-            Duration::from_millis(200),
-        )
-        .await;
-        let err = result.unwrap_err().to_string();
+        // Running a file just written can fail with "Text file busy" while
+        // another test's fork still holds it open; that clears at once.
+        let mut err = String::new();
+        for _ in 0..3 {
+            err = validate_tool_version(
+                script.to_str().unwrap(),
+                "1.0.0",
+                Duration::from_millis(200),
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+            if !err.contains("Text file busy") {
+                break;
+            }
+        }
         assert!(err.contains("did not finish"), "got: {err}");
     }
 }

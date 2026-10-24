@@ -35,8 +35,8 @@ pub async fn handle_transcribe(
         param_overrides,
     } = options;
 
-    // Validate the input file exists
     process::check_requested_action(&config_data.process, process.as_deref())?;
+    // Validate the input file exists
     if !file.exists() {
         return Err(anyhow::anyhow!("Audio file not found: {}", file.display()));
     }

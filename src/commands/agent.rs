@@ -33,23 +33,24 @@ pub fn handle_agent_list(config_data: &config::OsttConfig, json: bool) -> anyhow
         .collect();
 
     if json {
-        let agents: Vec<_> = agents
-            .iter()
-            .map(|(id, agent, builtin)| {
-                let path = program_path(agent);
-                serde_json::json!({
-                    "id": id,
-                    "name": agent.name,
-                    "installed": path.is_some(),
-                    "path": path,
-                    "images": agent.takes_images(),
-                    "builtin": builtin,
+        let agents: Vec<_> =
+            agents
+                .iter()
+                .map(|(id, agent, builtin)| {
+                    let path = program_path(agent);
+                    serde_json::json!({
+                        "id": id,
+                        "name": agent.name,
+                        "installed": path.is_some(),
+                        "path": path,
+                        "images": agent.takes_images(),
+                        "builtin": builtin,
+                    })
                 })
-            })
-            .chain(invalid.iter().map(
-                |(id, reason)| serde_json::json!({ "id": id, "name": id, "error": reason.trim() }),
-            ))
-            .collect();
+                .chain(invalid.iter().map(
+                    |(id, reason)| serde_json::json!({ "id": id, "name": id, "error": reason }),
+                ))
+                .collect();
         println!("{}", serde_json::to_string_pretty(&agents)?);
         return Ok(());
     }

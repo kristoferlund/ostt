@@ -342,7 +342,7 @@ mod tests {
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("timed out after 1 seconds"), "{err}");
+        assert!(err.contains("timed out after 1s"), "{err}");
         assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 
