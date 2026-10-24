@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Agents that take images receive it (all built-in ones except Hermes); bash actions get its path in `$OSTT_ATTACHMENT`.
-- Agents for AI actions are now data instead of code. ostt ships built-in agents for Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi and Hermes, and `[process.agents.<id>]` in `ostt.toml` adds an agent or replaces a built-in one: its command with `{model}` and `{workdir}` placeholders, how it takes an image, and the environment variables and files it needs. An action's `tool` names any agent id; the existing ids keep working. `ostt agent list [--format json]` lists agents, whether each is installed, and whether it takes images.
+- `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Agents that take images receive it (Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi and GitHub Copilot); bash actions get its path in `$OSTT_ATTACHMENT`.
+- Agents for AI actions are now data instead of code. ostt ships built-in agents for Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi, Hermes, GitHub Copilot, Grok, Cursor and OpenClaw, and `[process.agents.<id>]` in `ostt.toml` adds an agent or replaces a built-in one: its command with `{model}`, `{workdir}` and `{prompt}` placeholders, how it takes an image, and the environment variables and files it needs. An action's `tool` names any agent id; the existing ids keep working. `ostt agent list [--format json]` lists agents, whether each is installed, and whether it takes images.
 - Processing actions take an optional `description`, a one-line explanation shown under the action's name in the action picker and included in `ostt process list --format json`.
 
 ### Changed

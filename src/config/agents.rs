@@ -13,7 +13,8 @@ use std::sync::OnceLock;
 pub struct AgentSpec {
     /// Display name.
     pub name: String,
-    /// Program and arguments, with `{model}` and `{workdir}` placeholders.
+    /// Program and arguments, with `{model}`, `{workdir}` and `{prompt}`
+    /// placeholders. Without `{prompt}`, the prompt goes to stdin.
     pub command: Vec<String>,
     /// How the prompt and the answer are encoded.
     #[serde(default, skip_serializing_if = "AgentFormat::is_text")]
@@ -27,7 +28,8 @@ pub struct AgentSpec {
     /// Environment variables for the agent, with `{workdir}`.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub env: IndexMap<String, String>,
-    /// Files written into the agent's working directory before it runs.
+    /// Files written into the agent's working directory before it runs, by
+    /// relative path.
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub files: IndexMap<String, String>,
     /// Lowest version, as printed by `<program> --version`, the arguments work with.

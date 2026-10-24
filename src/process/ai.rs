@@ -132,11 +132,21 @@ impl Placeholders<'_> {
     }
 }
 
+/// Whether the agent takes the prompt as an argument (`{prompt}`) rather
+/// than on stdin.
+fn prompt_in_args(agent: &AgentSpec) -> bool {
+    agent.command.iter().any(|arg| arg.contains("{prompt}"))
+}
+
 /// Builds the arguments after the program: the agent's own, the image
 /// arguments when an image is attached, then the user's `tool_args`.
+///
+/// `{prompt}` is filled last, so placeholders the dictated text happens to
+/// contain are left as they are.
 fn command_args(
     agent: &AgentSpec,
     placeholders: &Placeholders,
+    prompt: &str,
     tool_args: Option<&[String]>,
 ) -> Vec<String> {
     let image_args = match (placeholders.image, &agent.image_args) {
@@ -146,7 +156,7 @@ fn command_args(
     agent.command[1..]
         .iter()
         .chain(image_args)
-        .map(|arg| placeholders.fill(arg))
+        .map(|arg| placeholders.fill(arg).replace("{prompt}", prompt))
         .chain(tool_args.unwrap_or_default().iter().cloned())
         .collect()
 }
@@ -164,10 +174,19 @@ fn prepare_workdir(
         .context("failed to create the agent's working directory")?;
     for (name, content) in &agent.files {
         // Names come from the config; keep them inside the directory.
-        if name.is_empty() || name.contains('/') || name == ".." {
-            bail!("Agent file name '{name}' must be a plain file name");
+        let relative = Path::new(name);
+        let inside = relative
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if name.is_empty() || !inside {
+            bail!("Agent file '{name}' must be a relative path inside its working directory");
         }
-        std::fs::write(workdir.path().join(name), content)
+        let path = workdir.path().join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create the folder for agent file '{name}'"))?;
+        }
+        std::fs::write(&path, content)
             .with_context(|| format!("failed to write the agent's file '{name}'"))?;
     }
     let image = match attachment {
@@ -250,8 +269,9 @@ fn claude_result(name: &str, stdout: &str) -> Option<anyhow::Result<String>> {
 
 /// Executes an AI action by running its agent non-interactively.
 ///
-/// Constructs a prompt from the resolved messages, pipes it to the agent via
-/// stdin in a new empty working directory, and returns the agent's response:
+/// Constructs a prompt from the resolved messages, passes it to the agent on
+/// stdin (or as an argument, where its command has `{prompt}`) in a new empty
+/// working directory, and returns the agent's response:
 /// stdout, or for the Claude stream-json format the text of its result.
 ///
 /// # Arguments
@@ -293,7 +313,6 @@ pub async fn execute_ai_action(
         Some(binary) => binary.to_string(),
         None => placeholders.fill(agent.program()),
     };
-    let args = command_args(agent, &placeholders, tool_args);
 
     if let Some(minimum) = &agent.minimum_version {
         validate_tool_version(&binary, minimum, VERSION_TIMEOUT).await?;
@@ -314,7 +333,10 @@ pub async fn execute_ai_action(
     if let (Some(_), Some(reference)) = (&image, &agent.image_prompt) {
         prompt = format!("{prompt}\n\n{}", placeholders.fill(reference));
     }
+    let in_args = prompt_in_args(agent);
+    let args = command_args(agent, &placeholders, &prompt, tool_args);
     let stdin_content = match agent.format {
+        _ if in_args => String::new(),
         AgentFormat::ClaudeStreamJson => claude_message(&prompt, image.as_deref())?,
         AgentFormat::Text => prompt,
     };
@@ -348,7 +370,11 @@ pub async fn execute_ai_action(
         )
         .env("TERM", "dumb")
         .env("NO_COLOR", "1")
-        .stdin(std::process::Stdio::piped())
+        .stdin(if in_args {
+            std::process::Stdio::null()
+        } else {
+            std::process::Stdio::piped()
+        })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .kill_on_drop(true)
@@ -368,8 +394,11 @@ pub async fn execute_ai_action(
 
     // Write stdin while reading the output, both under the timeout: an image
     // prompt exceeds the pipe buffer, so writing first could block forever.
-    let mut stdin = child.stdin.take().context("failed to open stdin pipe")?;
+    let stdin = child.stdin.take();
     let write = async move {
+        let Some(mut stdin) = stdin else {
+            return Ok(());
+        };
         // A tool that exits without reading all of stdin closes the pipe; its
         // exit status and stderr explain why, not the broken pipe.
         match stdin.write_all(stdin_content.as_bytes()).await {
@@ -505,7 +534,7 @@ mod tests {
             workdir: Path::new("/work"),
             image: image.map(Path::new),
         };
-        command_args(&agent(id), &placeholders, Some(&tool_args))
+        command_args(&agent(id), &placeholders, "the prompt", Some(&tool_args))
     }
 
     #[test]
@@ -584,9 +613,30 @@ mod tests {
         check("oh-my-pi", &["--config", "{workdir}/ostt.yml"]);
         assert!(agent("oh-my-pi").files["ostt.yml"].contains("enableProjectConfig: false"));
         check("hermes", &["-t", "bot_room"]);
+        check("copilot", &["--available-tools=ask_user", "--no-ask-user"]);
+        for kind in ["shell", "write", "read", "url", "memory"] {
+            check("copilot", &[&format!("--deny-tool={kind}")]);
+        }
+        check("copilot", &["--disable-builtin-mcps"]);
+        check("grok", &["--deny", "*"]);
+        check("grok", &["--sandbox", "strict"]);
+        check("cursor", &["--mode", "ask"]);
+        assert!(!agent("cursor")
+            .command
+            .iter()
+            .any(|a| a == "--force" || a == "--yolo"));
+        assert!(agent("cursor").files[".cursor/cli.json"].contains(r#""Shell(*)""#));
+        assert!(agent("cursor").files[".cursor/cli.json"].contains(r#""Mcp(*:*)""#));
+        check(
+            "openclaw",
+            &[
+                "--config-override",
+                r#"{"tools":{"deny":["*","group:plugins","bundle-mcp"]}}"#,
+            ],
+        );
         assert_eq!(
             builtin_agents().len(),
-            7,
+            11,
             "a new built-in agent needs its tools-off check here"
         );
     }
@@ -715,6 +765,77 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════════
     // Attachments
     // ═══════════════════════════════════════════════════════════════════
+
+    /// A prompt that contains a placeholder must reach the agent as dictated,
+    /// not with the placeholder filled in.
+    #[test]
+    fn prompt_is_filled_after_the_other_placeholders() {
+        let spec: AgentSpec = toml::from_str(
+            "name = \"A\"\ncommand = [\"a\", \"-m\", \"{model}\", \"-p\", \"{prompt}\"]\n",
+        )
+        .unwrap();
+        let placeholders = Placeholders {
+            model: "m1",
+            workdir: Path::new("/work"),
+            image: None,
+        };
+        assert_eq!(
+            command_args(&spec, &placeholders, "say {model}", None),
+            ["-m", "m1", "-p", "say {model}"]
+        );
+        assert!(prompt_in_args(&spec));
+    }
+
+    /// An agent that takes the prompt as an argument gets it there, with
+    /// stdin closed rather than left open for it to wait on.
+    #[tokio::test]
+    async fn prompt_argument_agent_gets_no_stdin() {
+        let dir = std::env::temp_dir().join("ostt_test_ai_prompt_arg");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script_path = dir.join("agent.sh");
+        std::fs::write(
+            &script_path,
+            "#!/bin/sh\nprintf '%s' \"$2\" | grep -q 'spoken words' && [ -z \"$(cat)\" ] && echo ok\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        let spec: AgentSpec = toml::from_str(&format!(
+            "name = \"A\"\ncommand = [\"{}\", \"-p\", \"{{prompt}}\"]\n",
+            script_path.display()
+        ))
+        .unwrap();
+        let messages = vec![msg(InputRole::User, "spoken words")];
+        let result = execute_ai_action("a", &spec, "m", &messages, None, None, None).await;
+        std::fs::remove_dir_all(&dir).ok();
+        assert_eq!(result.unwrap(), "ok");
+    }
+
+    #[test]
+    fn agent_files_stay_inside_the_workdir() {
+        for name in ["../escape", "/etc/passwd", "a/../../b", ""] {
+            let spec: AgentSpec = toml::from_str(&format!(
+                "name = \"A\"\ncommand = [\"a\"]\nfiles = {{ \"{name}\" = \"x\" }}\n"
+            ))
+            .unwrap();
+            let err = prepare_workdir(&spec, None).unwrap_err().to_string();
+            assert!(err.contains("relative path"), "'{name}': {err}");
+        }
+        let spec: AgentSpec = toml::from_str(
+            "name = \"A\"\ncommand = [\"a\"]\nfiles = { \".cursor/cli.json\" = \"{}\" }\n",
+        )
+        .unwrap();
+        let (workdir, _) = prepare_workdir(&spec, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(workdir.path().join(".cursor/cli.json")).unwrap(),
+            "{}"
+        );
+    }
 
     #[tokio::test]
     async fn agent_without_images_rejects_attachment_instead_of_dropping_it() {
