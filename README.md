@@ -74,8 +74,8 @@ If you prefer platform package managers, see the docs for Homebrew, AUR, `.deb`,
 ## Quick Start
 
 ```bash
-ostt auth           # Save cloud provider credentials
-ostt model          # Choose cloud or local transcription model
+ostt model          # Choose a local or cloud transcription model
+ostt auth           # Save cloud provider credentials (cloud models only)
 ostt                # Record, transcribe, print to stdout
 ostt -c             # Record, transcribe, copy to clipboard
 ostt -m deepgram/nova-3 -c
@@ -128,7 +128,7 @@ ostt launch -c               # Open popup recorder
 ostt transcribe file.mp3 -m deepinfra/openai/whisper-large-v3
 ostt retry 2 -m groq/whisper-large-v3 -c
 ostt replay                  # Play most recent recording
-ostt model                   # Choose cloud or local transcription model
+ostt model                   # Choose a local or cloud transcription model
 ostt model params whisper/turbo  # List supported params for a model
 ostt history                 # Browse transcription history
 ostt keyword                 # Manage transcription keywords
@@ -149,7 +149,7 @@ OSTT is bring-your-own-API-key and currently supports OpenAI, Deepgram, DeepInfr
 
 Run `ostt auth` to select your provider/model and save credentials securely.
 
-Run `ostt model` to switch between authenticated cloud models and local models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs. See [Local Models](https://ostt.ai/guide/local-models) for the Parakeet and Whisper models.
+Run `ostt model` to switch between local models and authenticated cloud models. The local model screen can download curated models, activate downloaded models, delete local model files, and add custom models from Hugging Face model pages or direct `.gguf` / `ggml-*.bin` URLs. See [Local Models](https://ostt.ai/guide/local-models) for the Parakeet and Whisper models.
 
 Per-provider and per-model params are configured under `[provider.params]` and `[provider."model".params]`, or passed per run with `--param key=value`. See [Providers and Models](https://ostt.ai/reference/providers) and [Configuration](https://ostt.ai/guide/configuration) for supported params.
 
