@@ -724,61 +724,34 @@ mod tests {
         );
     }
 
+    /// Runs `script` as `spec`'s program, through `sh` so a file just written
+    /// is never executed directly ("Text file busy" when another test forks
+    /// while it is open). The temp dir holds the script and anything else a
+    /// test needs, and is removed when dropped.
+    fn fake_agent(spec: &AgentSpec, script: &str) -> (tempfile::TempDir, AgentSpec) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("agent.sh");
+        std::fs::write(&path, script).unwrap();
+        let mut spec = spec.clone();
+        spec.command
+            .splice(..1, ["sh".to_string(), path.display().to_string()]);
+        (dir, spec)
+    }
+
+    fn spec(toml: &str) -> AgentSpec {
+        toml::from_str(toml).unwrap()
+    }
+
     #[tokio::test]
     async fn non_zero_exit_returns_error_with_stderr() {
-        // Use `bash` as the tool binary with `-c` to run a script that writes to
-        // stderr and exits non-zero. The required args from `command_args` are
-        // passed before our extra args, but `bash -c` uses only the first `-c` arg
-        // as the script and ignores the rest (they become positional params $0, $1...).
-        // We must ensure `-c` and the script come first, so we use them as tool_binary
-        // args via a wrapper: `bash` as binary, then the extra args include `-c` and
-        // the command. But required args are prepended. Solution: use `env` which passes
-        // through args — no, that has the same issue.
-        //
-        // Simplest approach: directly use a script path. We create a tiny shell script.
-        let dir = std::env::temp_dir().join("ostt_test_ai_nonzero");
-        std::fs::create_dir_all(&dir).unwrap();
-        let script_path = dir.join("fail.sh");
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\necho 'custom error output' >&2\nexit 1\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-
-        // Small delay to avoid "Text file busy" race condition on Linux
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
+        let (_dir, spec) = fake_agent(&agent("pi"), "echo 'custom error output' >&2\nexit 1\n");
         let messages = vec![msg(InputRole::User, "test")];
-        let result = execute_ai_action(
-            "pi",
-            &agent("pi"),
-            "unused",
-            &messages,
-            Some(script_path.to_str().unwrap()),
-            None,
-            None,
-        )
-        .await;
-
-        // Cleanup
-        std::fs::remove_dir_all(&dir).ok();
-
-        let err = result.unwrap_err().to_string();
-        assert!(
-            err.contains("failed"),
-            "error should mention failure, got: {}",
-            err
-        );
-        assert!(
-            err.contains("custom error output"),
-            "error should contain stderr content, got: {}",
-            err
-        );
+        let err = execute_ai_action("pi", &spec, "m", &messages, None, None, None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("failed"), "{err}");
+        assert!(err.contains("custom error output"), "{err}");
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -789,10 +762,8 @@ mod tests {
     /// "{model}", must reach the agent as they are, not filled in.
     #[test]
     fn prompt_is_filled_after_the_other_placeholders() {
-        let spec: AgentSpec = toml::from_str(
-            "name = \"A\"\ncommand = [\"a\", \"-m\", \"{model}\", \"-p\", \"{prompt}\"]\n",
-        )
-        .unwrap();
+        let spec =
+            spec("name = \"A\"\ncommand = [\"a\", \"-m\", \"{model}\", \"-p\", \"{prompt}\"]\n");
         let placeholders = Placeholders {
             model: "m1 {prompt}",
             workdir: Path::new("/work"),
@@ -810,29 +781,12 @@ mod tests {
     /// stdin closed rather than left open for it to wait on.
     #[tokio::test]
     async fn prompt_argument_agent_gets_no_stdin() {
-        let dir = std::env::temp_dir().join("ostt_test_ai_prompt_arg");
-        std::fs::create_dir_all(&dir).unwrap();
-        let script_path = dir.join("agent.sh");
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\nprintf '%s' \"$2\" | grep -q 'spoken words' && [ -z \"$(cat)\" ] && echo ok\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        let spec: AgentSpec = toml::from_str(&format!(
-            "name = \"A\"\ncommand = [\"{}\", \"-p\", \"{{prompt}}\"]\n",
-            script_path.display()
-        ))
-        .unwrap();
+        let (_dir, spec) = fake_agent(
+            &spec("name = \"A\"\ncommand = [\"a\", \"-p\", \"{prompt}\"]\n"),
+            "printf '%s' \"$2\" | grep -q 'spoken words' && [ -z \"$(cat)\" ] && echo ok\n",
+        );
         let messages = vec![msg(InputRole::User, "spoken words")];
         let result = execute_ai_action("a", &spec, "m", &messages, None, None, None).await;
-        std::fs::remove_dir_all(&dir).ok();
         assert_eq!(result.unwrap(), "ok");
     }
 
@@ -859,17 +813,14 @@ mod tests {
     #[test]
     fn agent_files_stay_inside_the_workdir() {
         for name in ["../escape", "/etc/passwd", "a/../../b", ""] {
-            let spec: AgentSpec = toml::from_str(&format!(
+            let spec = spec(&format!(
                 "name = \"A\"\ncommand = [\"a\"]\nfiles = {{ \"{name}\" = \"x\" }}\n"
-            ))
-            .unwrap();
+            ));
             let err = prepare_workdir(&spec, None).unwrap_err().to_string();
             assert!(err.contains("relative path"), "'{name}': {err}");
         }
-        let spec: AgentSpec = toml::from_str(
-            "name = \"A\"\ncommand = [\"a\"]\nfiles = { \".cursor/cli.json\" = \"{}\" }\n",
-        )
-        .unwrap();
+        let spec =
+            spec("name = \"A\"\ncommand = [\"a\"]\nfiles = { \".cursor/cli.json\" = \"{}\" }\n");
         let (workdir, _) = prepare_workdir(&spec, None).unwrap();
         assert_eq!(
             std::fs::read_to_string(workdir.path().join(".cursor/cli.json")).unwrap(),
@@ -899,48 +850,34 @@ mod tests {
     /// in the prompt point there.
     #[tokio::test]
     async fn agent_runs_in_a_prepared_workdir() {
-        let dir = std::env::temp_dir().join("ostt_test_ai_workdir");
-        std::fs::create_dir_all(&dir).unwrap();
-        let image = dir.join("shot.jpg");
-        std::fs::write(&image, b"jpeg bytes").unwrap();
-        let report = dir.join("report");
-        let script_path = dir.join("agent.sh");
-        std::fs::write(
-            &script_path,
-            format!(
-                "#!/bin/sh\n{{ pwd; echo \"$AGENT_DIR\"; cat policy.txt; echo; cat ostt-image.jpg; echo; echo \"$@\"; cat; }} > '{}'\necho answer\n",
-                report.display()
-            ),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        let spec: AgentSpec = toml::from_str(&format!(
+        let template = spec(
             r#"
             name = "Fake"
-            command = ["{}", "--model", "{{model}}"]
-            image_args = ["--image={{image}}"]
-            image_prompt = "@{{image}}"
-            env = {{ AGENT_DIR = "{{workdir}}" }}
-            files = {{ "policy.txt" = "deny all" }}
+            command = ["fake", "--model", "{model}"]
+            image_args = ["--image={image}"]
+            image_prompt = "@{image}"
+            env = { AGENT_DIR = "{workdir}" }
+            files = { "policy.txt" = "deny all" }
             "#,
-            script_path.display()
-        ))
-        .unwrap();
+        );
+        let report = tempfile::NamedTempFile::new().unwrap();
+        let (dir, spec) = fake_agent(
+            &template,
+            &format!(
+                "{{ pwd; echo \"$AGENT_DIR\"; cat policy.txt; echo; cat ostt-image.jpg; echo; echo \"$@\"; cat; }} > '{}'\necho answer\n",
+                report.path().display()
+            ),
+        );
+        let image = dir.path().join("shot.jpg");
+        std::fs::write(&image, b"jpeg bytes").unwrap();
         let messages = vec![msg(InputRole::User, "spoken words")];
         let result =
             execute_ai_action("fake", &spec, "m1", &messages, None, None, Some(&image)).await;
-        let lines: Vec<String> = std::fs::read_to_string(&report)
+        let lines: Vec<String> = std::fs::read_to_string(report.path())
             .unwrap()
             .lines()
             .map(String::from)
             .collect();
-        std::fs::remove_dir_all(&dir).ok();
 
         assert_eq!(result.unwrap(), "answer");
         let workdir = &lines[0];
@@ -970,41 +907,29 @@ mod tests {
     /// stream-json result event rather than returned as raw JSON.
     #[tokio::test]
     async fn claude_receives_image_in_stdin_and_returns_plain_text() {
-        let dir = std::env::temp_dir().join("ostt_test_ai_claude_attach");
-        std::fs::create_dir_all(&dir).unwrap();
-        let image = dir.join("context.png");
-        std::fs::write(&image, b"fake png bytes").unwrap();
-        let stdin_copy = dir.join("stdin.json");
-        let script_path = dir.join("claude.sh");
-        std::fs::write(
-            &script_path,
-            format!(
-                "#!/bin/sh\ncat > '{}'\necho '{{\"type\":\"system\"}}'\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"  processed  \"}}'\n",
-                stdin_copy.display()
+        let stdin_copy = tempfile::NamedTempFile::new().unwrap();
+        let (dir, spec) = fake_agent(
+            &agent("claude-code"),
+            &format!(
+                "cat > '{}'\necho '{{\"type\":\"system\"}}'\necho '{{\"type\":\"result\",\"is_error\":false,\"result\":\"  processed  \"}}'\n",
+                stdin_copy.path().display()
             ),
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
+        );
+        let image = dir.path().join("context.png");
+        std::fs::write(&image, b"fake png bytes").unwrap();
         let messages = vec![msg(InputRole::User, "spoken words")];
         let result = execute_ai_action(
             "claude-code",
-            &agent("claude-code"),
-            "unused",
+            &spec,
+            "m",
             &messages,
-            Some(script_path.to_str().unwrap()),
+            None,
             None,
             Some(&image),
         )
         .await;
         let sent: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(&stdin_copy).unwrap()).unwrap();
-        std::fs::remove_dir_all(&dir).ok();
+            serde_json::from_str(&std::fs::read_to_string(stdin_copy.path()).unwrap()).unwrap();
 
         assert_eq!(result.unwrap(), "processed");
         let content = &sent["message"]["content"];
@@ -1041,34 +966,13 @@ mod tests {
     /// reason, not the raw stream-json output.
     #[tokio::test]
     async fn claude_failure_reports_result_not_raw_output() {
-        let dir = std::env::temp_dir().join("ostt_test_ai_claude_error");
-        std::fs::create_dir_all(&dir).unwrap();
-        let script_path = dir.join("claude.sh");
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\ncat >/dev/null\necho '{\"type\":\"system\",\"tools\":[]}'\necho '{\"type\":\"result\",\"is_error\":true,\"result\":\"model not found\"}'\nexit 1\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
-        let messages = vec![msg(InputRole::User, "words")];
-        let result = execute_ai_action(
-            "claude-code",
+        let (_dir, spec) = fake_agent(
             &agent("claude-code"),
-            "unused",
-            &messages,
-            Some(script_path.to_str().unwrap()),
-            None,
-            None,
-        )
-        .await;
-        std::fs::remove_dir_all(&dir).ok();
-
+            "cat >/dev/null\necho '{\"type\":\"system\",\"tools\":[]}'\necho '{\"type\":\"result\",\"is_error\":true,\"result\":\"model not found\"}'\nexit 1\n",
+        );
+        let messages = vec![msg(InputRole::User, "words")];
+        let result =
+            execute_ai_action("claude-code", &spec, "m", &messages, None, None, None).await;
         assert_eq!(
             result.unwrap_err().to_string(),
             "Claude Code failed: model not found"
@@ -1079,36 +983,23 @@ mod tests {
     /// error, not a broken pipe, and must not block on the write.
     #[tokio::test]
     async fn tool_exiting_before_reading_large_image_reports_its_error() {
-        let dir = std::env::temp_dir().join("ostt_test_ai_early_exit");
-        std::fs::create_dir_all(&dir).unwrap();
-        let image = dir.join("big.png");
+        let (dir, spec) = fake_agent(
+            &agent("claude-code"),
+            "echo 'error: invalid model' >&2\nexit 1\n",
+        );
+        let image = dir.path().join("big.png");
         std::fs::write(&image, vec![0u8; 4 * 1024 * 1024]).unwrap();
-        let script_path = dir.join("claude.sh");
-        std::fs::write(
-            &script_path,
-            "#!/bin/sh\necho 'error: invalid model' >&2\nexit 1\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
         let messages = vec![msg(InputRole::User, "words")];
         let result = execute_ai_action(
             "claude-code",
-            &agent("claude-code"),
-            "unused",
+            &spec,
+            "m",
             &messages,
-            Some(script_path.to_str().unwrap()),
+            None,
             None,
             Some(&image),
         )
         .await;
-        std::fs::remove_dir_all(&dir).ok();
-
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid model"), "got: {err}");
     }
@@ -1116,25 +1007,21 @@ mod tests {
     /// A tool whose `--version` hangs must fail the action, not hang dictation.
     #[tokio::test]
     async fn hanging_version_check_fails_instead_of_hanging() {
-        let dir = std::env::temp_dir().join("ostt_test_ai_version_hang");
-        std::fs::create_dir_all(&dir).unwrap();
-        let script_path = dir.join("opencode.sh");
-        std::fs::write(&script_path, "#!/bin/sh\nsleep 30\n").unwrap();
-        #[cfg(unix)]
+        // `--version` runs the program itself, so this one needs a real
+        // executable rather than `sh <script>`.
+        let dir = tempfile::tempdir().unwrap();
+        let script = dir.path().join("agent");
+        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
         let result = validate_tool_version(
-            script_path.to_str().unwrap(),
+            script.to_str().unwrap(),
             "1.0.0",
             Duration::from_millis(200),
         )
         .await;
-        std::fs::remove_dir_all(&dir).ok();
-
         let err = result.unwrap_err().to_string();
         assert!(err.contains("did not finish"), "got: {err}");
     }
