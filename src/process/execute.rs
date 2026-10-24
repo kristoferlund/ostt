@@ -138,8 +138,9 @@ pub async fn apply_requested_action(
     attachment: Option<&Path>,
 ) -> anyhow::Result<String> {
     if process_arg.is_some() && transcription.trim().is_empty() {
+        // As in the record flow: nothing to process, so the text is output as is.
         tracing::info!("Transcription is empty; skipping processing");
-        return Ok(String::new());
+        return Ok(transcription.to_string());
     }
 
     let Some(action) = select_requested_action(process_config, process_arg, |actions| {
@@ -440,6 +441,6 @@ mod tests {
             ..Default::default()
         };
         let result = apply_requested_action(&config, "  \n", &[], Some("test"), None).await;
-        assert_eq!(result.unwrap(), "");
+        assert_eq!(result.unwrap(), "  \n");
     }
 }
