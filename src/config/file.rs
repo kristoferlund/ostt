@@ -396,6 +396,10 @@ pub struct ProcessAction {
     pub id: String,
     /// Human-readable display name (shown in action picker)
     pub name: String,
+    /// Optional one-line explanation of what the action does, shown under
+    /// its name in the action picker and in `ostt process list --format json`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     /// Action type and its type-specific configuration.
     /// The TOML `type` field ("bash" or "ai") determines which fields are required.
     #[serde(flatten)]
@@ -417,6 +421,8 @@ pub struct ProcessConfig {
 struct ProcessActionConfig {
     /// Human-readable display name (shown in action picker)
     name: String,
+    #[serde(default)]
+    description: Option<String>,
     /// Action type and its type-specific configuration.
     #[serde(flatten)]
     details: ActionDetails,
@@ -426,6 +432,8 @@ struct ProcessActionConfig {
 struct ProcessActionConfigRef<'a> {
     /// Human-readable display name (shown in action picker)
     name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<&'a str>,
     /// Action type and its type-specific configuration.
     #[serde(flatten)]
     details: &'a ActionDetails,
@@ -480,6 +488,7 @@ impl<'de> Deserialize<'de> for ProcessConfig {
                 ProcessAction {
                     id,
                     name: action.name,
+                    description: action.description,
                     details,
                 }
             })
@@ -515,6 +524,7 @@ impl Serialize for ProcessConfig {
                     action.id.clone(),
                     ProcessActionConfigRef {
                         name: action.name.as_str(),
+                        description: action.description.as_deref(),
                         details: &action.details,
                     },
                 )
@@ -1461,6 +1471,42 @@ mod tests {
             config.actions[1].details,
             ActionDetails::Ai { .. }
         ));
+    }
+
+    // The description is optional, and ostt writes the config back (e.g. when
+    // the model changes), so it must survive a load and save as well.
+    #[test]
+    fn action_description_is_optional_and_survives_a_round_trip() {
+        let toml_str = r#"
+            [actions.clean]
+            name = "Text cleanup"
+            description = "Fixes misheard words, punctuation and filler"
+            type = "bash"
+            command = "cat"
+
+            [actions.copy]
+            name = "Copy"
+            type = "bash"
+            command = "xclip"
+        "#;
+        let config = parse_process_config(toml_str).unwrap();
+        assert_eq!(
+            config.actions[0].description.as_deref(),
+            Some("Fixes misheard words, punctuation and filler")
+        );
+        assert_eq!(config.actions[1].description, None);
+
+        let saved = toml::to_string(&config).unwrap();
+        let reloaded = parse_process_config(&saved).unwrap();
+        assert_eq!(
+            reloaded.actions[0].description,
+            config.actions[0].description
+        );
+        assert_eq!(reloaded.actions[1].description, None);
+        assert!(
+            !saved.contains("description = \"\""),
+            "absent description must not be written as empty: {saved}"
+        );
     }
 
     #[test]

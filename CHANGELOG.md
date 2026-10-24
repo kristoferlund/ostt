@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Claude Code, Codex and OpenCode actions receive the image; bash actions get its path in `$OSTT_ATTACHMENT`. Gemini CLI actions do not support attachments yet.
+- Processing actions take an optional `description`, a one-line explanation shown under the action's name in the action picker and included in `ostt process list --format json`.
 
 ### Changed
 
