@@ -69,16 +69,17 @@ pub async fn handle_retry(
             tracing::debug!("Retry transcription completed: {}", transcription_text);
 
             history::save_transcription(&transcription_text)?;
-            let output_text = process::apply_requested_action(
+            let processed = process::apply_requested_action(
                 &config_data.process,
                 &transcription_text,
                 &context.keywords,
                 process.as_deref(),
                 attachment,
             )
-            .await?;
+            .await;
+            // A failed action still outputs the words, unprocessed.
             output::write_text(
-                &output_text,
+                processed.as_deref().unwrap_or(&transcription_text),
                 output_file,
                 clipboard,
                 paste,
@@ -86,7 +87,9 @@ pub async fn handle_retry(
                 "Output text",
             )?;
 
-            Ok(())
+            processed
+                .map(drop)
+                .map_err(|e| process::ProcessingFailed(e).into())
         }
         Err(e) => {
             tracing::error!("Retry transcription failed: {e}");

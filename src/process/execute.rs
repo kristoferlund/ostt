@@ -114,6 +114,16 @@ where
     }
 }
 
+/// A processing action failed, and the unprocessed transcription was output
+/// in its place so the words are not lost. ostt exits with status 3 for it,
+/// which tells callers that output was still written.
+#[derive(Debug, thiserror::Error)]
+#[error("Processing failed, so the transcription was output unprocessed: {0:#}")]
+pub struct ProcessingFailed(pub anyhow::Error);
+
+/// Exit status for [`ProcessingFailed`].
+pub const PROCESSING_FAILED_EXIT: u8 = 3;
+
 pub async fn apply_requested_action(
     process_config: &ProcessConfig,
     transcription: &str,

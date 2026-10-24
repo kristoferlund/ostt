@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Agents now run in a new empty working directory instead of ostt's, so `tool_args` with relative paths or that rely on project files (AGENTS.md, CLAUDE.md, `.codex`) behave differently. Codex runs with `--ignore-user-config`, so its `model_provider` and profiles in `~/.codex/config.toml` no longer apply, and OpenCode actions need OpenCode 2.0 or later. To keep the old behaviour, replace the agent in `[process.agents]`.
 - Claude Code actions now read Claude's structured output, so a failure shows Claude's reason instead of raw output.
 - An empty transcription is no longer sent to the processing action.
+- When a processing action fails, `record`, `transcribe` and `retry` output the unprocessed transcription instead (stdout, file, clipboard or paste), so the words are not lost, and exit with status 3 to show that processing failed.
 
 ### Fixed
 

@@ -82,7 +82,8 @@ struct Cli {
     #[arg(short, long, value_name = "FILE")]
     output: Option<String>,
 
-    /// Enable processing after transcription
+    /// Enable processing after transcription. If the action fails, the unprocessed
+    /// transcription is output instead and ostt exits with status 3.
     #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
     process: Option<String>,
 
@@ -136,6 +137,7 @@ enum Commands {
         output: Option<String>,
 
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        /// If the action fails, the unprocessed transcription is output instead and ostt exits with status 3.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
 
@@ -171,6 +173,7 @@ enum Commands {
         output: Option<String>,
 
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        /// If the action fails, the unprocessed transcription is output instead and ostt exits with status 3.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
 
@@ -213,6 +216,7 @@ enum Commands {
         output: Option<String>,
 
         /// Enable processing after transcription. Optionally specify action ID to skip picker.
+        /// If the action fails, the unprocessed transcription is output instead and ostt exits with status 3.
         #[arg(short = 'p', long = "process", value_name = "ACTION", num_args = 0..=1, default_missing_value = "")]
         process: Option<String>,
 

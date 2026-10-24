@@ -132,12 +132,30 @@ pub async fn handle_record(
                 );
             };
 
-            Some(
-                run_process_action_with_animation(&mut tui, action, transcribed_text, attachment)
-                    .await
-                    .context("failed to process transcription")
-                    .map_err(|err| show_recording_error(&mut tui, "Processing Error", err))?,
+            let processed = run_process_action_with_animation(
+                &mut tui,
+                action,
+                transcribed_text.clone(),
+                attachment,
             )
+            .await
+            .context("failed to process transcription");
+            match processed {
+                Ok(text) => Some(text),
+                // The words are still output, unprocessed.
+                Err(err) => {
+                    let err = show_recording_error(&mut tui, "Processing Error", err);
+                    finish_recording_with_output(
+                        &mut tui,
+                        &transcribed_text,
+                        output_file,
+                        clipboard,
+                        paste,
+                        &config.output.paste,
+                    )?;
+                    return Err(process::ProcessingFailed(err).into());
+                }
+            }
         }
         Some(transcribed_text) => Some(transcribed_text),
         None => None,
