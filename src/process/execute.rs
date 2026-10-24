@@ -5,6 +5,7 @@
 //! `execute_action_with_animation` which wraps the action in an animated
 //! progress indicator.
 
+use crate::config::agents::UserAgents;
 use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::session;
@@ -17,7 +18,7 @@ use std::path::Path;
 /// For AI actions: resolves inputs, invokes the configured CLI tool, returns response.
 ///
 /// # Arguments
-/// * `process` - The process config, for the action's agent
+/// * `agents` - The user's agents, for an AI action's agent
 /// * `action` - The action configuration to execute
 /// * `transcription` - The raw transcription text
 /// * `keywords` - The user's keyword list (for AI actions that reference keywords)
@@ -28,7 +29,7 @@ use std::path::Path;
 /// - If the action type is AI and the CLI tool invocation fails
 /// - If input resolution fails (missing file, etc.)
 pub async fn execute_action(
-    process: &ProcessConfig,
+    agents: &UserAgents,
     action: &ProcessAction,
     transcription: &str,
     keywords: &[String],
@@ -53,16 +54,14 @@ pub async fn execute_action(
             timeout_secs,
         } => {
             let messages = super::input::resolve_inputs(inputs, transcription, keywords)?;
-            let agent = process
-                .agent_for(action)
-                .map_err(anyhow::Error::msg)?
-                .expect("an AI action has an agent");
+            let tool = tool
+                .as_deref()
+                .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no tool", action.id))?;
             let model = model
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no model", action.id))?;
             super::ai::execute_ai_action(
-                tool.as_deref().unwrap_or_default(),
-                agent,
+                agents.resolve(tool)?,
                 model,
                 &messages,
                 super::ai::RunOptions {
@@ -155,7 +154,7 @@ pub async fn apply_requested_action(
 
     if process_arg == Some("") {
         return match execute_action_with_animation(
-            process_config,
+            &process_config.agents,
             &action,
             transcription,
             keywords,
@@ -168,7 +167,14 @@ pub async fn apply_requested_action(
         };
     }
 
-    execute_action(process_config, &action, transcription, keywords, attachment).await
+    execute_action(
+        &process_config.agents,
+        &action,
+        transcription,
+        keywords,
+        attachment,
+    )
+    .await
 }
 
 /// Fails for a named action that does not exist, so a mistyped `--process`
@@ -206,7 +212,7 @@ fn find_action(process_config: &ProcessConfig, action_id: &str) -> anyhow::Resul
 /// - `Ok(None)` — user cancelled during processing
 /// - `Err(...)` — action failed
 pub async fn execute_action_with_animation(
-    process: &ProcessConfig,
+    agents: &UserAgents,
     action: &ProcessAction,
     transcription: &str,
     keywords: &[String],
@@ -219,7 +225,7 @@ pub async fn execute_action_with_animation(
     animation.set_status_label("Processing...");
 
     // Clone data for the spawned task
-    let process_clone = process.clone();
+    let agents_clone = agents.clone();
     let action_clone = action.clone();
     let transcription_clone = transcription.to_string();
     let keywords_clone = keywords.to_vec();
@@ -227,7 +233,7 @@ pub async fn execute_action_with_animation(
 
     let task_handle = tokio::spawn(async move {
         execute_action(
-            &process_clone,
+            &agents_clone,
             &action_clone,
             &transcription_clone,
             &keywords_clone,
@@ -309,7 +315,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let err = execute_action(&config, &config.actions[0], "words", &[], None)
+        let err = execute_action(&config.agents, &config.actions[0], "words", &[], None)
             .await
             .unwrap_err()
             .to_string();
@@ -338,7 +344,7 @@ mod tests {
         )
         .unwrap();
         let started = std::time::Instant::now();
-        let err = execute_action(&config, &config.actions[0], "words", &[], None)
+        let err = execute_action(&config.agents, &config.actions[0], "words", &[], None)
             .await
             .unwrap_err()
             .to_string();
@@ -402,7 +408,7 @@ mod tests {
     async fn bash_cat_returns_transcription_as_is() {
         let action = bash_action("cat");
         let result =
-            execute_action(&ProcessConfig::default(), &action, "hello world", &[], None).await;
+            execute_action(&UserAgents::default(), &action, "hello world", &[], None).await;
         assert_eq!(result.unwrap(), "hello world");
     }
 
@@ -410,14 +416,14 @@ mod tests {
     async fn bash_tr_transforms_text() {
         let action = bash_action("tr '[:lower:]' '[:upper:]'");
         let result =
-            execute_action(&ProcessConfig::default(), &action, "hello world", &[], None).await;
+            execute_action(&UserAgents::default(), &action, "hello world", &[], None).await;
         assert_eq!(result.unwrap(), "HELLO WORLD");
     }
 
     #[tokio::test]
     async fn bash_failure_returns_error() {
         let action = bash_action("echo err >&2; exit 1");
-        let result = execute_action(&ProcessConfig::default(), &action, "", &[], None).await;
+        let result = execute_action(&UserAgents::default(), &action, "", &[], None).await;
         assert!(result.is_err());
         let err = result.unwrap_err().to_string();
         assert!(

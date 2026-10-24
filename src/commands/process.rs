@@ -88,7 +88,7 @@ pub async fn handle_process(
     // otherwise execute directly (no TUI was started)
     let result = if picker_was_shown {
         match process::execute_action_with_animation(
-            &config_data.process,
+            &config_data.process.agents,
             &action,
             &transcription.text,
             &keywords,
@@ -104,7 +104,7 @@ pub async fn handle_process(
         }
     } else {
         process::execute_action(
-            &config_data.process,
+            &config_data.process.agents,
             &action,
             &transcription.text,
             &keywords,
@@ -144,8 +144,13 @@ pub fn handle_process_list(
                     "description": action.description,
                     "images": process.takes_images(action),
                 });
-                if let Err(error) = process.agent_for(action) {
-                    entry["error"] = error.into();
+                if let crate::config::ActionDetails::Ai {
+                    tool: Some(tool), ..
+                } = &action.details
+                {
+                    if let Err(error) = process.agents.resolve(tool) {
+                        entry["error"] = error.to_string().into();
+                    }
                 }
                 entry
             })

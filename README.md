@@ -103,18 +103,18 @@ ostt agent list               # List the agents AI actions can run
 
 Actions are configured in `~/.config/ostt/ostt.toml` and can run either bash commands or AI agents (Claude Code, Codex, OpenCode, Gemini CLI and others; `ostt agent list` shows them). Agents run with their tools switched off, in an empty working directory. `[process.agents.<id>]` adds an agent or replaces a built-in one; the built-in ones are in [`src/config/agents.toml`](src/config/agents.toml). See [Processing Actions](https://ostt.ai/guide/processing) for examples.
 
-If an action fails, the unprocessed transcription is output instead, so the words are not lost.
+If an action fails while recording, transcribing or retrying, the unprocessed transcription is output instead, so the words are not lost.
 
 ### Scripting
 
 Other programs can rely on:
 
-- **Exit status:** 0 on success; 3 when processing failed and the unprocessed transcription was output instead; 2 for invalid arguments; 1 for any other failure.
-- **Errors** on stderr, starting with `Error: ` and followed by the causes (`Caused by:`); invalid arguments start with `error: ` instead.
+- **Exit status:** 0 on success; 3 when `record`, `transcribe` or `retry` output the unprocessed transcription because processing failed; 2 when the command line cannot be parsed; 1 for any other failure. `ostt launch` exits 0 once the popup is open.
+- **Errors** on stderr, starting with `Error: ` and followed by the causes (`Caused by:`); a command line that cannot be parsed starts with `error: ` instead.
 - **JSON lists** with `--format json`, an empty list when there is nothing to list:
   - `ostt process list`: `id`, `name`, `description`, `images` (whether `--attach` works with the action), and `error` when the action's agent is unknown or not valid.
   - `ostt agent list`: `id`, `name`, `installed`, `path`, `images`, `builtin`; an agent defined but not valid has `id`, `name` and `error`.
-- **`ostt agent models <id>`:** the models an agent offers, one per line, or nothing if it cannot list them.
+- **`ostt agent models <id>`:** the models an agent offers, one per line; nothing for an agent with no list, and an error when its models command fails.
 
 ## Common Commands
 

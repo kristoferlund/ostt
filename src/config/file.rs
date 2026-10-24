@@ -5,7 +5,7 @@
 
 use indexmap::IndexMap;
 
-use super::agents::{AgentLookup, AgentSpec, UserAgents};
+use super::agents::{AgentError, UserAgents};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -439,16 +439,22 @@ impl<'de> Deserialize<'de> for ProcessConfig {
             #[serde(default)]
             actions: IndexMap<String, toml::Value>,
             #[serde(default)]
-            agents: Option<toml::Value>,
+            agents: Option<RawAgents>,
+        }
+
+        /// A map keeps the agents in config order, which `toml::Table` does not.
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum RawAgents {
+            Table(IndexMap<String, toml::Value>),
+            Other(serde::de::IgnoredAny),
         }
 
         let raw = RawProcessConfig::deserialize(deserializer)?;
         let agents = match raw.agents {
             None => UserAgents::default(),
-            Some(toml::Value::Table(table)) => {
-                super::agents::parse_user_agents(table.into_iter().collect())
-            }
-            Some(_) => {
+            Some(RawAgents::Table(table)) => super::agents::parse_user_agents(table),
+            Some(RawAgents::Other(_)) => {
                 tracing::warn!("Ignoring [process] agents: it must be a table of agents");
                 UserAgents::default()
             }
@@ -482,7 +488,7 @@ impl<'de> Deserialize<'de> for ProcessConfig {
                         *model = raw.default_model.clone();
                     }
                     if let Some(agent_id) = tool.as_deref() {
-                        if matches!(agents.lookup(agent_id), AgentLookup::Unknown) {
+                        if let Err(AgentError::Unknown(_)) = agents.resolve(agent_id) {
                             tracing::warn!("Process action '{id}' uses unknown agent '{agent_id}'");
                         }
                     }
@@ -586,34 +592,15 @@ impl ProcessConfig {
         self.actions.iter().find(|a| a.id == id)
     }
 
-    /// The agent an AI action runs, `None` for a bash action, or why the
-    /// action has no usable agent.
-    pub fn agent_for(&self, action: &ProcessAction) -> Result<Option<&AgentSpec>, String> {
-        let ActionDetails::Ai { tool, .. } = &action.details else {
-            return Ok(None);
-        };
-        let Some(tool) = tool.as_deref() else {
-            return Err(format!("AI action '{}' has no tool", action.id));
-        };
-        match self.agents.lookup(tool) {
-            AgentLookup::Found(spec) => Ok(Some(spec)),
-            AgentLookup::Invalid(reason) => {
-                Err(format!("Agent '{tool}' in [process.agents] is not valid: {reason}"))
-            }
-            AgentLookup::Unknown => Err(format!(
-                "Unknown agent '{tool}' in action '{}'. Use 'ostt agent list' to see available agents.",
-                action.id
-            )),
-        }
-    }
-
     /// Whether `--attach` works with the action: a bash action gets the
     /// image's path, an AI action needs an agent that takes images.
     pub fn takes_images(&self, action: &ProcessAction) -> bool {
-        match self.agent_for(action) {
-            Ok(None) => true,
-            Ok(Some(agent)) => agent.takes_images(),
-            Err(_) => false,
+        match &action.details {
+            ActionDetails::Bash { .. } => true,
+            ActionDetails::Ai { tool, .. } => tool
+                .as_deref()
+                .and_then(|tool| self.agents.resolve(tool).ok())
+                .is_some_and(|agent| agent.takes_images()),
         }
     }
 }
@@ -1551,7 +1538,7 @@ mod tests {
     fn agents_that_is_not_a_table_is_ignored() {
         for value in ["agents = 5", "agents = []"] {
             let config = parse_process_config(value).unwrap();
-            assert!(config.agents.valid.is_empty(), "{value}");
+            assert!(config.agents.is_empty(), "{value}");
         }
     }
 
@@ -2630,8 +2617,17 @@ mod tests {
     // 2.1.B — Agents and AI config tests
     // ═══════════════════════════════════════════════════════════════════
 
-    fn agent_of<'a>(config: &'a ProcessConfig, id: &str) -> Result<Option<&'a AgentSpec>, String> {
-        config.agent_for(config.get_action(id).unwrap())
+    fn agent_of<'a>(
+        config: &'a ProcessConfig,
+        id: &str,
+    ) -> Result<&'a super::super::agents::AgentSpec, AgentError> {
+        let ActionDetails::Ai {
+            tool: Some(tool), ..
+        } = &config.get_action(id).unwrap().details
+        else {
+            panic!("'{id}' is not an AI action with a tool");
+        };
+        config.agents.resolve(tool)
     }
 
     /// Configs written before agents became data name these four tools; they
@@ -2650,7 +2646,7 @@ mod tests {
             );
             let config = parse_process_config(&toml_str).unwrap();
             assert_eq!(
-                agent_of(&config, "a").unwrap().unwrap().program(),
+                agent_of(&config, "a").unwrap().program(),
                 program,
                 "tool '{tool}'"
             );
@@ -2673,7 +2669,7 @@ mod tests {
         )
         .unwrap();
         let err = agent_of(&config, "a").unwrap_err();
-        assert!(err.contains("Unknown agent 'vim'"), "{err}");
+        assert_eq!(err, AgentError::Unknown("vim".to_string()));
     }
 
     #[test]
@@ -2694,7 +2690,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        assert_eq!(agent_of(&config, "a").unwrap().unwrap().program(), "my-llm");
+        assert_eq!(agent_of(&config, "a").unwrap().program(), "my-llm");
     }
 
     /// Integrations offer a screenshot only for actions that can use one, so

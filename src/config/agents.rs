@@ -73,6 +73,14 @@ impl AgentSpec {
         if self.program().is_empty() {
             return Err("it needs a command".to_string());
         }
+        // stream-json carries the prompt and the image on stdin.
+        if self.format == AgentFormat::ClaudeStreamJson
+            && self.command.iter().any(|arg| arg.contains("{prompt}"))
+        {
+            return Err(
+                "format claude-stream-json takes the prompt on stdin, not {prompt}".to_string(),
+            );
+        }
         self.files.keys().try_for_each(|name| check_file_name(name))
     }
 }
@@ -90,35 +98,72 @@ pub(crate) fn check_file_name(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// What an agent id refers to.
-#[derive(Debug, Clone, Copy)]
-pub enum AgentLookup<'a> {
-    /// No agent has that id.
-    Unknown,
-    Found(&'a AgentSpec),
-    /// The user defines that agent, but not validly; why.
-    Invalid(&'a str),
+/// Why an agent id cannot be run.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum AgentError {
+    #[error("Unknown agent '{0}'. Use 'ostt agent list' to see available agents.")]
+    Unknown(String),
+    #[error("Agent '{id}' in [process.agents] is not valid: {reason}")]
+    Invalid { id: String, reason: String },
 }
 
-/// The user's own agents from `[process.agents]`.
+/// The user's own agents from `[process.agents]`, in config order. One that
+/// is not valid keeps its place with the reason, and hides a built-in agent
+/// of the same id rather than fall back to it.
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct UserAgents {
-    pub valid: IndexMap<String, AgentSpec>,
-    /// Agents that could not be used, with the reason. They hide a built-in
-    /// agent of the same id rather than fall back to it.
-    pub invalid: IndexMap<String, String>,
+pub struct UserAgents(IndexMap<String, Result<AgentSpec, String>>);
+
+/// One agent in [`UserAgents::all`].
+#[derive(Debug)]
+pub struct ListedAgent<'a> {
+    pub id: &'a str,
+    /// The agent, or why the user's agent of this id is not valid.
+    pub spec: Result<&'a AgentSpec, &'a str>,
+    pub builtin: bool,
 }
 
 impl UserAgents {
-    /// Looks up an agent: the user's own first, then the built-in ones.
-    pub fn lookup(&self, id: &str) -> AgentLookup<'_> {
-        if let Some(reason) = self.invalid.get(id) {
-            return AgentLookup::Invalid(reason);
+    /// The agent with this id: the user's own, else the built-in one.
+    pub fn resolve(&self, id: &str) -> Result<&AgentSpec, AgentError> {
+        match self.0.get(id) {
+            Some(Ok(spec)) => Ok(spec),
+            Some(Err(reason)) => Err(AgentError::Invalid {
+                id: id.to_string(),
+                reason: reason.clone(),
+            }),
+            None => builtin_agents()
+                .get(id)
+                .ok_or_else(|| AgentError::Unknown(id.to_string())),
         }
-        match self.valid.get(id).or_else(|| builtin_agents().get(id)) {
-            Some(spec) => AgentLookup::Found(spec),
-            None => AgentLookup::Unknown,
-        }
+    }
+
+    /// Every agent as [`Self::resolve`] sees it: the built-in ones in
+    /// `agents.toml` order, each replaced by the user's agent of that id, then
+    /// the user's other agents.
+    pub fn all(&self) -> Vec<ListedAgent<'_>> {
+        let builtin = builtin_agents()
+            .iter()
+            .map(|(id, spec)| match self.0.get(id) {
+                Some(own) => (id, own.as_ref(), false),
+                None => (id, Ok(spec), true),
+            });
+        let own = self
+            .0
+            .iter()
+            .filter(|(id, _)| !builtin_agents().contains_key(*id))
+            .map(|(id, own)| (id, own.as_ref(), false));
+        builtin
+            .chain(own)
+            .map(|(id, spec, builtin)| ListedAgent {
+                id,
+                spec: spec.map_err(String::as_str),
+                builtin,
+            })
+            .collect()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 }
 
@@ -130,47 +175,26 @@ pub fn builtin_agents() -> &'static IndexMap<String, AgentSpec> {
     })
 }
 
-/// All agents, built-in ones first, each replaced by a user agent of the same
-/// id, then the user's other agents. The flag says whether it is built in.
-pub fn all_agents(user_agents: &IndexMap<String, AgentSpec>) -> Vec<(&str, &AgentSpec, bool)> {
-    let mut agents: Vec<(&str, &AgentSpec, bool)> = builtin_agents()
-        .iter()
-        .map(|(id, spec)| match user_agents.get(id) {
-            Some(own) => (id.as_str(), own, false),
-            None => (id.as_str(), spec, true),
-        })
-        .collect();
-    agents.extend(
-        user_agents
-            .iter()
-            .filter(|(id, _)| !builtin_agents().contains_key(*id))
-            .map(|(id, spec)| (id.as_str(), spec, false)),
-    );
-    agents
-}
-
 /// Parses the user's `[process.agents]`. An agent that is not valid is kept
-/// aside with its reason so the rest of the config loads; an action using it
-/// fails with that reason.
+/// with its reason so the rest of the config loads; an action using it fails
+/// with that reason.
 pub(crate) fn parse_user_agents(raw: IndexMap<String, toml::Value>) -> UserAgents {
-    let mut agents = UserAgents::default();
-    for (id, value) in raw {
-        let spec = value
-            .try_into::<AgentSpec>()
-            .map_err(|e| e.to_string())
-            .and_then(|spec| spec.validate().map(|()| spec));
-        match spec {
-            Ok(spec) => {
-                agents.valid.insert(id, spec);
-            }
-            Err(reason) => {
-                let reason = reason.trim().to_string();
-                tracing::warn!("Process agent '{id}' is not valid: {reason}");
-                agents.invalid.insert(id, reason);
-            }
-        }
-    }
-    agents
+    UserAgents(
+        raw.into_iter()
+            .map(|(id, value)| {
+                let spec = value
+                    .try_into::<AgentSpec>()
+                    .map_err(|e| e.to_string())
+                    .and_then(|spec| spec.validate().map(|()| spec))
+                    .map_err(|reason| {
+                        let reason = reason.trim().to_string();
+                        tracing::warn!("Process agent '{id}' is not valid: {reason}");
+                        reason
+                    });
+                (id, spec)
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
@@ -209,24 +233,50 @@ mod tests {
         )
         .unwrap();
         let user = parse_user_agents(raw);
-        let found = |id| match user.lookup(id) {
-            AgentLookup::Found(spec) => spec,
-            other => panic!("{id}: {other:?}"),
-        };
 
-        assert_eq!(found("opencode").name, "My OpenCode");
-        assert_eq!(found("pi").name, "Pi");
-        assert_eq!(found("local").program(), "llm");
-        assert!(matches!(user.lookup("missing"), AgentLookup::Unknown));
-
-        let all = all_agents(&user.valid);
-        let opencode = all.iter().find(|(id, _, _)| *id == "opencode").unwrap();
+        assert_eq!(user.resolve("opencode").unwrap().name, "My OpenCode");
+        assert_eq!(user.resolve("pi").unwrap().name, "Pi");
+        assert_eq!(user.resolve("local").unwrap().program(), "llm");
         assert_eq!(
-            (opencode.1.name.as_str(), opencode.2),
-            ("My OpenCode", false)
+            user.resolve("missing"),
+            Err(AgentError::Unknown("missing".to_string()))
         );
-        assert_eq!(all.last().unwrap().0, "local");
-        assert_eq!(all.iter().filter(|(id, _, _)| *id == "opencode").count(), 1);
+
+        let all = user.all();
+        let opencode = all.iter().find(|a| a.id == "opencode").unwrap();
+        assert_eq!(opencode.spec.unwrap().name, "My OpenCode");
+        assert!(!opencode.builtin);
+        assert_eq!(all.last().unwrap().id, "local");
+        assert_eq!(all.iter().filter(|a| a.id == "opencode").count(), 1);
+    }
+
+    /// `ostt agent list` shows the user's agents in the order they are written.
+    #[test]
+    fn user_agents_keep_config_order() {
+        let raw: IndexMap<String, toml::Value> = toml::from_str(
+            r#"
+            [zeta]
+            name = "Zeta"
+            command = ["z", "{model}"]
+
+            [alpha]
+            name = "Alpha"
+            command = []
+
+            [mid]
+            name = "Mid"
+            command = ["m", "{model}"]
+            "#,
+        )
+        .unwrap();
+        let user = parse_user_agents(raw);
+        let own: Vec<_> = user
+            .all()
+            .into_iter()
+            .filter(|a| !a.builtin)
+            .map(|a| a.id)
+            .collect();
+        assert_eq!(own, ["zeta", "alpha", "mid"]);
     }
 
     /// A broken agent must not stop the rest of the config from loading, and
@@ -248,20 +298,29 @@ mod tests {
             name = "Escape"
             command = ["x"]
             files = { "../out" = "x" }
+
+            # The image would be dropped: stream-json sends it on stdin.
+            [stream]
+            name = "Stream"
+            command = ["claude", "{prompt}", "{model}"]
+            format = "claude-stream-json"
             "#,
         )
         .unwrap();
         let user = parse_user_agents(raw);
-        assert!(user.valid.is_empty());
-        for id in ["broken", "claude-code", "escape"] {
+        for id in ["broken", "claude-code", "escape", "stream"] {
             assert!(
-                matches!(user.lookup(id), AgentLookup::Invalid(_)),
+                matches!(user.resolve(id), Err(AgentError::Invalid { .. })),
                 "{id} must be reported invalid"
             );
         }
-        let AgentLookup::Invalid(reason) = user.lookup("escape") else {
+        let Err(AgentError::Invalid { reason, .. }) = user.resolve("escape") else {
             unreachable!()
         };
         assert!(reason.contains("relative path"), "{reason}");
+        // Listed in place of the built-in, with the reason.
+        let listed = user.all();
+        let claude = listed.iter().find(|a| a.id == "claude-code").unwrap();
+        assert!(claude.spec.is_err() && !claude.builtin);
     }
 }

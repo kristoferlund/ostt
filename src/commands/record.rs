@@ -509,12 +509,12 @@ async fn run_process_action_with_animation(
     let mut animation = TranscriptionAnimation::new(80);
     animation.set_status_label("Processing...");
 
-    let task_process = process_config.clone();
+    let task_agents = process_config.agents.clone();
     let task_text = text.to_string();
     let task_attachment = attachment.map(std::path::Path::to_path_buf);
     let task_handle = tokio::spawn(async move {
         process::execute_action(
-            &task_process,
+            &task_agents,
             &action,
             &task_text,
             &keywords,

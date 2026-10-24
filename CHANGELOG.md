@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A processing action no longer hangs forever when the tool's `--version` check never returns; it fails after 10 seconds. Tools that time out are now stopped instead of left running.
+- A processing action no longer hangs forever when the tool's `--version` check never returns; it fails after 10 seconds, and the action's time limit covers the check. Agents that time out are now stopped, together with any processes they started, instead of left running. When a signal ends ostt while an agent runs (Ctrl+C, or `kill`), ostt stops the agent and removes its working directory first.
 - A large prompt can no longer block a processing action before its timeout starts, and a tool that exits early reports its own error instead of "Broken pipe".
 
 ## 0.0.30 - 2026-10-21

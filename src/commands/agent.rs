@@ -1,61 +1,52 @@
 //! Lists the agents AI processing actions can run, and their models.
 
 use crate::config;
-use crate::config::agents::{all_agents, AgentLookup, AgentSpec};
+use crate::config::agents::AgentSpec;
+use crate::process::find_program;
 use anyhow::Context;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// The agent's program as it would run: an executable file at its path, or
-/// the first one of that name on `PATH`.
+/// The agent's program as it would run.
 fn program_path(agent: &AgentSpec) -> Option<PathBuf> {
-    let program = Path::new(agent.program());
-    if program.components().count() > 1 {
-        return is_executable(program).then(|| program.to_path_buf());
-    }
-    std::env::split_paths(&std::env::var_os("PATH")?)
-        .map(|dir| dir.join(program))
-        .find(|path| is_executable(path))
-}
-
-fn is_executable(path: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    find_program(Path::new(agent.program()))
 }
 
 pub fn handle_agent_list(config_data: &config::OsttConfig, json: bool) -> anyhow::Result<()> {
-    let invalid = &config_data.process.agents.invalid;
-    // An invalid user agent hides the built-in of the same id.
-    let agents: Vec<_> = all_agents(&config_data.process.agents.valid)
-        .into_iter()
-        .filter(|(id, _, _)| !invalid.contains_key(*id))
-        .collect();
+    let agents = config_data.process.agents.all();
 
     if json {
-        let agents: Vec<_> =
-            agents
-                .iter()
-                .map(|(id, agent, builtin)| {
+        let agents: Vec<_> = agents
+            .iter()
+            .map(|listed| match listed.spec {
+                Ok(agent) => {
                     let path = program_path(agent);
                     serde_json::json!({
-                        "id": id,
+                        "id": listed.id,
                         "name": agent.name,
                         "installed": path.is_some(),
                         "path": path,
                         "images": agent.takes_images(),
-                        "builtin": builtin,
+                        "builtin": listed.builtin,
                     })
-                })
-                .chain(invalid.iter().map(
-                    |(id, reason)| serde_json::json!({ "id": id, "name": id, "error": reason }),
-                ))
-                .collect();
+                }
+                Err(reason) => {
+                    serde_json::json!({ "id": listed.id, "name": listed.id, "error": reason })
+                }
+            })
+            .collect();
         println!("{}", serde_json::to_string_pretty(&agents)?);
         return Ok(());
     }
 
-    for (id, agent, _) in &agents {
+    for listed in &agents {
+        let agent = match listed.spec {
+            Ok(agent) => agent,
+            Err(reason) => {
+                println!("{} — not valid: {reason}", listed.id);
+                continue;
+            }
+        };
         let mut notes = Vec::new();
         if program_path(agent).is_none() {
             notes.push("not installed");
@@ -68,10 +59,7 @@ pub fn handle_agent_list(config_data: &config::OsttConfig, json: bool) -> anyhow
         } else {
             format!(" ({})", notes.join(", "))
         };
-        println!("{id} — {}{notes}", agent.name);
-    }
-    for (id, reason) in invalid {
-        println!("{id} — not valid: {reason}");
+        println!("{} — {}{notes}", listed.id, agent.name);
     }
     Ok(())
 }
@@ -82,15 +70,7 @@ const MODELS_TIMEOUT: Duration = Duration::from_secs(15);
 /// Prints the models an agent offers, one per line: its fixed list, or what
 /// its models command prints. Nothing for an agent with neither.
 pub async fn handle_agent_models(config_data: &config::OsttConfig, id: &str) -> anyhow::Result<()> {
-    let agent = match config_data.process.agents.lookup(id) {
-        AgentLookup::Found(agent) => agent,
-        AgentLookup::Invalid(reason) => {
-            anyhow::bail!("Agent '{id}' in [process.agents] is not valid: {reason}")
-        }
-        AgentLookup::Unknown => {
-            anyhow::bail!("Unknown agent '{id}'. Use 'ostt agent list' to see available agents.")
-        }
-    };
+    let agent = config_data.process.agents.resolve(id)?;
     if !agent.models.is_empty() {
         println!("{}", agent.models.join("\n"));
         return Ok(());

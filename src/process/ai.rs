@@ -9,18 +9,35 @@ use crate::config::InputRole;
 use crate::process::input::ResolvedMessage;
 use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD, Engine};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::time::{timeout, timeout_at, Instant};
 
 /// How long an agent may take unless its action says otherwise.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Timeout for `<tool> --version`, which should return at once.
 const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The program as it would run: the executable file at its path, or the
+/// first one of that name on `PATH`.
+pub fn find_program(program: &Path) -> Option<PathBuf> {
+    if program.components().count() > 1 {
+        return is_executable(program).then(|| program.to_path_buf());
+    }
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|dir| dir.join(program))
+        .find(|path| is_executable(path))
+}
+
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    path.metadata()
+        .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+}
 
 fn program_not_found(binary: &str) -> anyhow::Error {
     anyhow::anyhow!(
@@ -192,7 +209,7 @@ fn prepare_workdir(
         .tempdir()
         .context("failed to create the agent's working directory")?;
     for (name, content) in &agent.files {
-        // Checked when the config loads too; this also covers specs built in code.
+        // Checked when the config loads too; here it guards the write itself.
         check_file_name(name).map_err(|e| anyhow::anyhow!("Agent {e}"))?;
         let path = workdir.path().join(name);
         if let Some(parent) = path.parent() {
@@ -303,6 +320,86 @@ impl Default for RunOptions<'_> {
     }
 }
 
+/// The agent's process group. Agents such as Gemini CLI do their work in a
+/// child process, which killing the agent alone would leave running with
+/// the prompt, so the whole group is killed unless the agent has exited.
+struct AgentGroup(Option<libc::pid_t>);
+
+impl AgentGroup {
+    fn of(child: &tokio::process::Child) -> Self {
+        // A child started with `process_group(0)` leads a group of its own pid.
+        Self(child.id().and_then(|id| libc::pid_t::try_from(id).ok()))
+    }
+
+    /// Kills the group. Only while the agent has not been waited for: until
+    /// then its pid, and so the group id, cannot be reused.
+    fn kill(&mut self) {
+        if let Some(pgid) = self.0.take() {
+            // SAFETY: killpg only sends a signal.
+            unsafe { libc::killpg(pgid, libc::SIGKILL) };
+        }
+    }
+
+    /// The agent was waited for; its group is no longer ours to kill.
+    fn exited(&mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for AgentGroup {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
+/// SIGINT, SIGTERM and SIGHUP while an agent runs. The agent's own process
+/// group does not receive a signal sent to ostt's, so ostt catches these to
+/// stop the agent before ending; their usual handling returns on drop.
+struct EndSignals {
+    ids: Vec<signal_hook::SigId>,
+    pipes: Vec<(i32, tokio::net::UnixStream)>,
+}
+
+impl EndSignals {
+    fn register() -> std::io::Result<Self> {
+        let mut signals = Self {
+            ids: Vec::new(),
+            pipes: Vec::new(),
+        };
+        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+            let (read, write) = std::os::unix::net::UnixStream::pair()?;
+            read.set_nonblocking(true)?;
+            signals
+                .ids
+                .push(signal_hook::low_level::pipe::register(signal, write)?);
+            signals
+                .pipes
+                .push((signal, tokio::net::UnixStream::from_std(read)?));
+        }
+        Ok(signals)
+    }
+
+    /// Waits for one of the signals and returns it.
+    async fn recv(&self) -> i32 {
+        let waits = self.pipes.iter().map(|(signal, pipe)| {
+            Box::pin(async move {
+                // Readable means the handler wrote a byte: the signal came.
+                let _ = pipe.readable().await;
+                *signal
+            })
+        });
+        futures_util::future::select_all(waits).await.0
+    }
+}
+
+impl Drop for EndSignals {
+    fn drop(&mut self) {
+        for id in self.ids.drain(..) {
+            signal_hook::low_level::unregister(id);
+        }
+    }
+}
+
 /// Executes an AI action by running its agent non-interactively.
 ///
 /// Constructs a prompt from the resolved messages, passes it to the agent on
@@ -311,7 +408,6 @@ impl Default for RunOptions<'_> {
 /// stdout, or for the Claude stream-json format the text of its result.
 ///
 /// # Arguments
-/// * `agent_id` - The agent's id, for messages
 /// * `agent` - How to run the agent
 /// * `model` - Model identifier (passed through to the agent as-is)
 /// * `messages` - Resolved input messages (from input resolution)
@@ -325,7 +421,6 @@ impl Default for RunOptions<'_> {
 /// - If the agent times out
 /// - If the agent returns empty output
 pub async fn execute_ai_action(
-    agent_id: &str,
     agent: &AgentSpec,
     model: &str,
     messages: &[ResolvedMessage],
@@ -338,7 +433,7 @@ pub async fn execute_ai_action(
         attachment,
     } = options;
     if attachment.is_some() && !agent.takes_images() {
-        bail!("{} ({agent_id}) does not take images", agent.name);
+        bail!("{} does not take images", agent.name);
     }
     let (system_prompt, user_prompt) = build_prompts(messages);
 
@@ -351,11 +446,22 @@ pub async fn execute_ai_action(
     };
     let binary = match tool_binary {
         Some(binary) => binary.to_string(),
-        None => placeholders.fill(agent.program()),
+        None => agent.program().to_string(),
     };
 
+    // The action's time limit covers the version check too.
+    let deadline = Instant::now() + limit;
+    let timed_out = || {
+        tracing::error!("Agent '{}' timed out after {}s", binary, limit.as_secs());
+        anyhow::anyhow!("Agent '{}' timed out after {}s", binary, limit.as_secs())
+    };
     if let Some(minimum) = &agent.minimum_version {
-        validate_tool_version(&binary, minimum, VERSION_TIMEOUT).await?;
+        timeout_at(
+            deadline,
+            validate_tool_version(&binary, minimum, VERSION_TIMEOUT),
+        )
+        .await
+        .map_err(|_| timed_out())??;
     }
 
     // Prepend a standard preamble so the model knows the input text is delimited
@@ -412,6 +518,7 @@ pub async fn execute_ai_action(
     );
     tracing::debug!("Stdin content length: {} bytes", stdin_content.len());
 
+    let ending = EndSignals::register().context("failed to watch for signals")?;
     // Spawn the child process with terminal-hostile environment variables
     // to prevent tools from outputting ANSI escapes or attempting TTY interactions
     let mut child = Command::new(&binary)
@@ -427,7 +534,7 @@ pub async fn execute_ai_action(
         })
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
+        .process_group(0)
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -436,6 +543,7 @@ pub async fn execute_ai_action(
                 anyhow::anyhow!("Failed to start agent '{binary}': {e}")
             }
         })?;
+    let mut group = AgentGroup::of(&child);
 
     // Write stdin while reading the output, both under the timeout: an image
     // prompt exceeds the pipe buffer, so writing first could block forever.
@@ -457,10 +565,18 @@ pub async fn execute_ai_action(
         written.context("failed to write the prompt to the agent")?;
         output.context("failed to wait for the agent")
     };
-    let output = timeout(limit, run).await.map_err(|_| {
-        tracing::error!("Agent '{}' timed out after {}s", binary, limit.as_secs());
-        anyhow::anyhow!("Agent '{}' timed out after {}s", binary, limit.as_secs())
-    })??;
+    let output = tokio::select! {
+        output = timeout_at(deadline, run) => output.map_err(|_| timed_out())??,
+        signal = ending.recv() => {
+            // What the signal would have done to ostt, after stopping the
+            // agent and removing the prompt and image it was given.
+            tracing::warn!("Signal {signal} while agent '{binary}' ran; stopping it");
+            group.kill();
+            let _ = std::fs::remove_dir_all(workdir.path());
+            std::process::exit(128 + signal);
+        }
+    };
+    group.exited();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let claude = match agent.format {
@@ -693,7 +809,6 @@ mod tests {
         // The error message should contain the custom binary name, not the default.
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            "claude-code",
             &agent("claude-code"),
             "test-model",
             &messages,
@@ -721,7 +836,6 @@ mod tests {
     async fn missing_cli_tool_returns_error_with_tool_name() {
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            "pi",
             &agent("pi"),
             "test-model",
             &messages,
@@ -767,12 +881,67 @@ mod tests {
     async fn non_zero_exit_returns_error_with_stderr() {
         let (_dir, spec) = fake_agent(&agent("pi"), "echo 'custom error output' >&2\nexit 1\n");
         let messages = vec![msg(InputRole::User, "test")];
-        let err = execute_ai_action("pi", &spec, "m", &messages, RunOptions::default())
+        let err = execute_ai_action(&spec, "m", &messages, RunOptions::default())
             .await
             .unwrap_err()
             .to_string();
         assert!(err.contains("failed"), "{err}");
         assert!(err.contains("custom error output"), "{err}");
+    }
+
+    /// Agents such as Gemini CLI do their work in a child process. A timeout
+    /// must stop that child too, or it keeps running with the prompt.
+    #[tokio::test]
+    async fn timeout_stops_the_agents_children() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("child.pid");
+        let (_agent_dir, spec) = fake_agent(
+            &agent("pi"),
+            &format!("sleep 30 &\necho $! > {}\nwait\n", pid_file.display()),
+        );
+        let messages = vec![msg(InputRole::User, "test")];
+        let err = execute_ai_action(
+            &spec,
+            "m",
+            &messages,
+            RunOptions {
+                timeout: Duration::from_secs(1),
+                ..RunOptions::default()
+            },
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("timed out"), "{err}");
+
+        let pid: libc::pid_t = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        // The killed child is a zombie until init reaps it; poll briefly.
+        let alive = || {
+            std::fs::read_to_string(format!("/proc/{pid}/stat"))
+                .is_ok_and(|stat| !stat.contains(") Z "))
+        };
+        for _ in 0..50 {
+            if !alive() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        panic!("the agent's child {pid} is still running");
+    }
+
+    /// While an agent runs, a signal that ends ostt must reach ostt's handler,
+    /// which stops the agent, instead of ending ostt and leaving the agent.
+    #[tokio::test]
+    async fn end_signals_are_caught_while_registered() {
+        let signals = EndSignals::register().unwrap();
+        // SAFETY: raise only sends a signal to this process, which is handled.
+        unsafe { libc::raise(libc::SIGHUP) };
+        let received = timeout(Duration::from_secs(5), signals.recv()).await;
+        assert_eq!(received.unwrap(), libc::SIGHUP);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -807,7 +976,7 @@ mod tests {
             "printf '%s' \"$2\" | grep -q 'spoken words' && [ -z \"$(cat)\" ] && echo ok\n",
         );
         let messages = vec![msg(InputRole::User, "spoken words")];
-        let result = execute_ai_action("a", &spec, "m", &messages, RunOptions::default()).await;
+        let result = execute_ai_action(&spec, "m", &messages, RunOptions::default()).await;
         assert_eq!(result.unwrap(), "ok");
     }
 
@@ -817,7 +986,6 @@ mod tests {
     async fn prompt_too_long_for_an_argument_names_the_agent() {
         let messages = vec![msg(InputRole::User, &"word ".repeat(30_000))];
         let err = execute_ai_action(
-            "grok",
             &agent("grok"),
             "m",
             &messages,
@@ -854,7 +1022,6 @@ mod tests {
     async fn agent_without_images_rejects_attachment_instead_of_dropping_it() {
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            "hermes",
             &agent("hermes"),
             "unused",
             &messages,
@@ -896,7 +1063,6 @@ mod tests {
         std::fs::write(&image, b"jpeg bytes").unwrap();
         let messages = vec![msg(InputRole::User, "spoken words")];
         let result = execute_ai_action(
-            "fake",
             &spec,
             "m1",
             &messages,
@@ -952,7 +1118,6 @@ mod tests {
         std::fs::write(&image, b"fake png bytes").unwrap();
         let messages = vec![msg(InputRole::User, "spoken words")];
         let result = execute_ai_action(
-            "claude-code",
             &spec,
             "m",
             &messages,
@@ -1005,8 +1170,7 @@ mod tests {
             "cat >/dev/null\necho '{\"type\":\"system\",\"tools\":[]}'\necho '{\"type\":\"result\",\"is_error\":true,\"result\":\"model not found\"}'\nexit 1\n",
         );
         let messages = vec![msg(InputRole::User, "words")];
-        let result =
-            execute_ai_action("claude-code", &spec, "m", &messages, RunOptions::default()).await;
+        let result = execute_ai_action(&spec, "m", &messages, RunOptions::default()).await;
         assert_eq!(
             result.unwrap_err().to_string(),
             "Claude Code failed: model not found"
@@ -1025,7 +1189,6 @@ mod tests {
         std::fs::write(&image, vec![0u8; 4 * 1024 * 1024]).unwrap();
         let messages = vec![msg(InputRole::User, "words")];
         let result = execute_ai_action(
-            "claude-code",
             &spec,
             "m",
             &messages,

@@ -28,6 +28,9 @@
 #   files            Files written into the working directory before it runs,
 #                    by relative path.
 #   minimum_version  Lowest `<program> --version` the arguments work with.
+#                    Checked before every run, which costs a start of the
+#                    program (about a second for Gemini CLI): an older one
+#                    could ignore the arguments that switch its tools off.
 #   models           Models to offer when setting up an action (`ostt agent
 #                    models <id>`), for agents with a short fixed list.
 #   models_command   Command that prints the agent's models, one per line.
@@ -59,8 +62,12 @@ models = ["haiku", "sonnet", "opus"]
 
 # Ran it with 0.163.0: text, image, and a touch/read attempt with no shell or
 # file tool available. Codex has no single switch for tools, so each feature
-# that provides one is disabled; the only tool left, apply_patch, is stopped by
-# the read-only sandbox. `--ignore-user-config` drops the user's MCP servers.
+# that provides one is disabled. What the model is still offered (from the
+# request in Codex's trace log): `exec`, JavaScript in an isolate with no file
+# system or network whose nested tools are apply_patch, stopped by the
+# read-only sandbox, MCP resources, of which `--ignore-user-config` leaves
+# none, and the clock; sub-agents with these same settings; and asking the
+# user, which `exec` mode cannot do.
 [codex-cli]
 name = "Codex"
 command = [
@@ -70,7 +77,7 @@ command = [
   "--disable", "view_image", "--disable", "apps", "--disable", "plugins",
   "--disable", "multi_agent", "--disable", "goals",
   "--disable", "image_generation", "--disable", "browser_use",
-  "--disable", "computer_use", "--disable", "hooks",
+  "--disable", "computer_use", "--disable", "hooks", "--disable", "sleep_tool",
   "-c", 'web_search="disabled"',
   "--model", "{model}",
 ]
