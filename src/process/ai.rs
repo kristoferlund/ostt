@@ -2,14 +2,15 @@
 //!
 //! Runs an agent CLI non-interactively as its `AgentSpec` describes (see
 //! `config/agents.toml`): in a new empty working directory, with the resolved
-//! prompt on stdin, and captures the response text.
+//! prompt on stdin or as an argument, and captures the response text.
 
-use crate::config::agents::{AgentFormat, AgentSpec};
+use crate::config::agents::{check_file_name, AgentFormat, AgentSpec};
 use crate::config::InputRole;
 use crate::process::input::ResolvedMessage;
 use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -113,22 +114,37 @@ pub(crate) fn build_stdin_content(system_prompt: &str, user_prompt: &str) -> Str
     format!("{system_prompt}\n\n<text>\n{user_prompt}\n</text>")
 }
 
+/// Linux limits one argument to 128 KiB; a prompt passed as an argument must
+/// fit in that.
+const MAX_PROMPT_ARG: usize = 128 * 1024 - 1;
+
 /// Values for the placeholders in an agent's spec.
 struct Placeholders<'a> {
     model: &'a str,
     workdir: &'a Path,
     image: Option<&'a Path>,
+    prompt: Option<&'a str>,
 }
 
 impl Placeholders<'_> {
+    /// Fills the placeholders in one pass, so a value that contains a
+    /// placeholder (dictated text saying "{model}") is left as it is. A
+    /// placeholder without a value stays as written.
     fn fill(&self, template: &str) -> String {
-        let mut text = template
-            .replace("{model}", self.model)
-            .replace("{workdir}", &self.workdir.to_string_lossy());
-        if let Some(image) = self.image {
-            text = text.replace("{image}", &image.to_string_lossy());
-        }
-        text
+        static PLACEHOLDER: OnceLock<regex::Regex> = OnceLock::new();
+        let placeholder = PLACEHOLDER
+            .get_or_init(|| regex::Regex::new(r"\{(model|workdir|image|prompt)\}").unwrap());
+        placeholder
+            .replace_all(template, |caps: &regex::Captures| {
+                let value = match &caps[1] {
+                    "model" => Some(self.model.into()),
+                    "workdir" => Some(self.workdir.to_string_lossy()),
+                    "image" => self.image.map(Path::to_string_lossy),
+                    _ => self.prompt.map(Into::into),
+                };
+                value.map_or_else(|| caps[0].to_string(), |v| v.into_owned())
+            })
+            .into_owned()
     }
 }
 
@@ -140,13 +156,9 @@ fn prompt_in_args(agent: &AgentSpec) -> bool {
 
 /// Builds the arguments after the program: the agent's own, the image
 /// arguments when an image is attached, then the user's `tool_args`.
-///
-/// `{prompt}` is filled last, so placeholders the dictated text happens to
-/// contain are left as they are.
 fn command_args(
     agent: &AgentSpec,
     placeholders: &Placeholders,
-    prompt: &str,
     tool_args: Option<&[String]>,
 ) -> Vec<String> {
     let image_args = match (placeholders.image, &agent.image_args) {
@@ -156,7 +168,7 @@ fn command_args(
     agent.command[1..]
         .iter()
         .chain(image_args)
-        .map(|arg| placeholders.fill(arg).replace("{prompt}", prompt))
+        .map(|arg| placeholders.fill(arg))
         .chain(tool_args.unwrap_or_default().iter().cloned())
         .collect()
 }
@@ -173,15 +185,9 @@ fn prepare_workdir(
         .tempdir()
         .context("failed to create the agent's working directory")?;
     for (name, content) in &agent.files {
-        // Names come from the config; keep them inside the directory.
-        let relative = Path::new(name);
-        let inside = relative
-            .components()
-            .all(|c| matches!(c, std::path::Component::Normal(_)));
-        if name.is_empty() || !inside {
-            bail!("Agent file '{name}' must be a relative path inside its working directory");
-        }
-        let path = workdir.path().join(relative);
+        // Checked when the config loads too; this also covers specs built in code.
+        check_file_name(name).map_err(|e| anyhow::anyhow!("Agent {e}"))?;
+        let path = workdir.path().join(name);
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create the folder for agent file '{name}'"))?;
@@ -285,6 +291,7 @@ fn claude_result(name: &str, stdout: &str) -> Option<anyhow::Result<String>> {
 ///
 /// # Errors
 /// - If the agent takes no images and one is attached
+/// - If the agent takes the prompt as an argument and it is too long
 /// - If the agent is not found on PATH
 /// - If the agent exits with non-zero status
 /// - If the agent times out
@@ -308,6 +315,7 @@ pub async fn execute_ai_action(
         model,
         workdir: workdir.path(),
         image: image.as_deref(),
+        prompt: None,
     };
     let binary = match tool_binary {
         Some(binary) => binary.to_string(),
@@ -334,11 +342,21 @@ pub async fn execute_ai_action(
         prompt = format!("{prompt}\n\n{}", placeholders.fill(reference));
     }
     let in_args = prompt_in_args(agent);
-    let args = command_args(agent, &placeholders, &prompt, tool_args);
+    if in_args && prompt.len() > MAX_PROMPT_ARG {
+        bail!(
+            "The text is too long for {}, which takes it as a command-line argument (at most 128 KB). Use an agent that reads it from stdin.",
+            agent.name
+        );
+    }
+    let placeholders = Placeholders {
+        prompt: Some(&prompt),
+        ..placeholders
+    };
+    let args = command_args(agent, &placeholders, tool_args);
     let stdin_content = match agent.format {
         _ if in_args => String::new(),
         AgentFormat::ClaudeStreamJson => claude_message(&prompt, image.as_deref())?,
-        AgentFormat::Text => prompt,
+        AgentFormat::Text => prompt.clone(),
     };
 
     tracing::info!(
@@ -533,8 +551,9 @@ mod tests {
             model: "test-model",
             workdir: Path::new("/work"),
             image: image.map(Path::new),
+            prompt: Some("the prompt"),
         };
-        command_args(&agent(id), &placeholders, "the prompt", Some(&tool_args))
+        command_args(&agent(id), &placeholders, Some(&tool_args))
     }
 
     #[test]
@@ -682,7 +701,7 @@ mod tests {
     async fn missing_cli_tool_returns_error_with_tool_name() {
         let messages = vec![msg(InputRole::User, "test")];
         let result = execute_ai_action(
-            "opencode",
+            "pi",
             &agent("pi"),
             "test-model",
             &messages,
@@ -766,8 +785,8 @@ mod tests {
     // Attachments
     // ═══════════════════════════════════════════════════════════════════
 
-    /// A prompt that contains a placeholder must reach the agent as dictated,
-    /// not with the placeholder filled in.
+    /// Values that contain a placeholder, such as dictated text saying
+    /// "{model}", must reach the agent as they are, not filled in.
     #[test]
     fn prompt_is_filled_after_the_other_placeholders() {
         let spec: AgentSpec = toml::from_str(
@@ -775,13 +794,14 @@ mod tests {
         )
         .unwrap();
         let placeholders = Placeholders {
-            model: "m1",
+            model: "m1 {prompt}",
             workdir: Path::new("/work"),
             image: None,
+            prompt: Some("say {model} {image}"),
         };
         assert_eq!(
-            command_args(&spec, &placeholders, "say {model}", None),
-            ["-m", "m1", "-p", "say {model}"]
+            command_args(&spec, &placeholders, None),
+            ["-m", "m1 {prompt}", "-p", "say {model} {image}"]
         );
         assert!(prompt_in_args(&spec));
     }
@@ -814,6 +834,26 @@ mod tests {
         let result = execute_ai_action("a", &spec, "m", &messages, None, None, None).await;
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(result.unwrap(), "ok");
+    }
+
+    /// Linux rejects an argument over 128 KiB with "Argument list too long";
+    /// the user must instead learn which agent can't take that much text.
+    #[tokio::test]
+    async fn prompt_too_long_for_an_argument_names_the_agent() {
+        let messages = vec![msg(InputRole::User, &"word ".repeat(30_000))];
+        let err = execute_ai_action(
+            "grok",
+            &agent("grok"),
+            "m",
+            &messages,
+            Some("/nonexistent/grok"),
+            None,
+            None,
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("too long for Grok"), "{err}");
     }
 
     #[test]

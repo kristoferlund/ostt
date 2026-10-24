@@ -5,6 +5,7 @@
 //! `execute_action_with_animation` which wraps the action in an animated
 //! progress indicator.
 
+use crate::config::agents::AgentLookup;
 use crate::config::{ActionDetails, ProcessAction, ProcessConfig};
 use crate::transcription::TranscriptionAnimation;
 use crate::ui::session;
@@ -54,12 +55,16 @@ pub async fn execute_action(
             let tool = tool
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no tool", action.id))?;
-            let agent = agent.as_ref().ok_or_else(|| {
-                anyhow::anyhow!(
+            let agent = match agent {
+                AgentLookup::Found(agent) => agent,
+                AgentLookup::Invalid(reason) => anyhow::bail!(
+                    "Agent '{tool}' in [process.agents] is not valid: {reason}"
+                ),
+                AgentLookup::Unknown => anyhow::bail!(
                     "Unknown agent '{tool}' in action '{}'. Use 'ostt agent list' to see available agents.",
                     action.id
-                )
-            })?;
+                ),
+            };
             let model = model
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("AI action '{}' has no model", action.id))?;
@@ -244,6 +249,33 @@ mod tests {
     // ═══════════════════════════════════════════════════════════════════
     // 3.2 — Action dispatcher tests
     // ═══════════════════════════════════════════════════════════════════
+
+    /// An action whose agent the user defined but broke must say so, not
+    /// claim the agent is unknown or run a built-in one instead.
+    #[tokio::test]
+    async fn action_with_invalid_agent_reports_why() {
+        let config: ProcessConfig = toml::from_str(
+            r#"
+            [agents.claude-code]
+            name = "My Claude"
+            comand = ["/opt/claude"]
+
+            [actions.a]
+            name = "A"
+            type = "ai"
+            tool = "claude-code"
+            model = "m"
+            inputs = [{ role = "user", source = "transcription" }]
+            "#,
+        )
+        .unwrap();
+        let err = execute_action(&config.actions[0], "words", &[], None)
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("not valid"), "{err}");
+        assert!(err.contains("command"), "{err}");
+    }
 
     /// Helper: create a bash ProcessAction.
     fn bash_action(command: &str) -> ProcessAction {

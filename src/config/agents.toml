@@ -14,7 +14,9 @@
 #   command          Program and arguments. {model} is the action's model,
 #                    {workdir} the agent's empty working directory, and
 #                    {prompt} the prompt, for agents that take it as an
-#                    argument; without {prompt} it goes to stdin.
+#                    argument; without {prompt} it goes to stdin. A prompt in
+#                    an argument is limited to 128 KB and visible to other
+#                    local users (in /proc) while the agent runs.
 #   format           "text" (default): plain prompt in, answer on stdout.
 #                    "claude-stream-json": Claude Code's stream-json messages,
 #                    which carry the image in the message itself.
@@ -84,7 +86,10 @@ minimum_version = "2.0.0"
 # Ran it with 0.65.0: text, image, and touch/read/fetch attempts with no tool
 # calls made. The policy denies every tool and MCP tool. The CLI reads an
 # `@path` in the prompt itself, not through a tool, so the image still works;
-# it must be inside the working directory, where ostt puts it.
+# it must be inside the working directory, where ostt puts it. An `@path` in
+# the dictated text is read the same way, but only inside that directory,
+# which holds just the policy and the image (checked: `@/etc/hostname` was
+# not read).
 [gemini-cli]
 name = "Gemini CLI"
 command = [

@@ -68,11 +68,57 @@ impl AgentSpec {
             || self.image_prompt.is_some()
     }
 
-    fn validate(&self, id: &str) -> Result<(), String> {
+    fn validate(&self) -> Result<(), String> {
         if self.program().is_empty() {
-            return Err(format!("agent '{id}' needs a command"));
+            return Err("it needs a command".to_string());
         }
-        Ok(())
+        self.files.keys().try_for_each(|name| check_file_name(name))
+    }
+}
+
+/// Checks that an agent file's name keeps it inside the working directory.
+pub(crate) fn check_file_name(name: &str) -> Result<(), String> {
+    let inside = std::path::Path::new(name)
+        .components()
+        .all(|c| matches!(c, std::path::Component::Normal(_)));
+    if name.is_empty() || !inside {
+        return Err(format!(
+            "file '{name}' must be a relative path inside its working directory"
+        ));
+    }
+    Ok(())
+}
+
+/// What an action's `tool` id refers to.
+#[derive(Debug, Clone, Default)]
+pub enum AgentLookup {
+    /// No agent has that id.
+    #[default]
+    Unknown,
+    Found(Box<AgentSpec>),
+    /// The user defines that agent, but not validly; why.
+    Invalid(String),
+}
+
+/// The user's own agents from `[process.agents]`.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct UserAgents {
+    pub valid: IndexMap<String, AgentSpec>,
+    /// Agents that could not be used, with the reason. They hide a built-in
+    /// agent of the same id rather than fall back to it.
+    pub invalid: IndexMap<String, String>,
+}
+
+impl UserAgents {
+    /// Looks up an agent: the user's own first, then the built-in ones.
+    pub fn lookup(&self, id: &str) -> AgentLookup {
+        if let Some(reason) = self.invalid.get(id) {
+            return AgentLookup::Invalid(reason.clone());
+        }
+        match self.valid.get(id).or_else(|| builtin_agents().get(id)) {
+            Some(spec) => AgentLookup::Found(Box::new(spec.clone())),
+            None => AgentLookup::Unknown,
+        }
     }
 }
 
@@ -82,14 +128,6 @@ pub fn builtin_agents() -> &'static IndexMap<String, AgentSpec> {
     AGENTS.get_or_init(|| {
         toml::from_str(include_str!("agents.toml")).expect("built-in agents.toml is valid")
     })
-}
-
-/// Looks up an agent: the user's own first, then the built-in ones.
-pub fn find_agent<'a>(
-    user_agents: &'a IndexMap<String, AgentSpec>,
-    id: &str,
-) -> Option<&'a AgentSpec> {
-    user_agents.get(id).or_else(|| builtin_agents().get(id))
 }
 
 /// All agents, built-in ones first, each replaced by a user agent of the same
@@ -111,25 +149,27 @@ pub fn all_agents(user_agents: &IndexMap<String, AgentSpec>) -> Vec<(&str, &Agen
     agents
 }
 
-/// Parses the user's `[process.agents]`. An agent that is not valid is skipped
-/// with a warning so the rest of the config loads; an action using it then
-/// gets the built-in agent of that id, or fails as an unknown agent.
-pub(crate) fn parse_user_agents(raw: IndexMap<String, toml::Value>) -> IndexMap<String, AgentSpec> {
-    raw.into_iter()
-        .filter_map(|(id, value)| {
-            let spec = value
-                .try_into::<AgentSpec>()
-                .map_err(|e| e.to_string())
-                .and_then(|spec| spec.validate(&id).map(|()| spec));
-            match spec {
-                Ok(spec) => Some((id, spec)),
-                Err(e) => {
-                    tracing::warn!("Ignoring process agent '{id}': {e}");
-                    None
-                }
+/// Parses the user's `[process.agents]`. An agent that is not valid is kept
+/// aside with its reason so the rest of the config loads; an action using it
+/// fails with that reason.
+pub(crate) fn parse_user_agents(raw: IndexMap<String, toml::Value>) -> UserAgents {
+    let mut agents = UserAgents::default();
+    for (id, value) in raw {
+        let spec = value
+            .try_into::<AgentSpec>()
+            .map_err(|e| e.to_string())
+            .and_then(|spec| spec.validate().map(|()| spec));
+        match spec {
+            Ok(spec) => {
+                agents.valid.insert(id, spec);
             }
-        })
-        .collect()
+            Err(reason) => {
+                tracing::warn!("Process agent '{id}' is not valid: {reason}");
+                agents.invalid.insert(id, reason);
+            }
+        }
+    }
+    agents
 }
 
 #[cfg(test)]
@@ -145,7 +185,7 @@ mod tests {
             assert!(agents.contains_key(id), "existing tool id '{id}' must stay");
         }
         for (id, spec) in agents {
-            spec.validate(id).unwrap();
+            spec.validate().unwrap();
             assert!(
                 spec.command.iter().any(|a| a.contains("{model}")),
                 "agent '{id}' ignores the model"
@@ -168,13 +208,17 @@ mod tests {
         )
         .unwrap();
         let user = parse_user_agents(raw);
+        let found = |id| match user.lookup(id) {
+            AgentLookup::Found(spec) => spec,
+            other => panic!("{id}: {other:?}"),
+        };
 
-        assert_eq!(find_agent(&user, "opencode").unwrap().name, "My OpenCode");
-        assert_eq!(find_agent(&user, "pi").unwrap().name, "Pi");
-        assert_eq!(find_agent(&user, "local").unwrap().program(), "llm");
-        assert!(find_agent(&user, "missing").is_none());
+        assert_eq!(found("opencode").name, "My OpenCode");
+        assert_eq!(found("pi").name, "Pi");
+        assert_eq!(found("local").program(), "llm");
+        assert!(matches!(user.lookup("missing"), AgentLookup::Unknown));
 
-        let all = all_agents(&user);
+        let all = all_agents(&user.valid);
         let opencode = all.iter().find(|(id, _, _)| *id == "opencode").unwrap();
         assert_eq!(
             (opencode.1.name.as_str(), opencode.2),
@@ -184,13 +228,39 @@ mod tests {
         assert_eq!(all.iter().filter(|(id, _, _)| *id == "opencode").count(), 1);
     }
 
-    /// A broken agent must not stop the rest of the config from loading.
+    /// A broken agent must not stop the rest of the config from loading, and
+    /// must not silently fall back to a built-in agent of the same id: that
+    /// would run a different program than the user configured.
     #[test]
-    fn invalid_user_agent_is_skipped() {
+    fn invalid_user_agent_is_reported_not_replaced() {
         let raw: IndexMap<String, toml::Value> = toml::from_str(
-            "[broken]\nname = \"Broken\"\ncommand = []\n[typo]\nname = 1\ncommand = [\"x\"]\n",
+            r#"
+            [broken]
+            name = "Broken"
+            command = []
+
+            [claude-code]
+            name = "My Claude"
+            comand = ["/opt/claude"]
+
+            [escape]
+            name = "Escape"
+            command = ["x"]
+            files = { "../out" = "x" }
+            "#,
         )
         .unwrap();
-        assert!(parse_user_agents(raw).is_empty());
+        let user = parse_user_agents(raw);
+        assert!(user.valid.is_empty());
+        for id in ["broken", "claude-code", "escape"] {
+            assert!(
+                matches!(user.lookup(id), AgentLookup::Invalid(_)),
+                "{id} must be reported invalid"
+            );
+        }
+        let AgentLookup::Invalid(reason) = user.lookup("escape") else {
+            unreachable!()
+        };
+        assert!(reason.contains("relative path"), "{reason}");
     }
 }

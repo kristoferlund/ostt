@@ -5,7 +5,7 @@
 
 use indexmap::IndexMap;
 
-use super::agents::AgentSpec;
+use super::agents::{AgentLookup, AgentSpec, UserAgents};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -366,10 +366,9 @@ pub enum ActionDetails {
         /// Allows pro users to pass additional flags without modifying OSTT.
         #[serde(default)]
         tool_args: Option<Vec<String>>,
-        /// The agent `tool` names, resolved when the config loads; `None` if
-        /// there is no agent with that id.
+        /// The agent `tool` names, resolved when the config loads.
         #[serde(skip)]
-        agent: Option<Box<AgentSpec>>,
+        agent: AgentLookup,
     },
 }
 
@@ -401,7 +400,7 @@ pub struct ProcessConfig {
     pub actions: Vec<ProcessAction>,
     /// The user's own agents from `[process.agents]`, which add to or replace
     /// the built-in ones.
-    pub agents: IndexMap<String, AgentSpec>,
+    pub agents: UserAgents,
 }
 
 #[derive(Deserialize)]
@@ -440,11 +439,20 @@ impl<'de> Deserialize<'de> for ProcessConfig {
             #[serde(default)]
             actions: IndexMap<String, toml::Value>,
             #[serde(default)]
-            agents: IndexMap<String, toml::Value>,
+            agents: Option<toml::Value>,
         }
 
         let raw = RawProcessConfig::deserialize(deserializer)?;
-        let agents = super::agents::parse_user_agents(raw.agents);
+        let agents = match raw.agents {
+            None => UserAgents::default(),
+            Some(toml::Value::Table(table)) => {
+                super::agents::parse_user_agents(table.into_iter().collect())
+            }
+            Some(_) => {
+                tracing::warn!("Ignoring [process] agents: it must be a table of agents");
+                UserAgents::default()
+            }
+        };
         let mut parsed = Vec::with_capacity(raw.actions.len());
         for (id, value) in raw.actions {
             // An action type this OSTT version does not know (for example one
@@ -476,10 +484,12 @@ impl<'de> Deserialize<'de> for ProcessConfig {
                     if model.is_none() {
                         *model = raw.default_model.clone();
                     }
-                    *agent = tool
-                        .as_deref()
-                        .and_then(|id| super::agents::find_agent(&agents, id))
-                        .map(|spec| Box::new(spec.clone()));
+                    if let Some(agent_id) = tool.as_deref() {
+                        *agent = agents.lookup(agent_id);
+                        if matches!(agent, AgentLookup::Unknown) {
+                            tracing::warn!("Process action '{id}' uses unknown agent '{agent_id}'");
+                        }
+                    }
                 }
 
                 ProcessAction {
@@ -535,7 +545,7 @@ impl Serialize for ProcessConfig {
             default_tool: &self.default_tool,
             default_model: &self.default_model,
             actions,
-            agents: &self.agents,
+            agents: &self.agents.valid,
         }
         .serialize(serializer)
     }
@@ -922,7 +932,7 @@ fn config_to_table(config: &OsttConfig) -> anyhow::Result<toml::Table> {
     if config.output != OutputConfig::default() {
         table.insert("output".to_string(), toml::Value::try_from(&config.output)?);
     }
-    if !config.process.actions.is_empty() {
+    if !config.process.actions.is_empty() || !config.process.agents.valid.is_empty() {
         table.insert(
             "process".to_string(),
             toml::Value::try_from(&config.process)?,
@@ -1474,8 +1484,8 @@ mod tests {
         ));
     }
 
-    // The description is optional, and ostt writes the config back (e.g. when
-    // the model changes), so it must survive a load and save as well.
+    // The description is optional, and must survive serializing the config,
+    // which is how ostt writes a whole config file.
     #[test]
     fn action_description_is_optional_and_survives_a_round_trip() {
         let toml_str = r#"
@@ -1508,6 +1518,29 @@ mod tests {
             !saved.contains("description = \"\""),
             "absent description must not be written as empty: {saved}"
         );
+    }
+
+    /// Agents alone, without actions, are still part of the config file ostt
+    /// writes.
+    #[test]
+    fn config_with_only_agents_keeps_them_when_written() {
+        let mut config = OsttConfig::default();
+        config.process = parse_process_config(
+            "[agents.mine]\nname = \"Mine\"\ncommand = [\"my-llm\", \"{model}\"]\n",
+        )
+        .unwrap();
+        let table = config_to_table(&config).unwrap();
+        let written = toml::to_string(&table).unwrap();
+        assert!(written.contains("[process.agents.mine]"), "{written}");
+    }
+
+    /// `agents` that is not a table must not stop ostt from starting.
+    #[test]
+    fn agents_that_is_not_a_table_is_ignored() {
+        for value in ["agents = 5", "agents = []"] {
+            let config = parse_process_config(value).unwrap();
+            assert!(config.agents.valid.is_empty(), "{value}");
+        }
     }
 
     #[test]
@@ -2587,7 +2620,11 @@ mod tests {
 
     fn agent_of(config: &ProcessConfig, id: &str) -> Option<AgentSpec> {
         match &config.actions.iter().find(|a| a.id == id).unwrap().details {
-            ActionDetails::Ai { agent, .. } => agent.as_deref().cloned(),
+            ActionDetails::Ai {
+                agent: AgentLookup::Found(spec),
+                ..
+            } => Some(*spec.clone()),
+            ActionDetails::Ai { .. } => None,
             _ => panic!("expected Ai variant"),
         }
     }
@@ -2656,7 +2693,7 @@ mod tests {
         // Only the user's own agents are written back, never the built-in ones.
         let saved = toml::to_string(&config).unwrap();
         let reloaded = parse_process_config(&saved).unwrap();
-        assert_eq!(reloaded.agents.keys().collect::<Vec<_>>(), ["mine"]);
+        assert_eq!(reloaded.agents.valid.keys().collect::<Vec<_>>(), ["mine"]);
         assert_eq!(agent_of(&reloaded, "a").unwrap().program(), "my-llm");
     }
 
