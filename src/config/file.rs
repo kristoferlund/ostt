@@ -439,22 +439,16 @@ impl<'de> Deserialize<'de> for ProcessConfig {
             #[serde(default)]
             actions: IndexMap<String, toml::Value>,
             #[serde(default)]
-            agents: Option<RawAgents>,
-        }
-
-        /// A map keeps the agents in config order, which `toml::Table` does not.
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum RawAgents {
-            Table(IndexMap<String, toml::Value>),
-            Other(serde::de::IgnoredAny),
+            agents: Option<toml::Value>,
         }
 
         let raw = RawProcessConfig::deserialize(deserializer)?;
         let agents = match raw.agents {
             None => UserAgents::default(),
-            Some(RawAgents::Table(table)) => super::agents::parse_user_agents(table),
-            Some(RawAgents::Other(_)) => {
+            Some(toml::Value::Table(table)) => {
+                super::agents::parse_user_agents(table.into_iter().collect())
+            }
+            Some(_) => {
                 tracing::warn!("Ignoring [process] agents: it must be a table of agents");
                 UserAgents::default()
             }

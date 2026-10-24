@@ -10,7 +10,8 @@ use crate::process::input::ResolvedMessage;
 use anyhow::{bail, Context};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
@@ -331,8 +332,8 @@ impl AgentGroup {
         Self(child.id().and_then(|id| libc::pid_t::try_from(id).ok()))
     }
 
-    /// Kills the group. Only while the agent has not been waited for: until
-    /// then its pid, and so the group id, cannot be reused.
+    /// Kills the group. Its id is not reused while any process in it lives,
+    /// and the agent has not exited normally yet.
     fn kill(&mut self) {
         if let Some(pgid) = self.0.take() {
             // SAFETY: killpg only sends a signal.
@@ -340,7 +341,7 @@ impl AgentGroup {
         }
     }
 
-    /// The agent was waited for; its group is no longer ours to kill.
+    /// The agent exited; what it left running is no longer ours to kill.
     fn exited(&mut self) {
         self.0 = None;
     }
@@ -352,9 +353,27 @@ impl Drop for AgentGroup {
     }
 }
 
-/// SIGINT, SIGTERM and SIGHUP while an agent runs. The agent's own process
-/// group does not receive a signal sent to ostt's, so ostt catches these to
-/// stop the agent before ending; their usual handling returns on drop.
+/// Signals that end ostt, which the agent's own process group does not
+/// receive when they are sent to ostt's.
+const END_SIGNALS: [i32; 3] = [libc::SIGINT, libc::SIGTERM, libc::SIGHUP];
+
+/// True between agent runs. Once signal-hook handles a signal, its handler
+/// stays installed for good, so between runs the handler carries out the
+/// signal's usual action (ending ostt) itself.
+fn between_runs() -> &'static Arc<AtomicBool> {
+    static BETWEEN_RUNS: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+    BETWEEN_RUNS.get_or_init(|| {
+        let between_runs = Arc::new(AtomicBool::new(true));
+        for signal in END_SIGNALS {
+            signal_hook::flag::register_conditional_default(signal, Arc::clone(&between_runs))
+                .expect("SIGINT, SIGTERM and SIGHUP can be handled");
+        }
+        between_runs
+    })
+}
+
+/// The end signals, caught while an agent runs so that ostt can stop the
+/// agent and remove its working directory before ending.
 struct EndSignals {
     ids: Vec<signal_hook::SigId>,
     pipes: Vec<(i32, tokio::net::UnixStream)>,
@@ -362,11 +381,14 @@ struct EndSignals {
 
 impl EndSignals {
     fn register() -> std::io::Result<Self> {
+        let between_runs = between_runs();
+        // From here on, Drop restores the usual handling.
         let mut signals = Self {
             ids: Vec::new(),
             pipes: Vec::new(),
         };
-        for signal in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP] {
+        between_runs.store(false, Ordering::SeqCst);
+        for signal in END_SIGNALS {
             let (read, write) = std::os::unix::net::UnixStream::pair()?;
             read.set_nonblocking(true)?;
             signals
@@ -397,7 +419,27 @@ impl Drop for EndSignals {
         for id in self.ids.drain(..) {
             signal_hook::low_level::unregister(id);
         }
+        between_runs().store(true, Ordering::SeqCst);
+        // A signal that came after the last wait still ends ostt.
+        for (signal, pipe) in &self.pipes {
+            if pipe.try_read(&mut [0]).is_ok_and(|read| read > 0) {
+                let _ = signal_hook::low_level::emulate_default_handler(*signal);
+            }
+        }
     }
+}
+
+/// Ends ostt as `signal` would have, after stopping the agent, if it was
+/// started, and removing the prompt and image it was given.
+fn end_by(signal: i32, group: Option<&mut AgentGroup>, workdir: &Path) -> ! {
+    tracing::warn!("Signal {signal} while an agent ran; stopping it");
+    if let Some(group) = group {
+        group.kill();
+    }
+    let _ = std::fs::remove_dir_all(workdir);
+    let _ = signal_hook::low_level::emulate_default_handler(signal);
+    // Only if the signal's usual action did not end ostt.
+    std::process::exit(128 + signal);
 }
 
 /// Executes an AI action by running its agent non-interactively.
@@ -437,6 +479,7 @@ pub async fn execute_ai_action(
     }
     let (system_prompt, user_prompt) = build_prompts(messages);
 
+    let ending = EndSignals::register().context("failed to watch for signals")?;
     let (workdir, image) = prepare_workdir(agent, attachment)?;
     let placeholders = Placeholders {
         model,
@@ -456,12 +499,12 @@ pub async fn execute_ai_action(
         anyhow::anyhow!("Agent '{}' timed out after {}s", binary, limit.as_secs())
     };
     if let Some(minimum) = &agent.minimum_version {
-        timeout_at(
-            deadline,
-            validate_tool_version(&binary, minimum, VERSION_TIMEOUT),
-        )
-        .await
-        .map_err(|_| timed_out())??;
+        tokio::select! {
+            checked = timeout_at(deadline, validate_tool_version(&binary, minimum, VERSION_TIMEOUT)) => {
+                checked.map_err(|_| timed_out())??;
+            }
+            signal = ending.recv() => end_by(signal, None, workdir.path()),
+        }
     }
 
     // Prepend a standard preamble so the model knows the input text is delimited
@@ -518,7 +561,6 @@ pub async fn execute_ai_action(
     );
     tracing::debug!("Stdin content length: {} bytes", stdin_content.len());
 
-    let ending = EndSignals::register().context("failed to watch for signals")?;
     // Spawn the child process with terminal-hostile environment variables
     // to prevent tools from outputting ANSI escapes or attempting TTY interactions
     let mut child = Command::new(&binary)
@@ -567,14 +609,7 @@ pub async fn execute_ai_action(
     };
     let output = tokio::select! {
         output = timeout_at(deadline, run) => output.map_err(|_| timed_out())??,
-        signal = ending.recv() => {
-            // What the signal would have done to ostt, after stopping the
-            // agent and removing the prompt and image it was given.
-            tracing::warn!("Signal {signal} while agent '{binary}' ran; stopping it");
-            group.kill();
-            let _ = std::fs::remove_dir_all(workdir.path());
-            std::process::exit(128 + signal);
-        }
+        signal = ending.recv() => end_by(signal, Some(&mut group), workdir.path()),
     };
     group.exited();
 
@@ -891,6 +926,7 @@ mod tests {
 
     /// Agents such as Gemini CLI do their work in a child process. A timeout
     /// must stop that child too, or it keeps running with the prompt.
+    #[cfg(target_os = "linux")] // reads /proc
     #[tokio::test]
     async fn timeout_stops_the_agents_children() {
         let dir = tempfile::tempdir().unwrap();
@@ -931,17 +967,6 @@ mod tests {
             std::thread::sleep(Duration::from_millis(20));
         }
         panic!("the agent's child {pid} is still running");
-    }
-
-    /// While an agent runs, a signal that ends ostt must reach ostt's handler,
-    /// which stops the agent, instead of ending ostt and leaving the agent.
-    #[tokio::test]
-    async fn end_signals_are_caught_while_registered() {
-        let signals = EndSignals::register().unwrap();
-        // SAFETY: raise only sends a signal to this process, which is handled.
-        unsafe { libc::raise(libc::SIGHUP) };
-        let received = timeout(Duration::from_secs(5), signals.recv()).await;
-        assert_eq!(received.unwrap(), libc::SIGHUP);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1079,12 +1104,18 @@ mod tests {
             .collect();
 
         assert_eq!(result.unwrap(), "answer");
-        let workdir = &lines[0];
+        // The path as ostt gave it; pwd may resolve a symlink in it (macOS's
+        // /var is /private/var), so the two are compared by the directory.
+        let workdir = &lines[1];
         assert!(
             workdir.contains("ostt-agent-"),
             "not a fresh workdir: {workdir}"
         );
-        assert_eq!(&lines[1], workdir);
+        assert_eq!(
+            Path::new(&lines[0]).file_name(),
+            Path::new(workdir).file_name(),
+            "the agent must run in its workdir"
+        );
         assert_eq!(lines[2], "deny all");
         assert_eq!(lines[3], "jpeg bytes");
         assert_eq!(

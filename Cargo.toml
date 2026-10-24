@@ -81,8 +81,9 @@ rusqlite = { version = "0.31", features = ["bundled", "chrono"] }
 chrono = { version = "0.4", features = ["serde"] }
 signal-hook = "0.3.18"
 
-# Unix system calls (Linux-only for ALSA warning suppression)
-[target.'cfg(target_os = "linux")'.dependencies]
+# Unix system calls: ALSA warning suppression on Linux, and killing an
+# agent's process group
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
 # The profile that 'dist' will build with

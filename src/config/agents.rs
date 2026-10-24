@@ -107,9 +107,9 @@ pub enum AgentError {
     Invalid { id: String, reason: String },
 }
 
-/// The user's own agents from `[process.agents]`, in config order. One that
-/// is not valid keeps its place with the reason, and hides a built-in agent
-/// of the same id rather than fall back to it.
+/// The user's own agents from `[process.agents]`, by id. One that is not
+/// valid is kept with the reason, and hides a built-in agent of the same id
+/// rather than fall back to it.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct UserAgents(IndexMap<String, Result<AgentSpec, String>>);
 
@@ -139,7 +139,7 @@ impl UserAgents {
 
     /// Every agent as [`Self::resolve`] sees it: the built-in ones in
     /// `agents.toml` order, each replaced by the user's agent of that id, then
-    /// the user's other agents.
+    /// the user's other agents by id.
     pub fn all(&self) -> Vec<ListedAgent<'_>> {
         let builtin = builtin_agents()
             .iter()
@@ -248,35 +248,6 @@ mod tests {
         assert!(!opencode.builtin);
         assert_eq!(all.last().unwrap().id, "local");
         assert_eq!(all.iter().filter(|a| a.id == "opencode").count(), 1);
-    }
-
-    /// `ostt agent list` shows the user's agents in the order they are written.
-    #[test]
-    fn user_agents_keep_config_order() {
-        let raw: IndexMap<String, toml::Value> = toml::from_str(
-            r#"
-            [zeta]
-            name = "Zeta"
-            command = ["z", "{model}"]
-
-            [alpha]
-            name = "Alpha"
-            command = []
-
-            [mid]
-            name = "Mid"
-            command = ["m", "{model}"]
-            "#,
-        )
-        .unwrap();
-        let user = parse_user_agents(raw);
-        let own: Vec<_> = user
-            .all()
-            .into_iter()
-            .filter(|a| !a.builtin)
-            .map(|a| a.id)
-            .collect();
-        assert_eq!(own, ["zeta", "alpha", "mid"]);
     }
 
     /// A broken agent must not stop the rest of the config from loading, and
