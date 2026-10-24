@@ -20,11 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Claude Code actions now read Claude's structured output, so a failure shows Claude's reason instead of raw output.
 - An empty transcription is no longer sent to the processing action.
 - A `--process` action that does not exist is reported before recording or transcribing, not after.
+- ostt no longer runs `<agent> --version` before every AI action to check a minimum version (OpenCode's 1.4.3 check is gone too); that cost up to a second per dictation. An agent too old for the arguments ostt passes fails with its own error, and the words are output unprocessed.
 - When a processing action fails, `record`, `transcribe` and `retry` output the unprocessed transcription instead (stdout, file, clipboard or paste), so the words are not lost, and exit with status 3 to show that processing failed.
 
 ### Fixed
 
-- A processing action no longer hangs forever when the tool's `--version` check never returns; it fails after 10 seconds, and the action's time limit covers the check. Agents that time out are now stopped, together with any processes they started, instead of left running. When a signal ends ostt while an agent runs (Ctrl+C, or `kill`), ostt stops the agent and removes its working directory first.
+- Agents that time out are now stopped, together with any processes they started, instead of left running. When a signal ends ostt while an agent runs (Ctrl+C, or `kill`), ostt stops the agent and removes its working directory first.
 - A large prompt can no longer block a processing action before its timeout starts, and a tool that exits early reports its own error instead of "Broken pipe".
 
 ## 0.0.30 - 2026-10-21

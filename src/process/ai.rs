@@ -15,13 +15,10 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
-use tokio::time::{timeout, timeout_at, Instant};
+use tokio::time::{timeout_at, Instant};
 
 /// How long an agent may take unless its action says otherwise.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(300);
-
-/// Timeout for `<tool> --version`, which should return at once.
-const VERSION_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The program as it would run: the executable file at its path, or the
 /// first one of that name on `PATH`.
@@ -44,63 +41,6 @@ fn program_not_found(binary: &str) -> anyhow::Error {
     anyhow::anyhow!(
         "Agent program '{binary}' not found. Install it, or make sure it is on the PATH ostt runs with."
     )
-}
-
-/// Parses an `X.Y.Z` version anywhere in `text`.
-fn parse_version(text: &str) -> Option<(u32, u32, u32)> {
-    static VERSION: OnceLock<regex::Regex> = OnceLock::new();
-    let version = VERSION.get_or_init(|| regex::Regex::new(r"(\d+)\.(\d+)\.(\d+)").unwrap());
-    let caps = version.captures(text)?;
-    Some((
-        caps[1].parse().ok()?,
-        caps[2].parse().ok()?,
-        caps[3].parse().ok()?,
-    ))
-}
-
-/// Checks that `<binary> --version` is at least `minimum`.
-///
-/// An unparseable version is let through: an agent that changes how it
-/// prints its version should not stop working.
-async fn validate_tool_version(binary: &str, minimum: &str, limit: Duration) -> anyhow::Result<()> {
-    let Some(minimum_version) = parse_version(minimum) else {
-        tracing::warn!("Ignoring minimum version '{minimum}' for '{binary}': not X.Y.Z");
-        return Ok(());
-    };
-
-    let version = tokio::process::Command::new(binary)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .kill_on_drop(true)
-        .output();
-    let output = timeout(limit, version)
-        .await
-        .map_err(|_| anyhow::anyhow!("'{binary} --version' did not finish within {limit:?}"))?
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                program_not_found(binary)
-            } else {
-                anyhow::anyhow!("Failed to check '{binary}' version: {e}")
-            }
-        })?;
-
-    let version_text = String::from_utf8_lossy(&output.stdout);
-    let Some(version) = parse_version(&version_text) else {
-        tracing::warn!(
-            "Could not parse version from '{}' output: {}",
-            binary,
-            version_text.trim()
-        );
-        return Ok(());
-    };
-    let (major, minor, patch) = version;
-    if version < minimum_version {
-        bail!("'{binary}' version {major}.{minor}.{patch} is too old. Minimum required: {minimum}. Please update.");
-    }
-    tracing::debug!("Agent '{binary}' version {major}.{minor}.{patch} meets minimum {minimum}");
-    Ok(())
 }
 
 /// Splits resolved messages into a system prompt and a user prompt.
@@ -492,20 +432,11 @@ pub async fn execute_ai_action(
         None => agent.program().to_string(),
     };
 
-    // The action's time limit covers the version check too.
     let deadline = Instant::now() + limit;
     let timed_out = || {
         tracing::error!("Agent '{}' timed out after {}s", binary, limit.as_secs());
         anyhow::anyhow!("Agent '{}' timed out after {}s", binary, limit.as_secs())
     };
-    if let Some(minimum) = &agent.minimum_version {
-        tokio::select! {
-            checked = timeout_at(deadline, validate_tool_version(&binary, minimum, VERSION_TIMEOUT)) => {
-                checked.map_err(|_| timed_out())??;
-            }
-            signal = ending.recv() => end_by(signal, None, workdir.path()),
-        }
-    }
 
     // Prepend a standard preamble so the model knows the input text is delimited
     // by <text> tags. This is always true (build_stdin_content wraps the user
@@ -1231,36 +1162,5 @@ mod tests {
         .await;
         let err = result.unwrap_err().to_string();
         assert!(err.contains("invalid model"), "got: {err}");
-    }
-
-    /// A tool whose `--version` hangs must fail the action, not hang dictation.
-    #[tokio::test]
-    async fn hanging_version_check_fails_instead_of_hanging() {
-        // `--version` runs the program itself, so this one needs a real
-        // executable rather than `sh <script>`.
-        let dir = tempfile::tempdir().unwrap();
-        let script = dir.path().join("agent");
-        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        }
-        // Running a file just written can fail with "Text file busy" while
-        // another test's fork still holds it open; that clears at once.
-        let mut err = String::new();
-        for _ in 0..3 {
-            err = validate_tool_version(
-                script.to_str().unwrap(),
-                "1.0.0",
-                Duration::from_millis(200),
-            )
-            .await
-            .unwrap_err()
-            .to_string();
-            if !err.contains("Text file busy") {
-                break;
-            }
-        }
-        assert!(err.contains("did not finish"), "got: {err}");
     }
 }

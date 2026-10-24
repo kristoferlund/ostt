@@ -27,10 +27,6 @@
 #   env              Environment variables for the agent.
 #   files            Files written into the working directory before it runs,
 #                    by relative path.
-#   minimum_version  Lowest `<program> --version` the arguments work with.
-#                    Checked before every run, which costs a start of the
-#                    program (about a second for Gemini CLI): an older one
-#                    could ignore the arguments that switch its tools off.
 #   models           Models to offer when setting up an action (`ostt agent
 #                    models <id>`), for agents with a short fixed list.
 #   models_command   Command that prints the agent's models, one per line.
@@ -93,7 +89,6 @@ command = ["opencode", "run", "--standalone", "--agent", "ostt", "--model", "{mo
 image_args = ["--file={image}"]
 models_command = ["opencode", "models"]
 env = { OPENCODE_CONFIG_CONTENT = '{"agents":{"ostt":{"mode":"primary","description":"Processes dictation without tools","permissions":[{"action":"*","resource":"*","effect":"deny"}]}}}' }
-minimum_version = "2.0.0"
 
 # Ran it with 0.65.0: text, image, and touch/read/fetch attempts with no tool
 # calls made. The policy denies every tool and MCP tool. The CLI reads an
@@ -109,7 +104,6 @@ command = [
   "--policy", "{workdir}/ostt-policy.toml", "-o", "text", "-p", "",
 ]
 image_prompt = "@{image}"
-minimum_version = "0.30.0"
 
 [gemini-cli.files]
 "ostt-policy.toml" = '''
@@ -136,7 +130,6 @@ command = [
   "--no-approve", "--model", "{model}",
 ]
 image_args = ["@{image}"]
-minimum_version = "1.0.4"
 
 # Ran it with 18.12.6 against a mock provider, as for Pi. `--no-tools` keeps
 # MCP tools, so the config overlay turns off MCP and every source of
@@ -167,7 +160,6 @@ command = [
   "hermes", "chat", "-Q", "--query-file", "-", "-t", "bot_room",
   "--ignore-rules", "--source", "tool", "-m", "{model}",
 ]
-minimum_version = "0.21.3"
 
 # Checked against the docs (docs.github.com Copilot CLI reference and "Allowing
 # tools") and the --help of 1.0.103; it accepted these arguments. `--available-tools` leaves the model only
@@ -185,7 +177,6 @@ command = [
   "--disable-builtin-mcps", "--no-custom-instructions", "--no-auto-update",
 ]
 image_args = ["--attachment={image}"]
-minimum_version = "1.0.41"
 
 # Checked against the docs bundled with Grok CLI (headless mode, permissions
 # and sandbox) and the --help of 1.0.70, which parsed these arguments. "A bare
