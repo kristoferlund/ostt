@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.31 - 2026-10-26
+
 ### Added
 
 - `--attach <image>` sends an image to the processing action along with the text, e.g. `ostt transcribe rec.wav --process clean --attach screen.png`. It works wherever `--process` does, and with `ostt process` to rerun an action. Agents that take images receive it (Claude Code, Codex, OpenCode, Gemini CLI, Pi, Oh My Pi and GitHub Copilot); bash actions get its path in `$OSTT_ATTACHMENT`.
