@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.32 - 2026-10-26
+
 ### Added
 
 - `ostt agent list` shows which agents take the prompt as a command-line argument, which other local users can read while the agent runs (GitHub Copilot), and its JSON has `prompt_in_args`.
