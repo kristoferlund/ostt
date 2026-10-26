@@ -30,6 +30,9 @@
 #   models           Models to offer when setting up an action (`ostt agent
 #                    models <id>`), for agents with a short fixed list.
 #   models_command   Command that prints the agent's models, one per line.
+#   models_pattern   Regex for models_command's output, for an agent that
+#                    prints more than its models: each line it matches gives
+#                    the model in its first group.
 #
 # Agents marked "ran it" were run through ostt with these settings: a text
 # prompt, an image, and an attempt to make them create a file and read
@@ -190,6 +193,8 @@ command = [
   "--no-auto-update", "--deny", "*", "--disallowed-tools", "Agent",
   "--disable-web-search", "--no-subagents", "--no-plan", "--sandbox", "strict",
 ]
+models_command = ["grok", "models"]
+models_pattern = '^\s+[*-] (\S+)'
 
 # Ran it (2026.10.22), and checked against cursor.com/docs/cli (headless,
 # permissions, parameters). It validates the project config, so `allow` must
@@ -205,6 +210,8 @@ command = [
   "--sandbox", "enabled", "--trust", "--workspace", "{workdir}",
   "--model", "{model}",
 ]
+models_command = ["cursor-agent", "models"]
+models_pattern = '^(\S+) - '
 
 [cursor.files]
 ".cursor/cli.json" = '{"permissions":{"allow":[],"deny":["Shell(*)","Read(**)","Read(/**)","Write(**)","Write(/**)","WebFetch(*)","Mcp(*:*)"]}}'

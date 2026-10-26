@@ -103,6 +103,9 @@ pub async fn handle_agent_models(config_data: &config::OsttConfig, id: &str) -> 
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    print!("{}", String::from_utf8_lossy(&output.stdout));
+    let models = agent.parse_models(&String::from_utf8_lossy(&output.stdout));
+    if !models.is_empty() {
+        println!("{}", models.join("\n"));
+    }
     Ok(())
 }

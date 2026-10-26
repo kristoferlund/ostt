@@ -39,6 +39,11 @@ pub struct AgentSpec {
     /// Command that prints the agent's models, one per line.
     #[serde(default)]
     pub models_command: Option<Vec<String>>,
+    /// Regex picking the models out of what `models_command` prints: each
+    /// line it matches gives the model in its first group. Without it, every
+    /// line is a model.
+    #[serde(default)]
+    pub models_pattern: Option<String>,
 }
 
 /// How the prompt goes in and the answer comes out.
@@ -84,7 +89,31 @@ impl AgentSpec {
                 "format claude-stream-json takes the prompt on stdin, not {prompt}".to_string(),
             );
         }
+        if let Some(pattern) = &self.models_pattern {
+            let regex = regex::Regex::new(pattern)
+                .map_err(|e| format!("models_pattern is not a valid regex: {e}"))?;
+            if regex.captures_len() < 2 {
+                return Err("models_pattern needs a group around the model".to_string());
+            }
+        }
         self.files.keys().try_for_each(|name| check_file_name(name))
+    }
+
+    /// The models in what `models_command` printed.
+    pub fn parse_models(&self, output: &str) -> Vec<String> {
+        let regex = self
+            .models_pattern
+            .as_deref()
+            .and_then(|pattern| regex::Regex::new(pattern).ok());
+        output
+            .lines()
+            .filter_map(|line| match &regex {
+                Some(regex) => regex.captures(line)?.get(1).map(|m| m.as_str()),
+                None => Some(line.trim()),
+            })
+            .filter(|model| !model.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 }
 
@@ -233,6 +262,51 @@ mod tests {
             .map(|(id, _)| id.as_str())
             .collect();
         assert_eq!(in_args, ["copilot"]);
+    }
+
+    /// Grok and Cursor print their models among headers and descriptions;
+    /// the setup must offer only the ids, which are what --model takes.
+    #[test]
+    fn models_are_picked_out_of_the_agents_listings() {
+        let agents = builtin_agents();
+        let grok = "You are logged in with grok.com.\n\nDefault model: grok-4.7\n\n\
+                    Available models:\n  * grok-4.7 (default)\n  - grok-4.7-build-fast\n  - grok-4.6\n";
+        assert_eq!(
+            agents["grok"].parse_models(grok),
+            ["grok-4.7", "grok-4.7-build-fast", "grok-4.6"]
+        );
+        let cursor = "Available models\n\nauto - Auto (current, default)\n\
+                      gpt-5.3-codex - Codex 5.3\nsonnet-4.5-thinking - Sonnet 4.5 Thinking\n";
+        assert_eq!(
+            agents["cursor"].parse_models(cursor),
+            ["auto", "gpt-5.3-codex", "sonnet-4.5-thinking"]
+        );
+        // Without a pattern, as for OpenCode, every non-empty line is a model.
+        assert_eq!(
+            agents["opencode"].parse_models("openai/gpt-5\n\nanthropic/claude\n"),
+            ["openai/gpt-5", "anthropic/claude"]
+        );
+    }
+
+    #[test]
+    fn models_pattern_must_be_a_regex_with_a_group() {
+        let raw: IndexMap<String, toml::Value> = toml::from_str(
+            r#"
+            [nogroup]
+            name = "A"
+            command = ["a", "{model}"]
+            models_pattern = "^\\S+"
+
+            [broken]
+            name = "B"
+            command = ["b", "{model}"]
+            models_pattern = "("
+            "#,
+        )
+        .unwrap();
+        let user = parse_user_agents(raw);
+        assert!(user.resolve("nogroup").is_err());
+        assert!(user.resolve("broken").is_err());
     }
 
     #[test]

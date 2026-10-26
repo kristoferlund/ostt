@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `ostt agent list` shows which agents take the prompt as a command-line argument, which other local users can read while the agent runs (GitHub Copilot), and its JSON has `prompt_in_args`.
+- `ostt agent models grok` and `ostt agent models cursor` list the models Grok and Cursor offer, so the Omarchy setup lets you pick one instead of typing it. An agent's `models_pattern` picks the models out of what its `models_command` prints.
 
 ### Changed
 
