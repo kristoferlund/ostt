@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ostt agent list` shows which agents take the prompt as a command-line argument, which other local users can read while the agent runs (Copilot, Grok and Cursor), and its JSON has `prompt_in_args`.
+
+### Fixed
+
+- The credentials file is created readable only by you. Saving a key could leave a new file readable by other local users for a moment, until its permissions were set.
+
 ## 0.0.31 - 2026-10-26
 
 ### Added

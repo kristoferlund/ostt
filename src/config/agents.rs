@@ -59,6 +59,12 @@ impl AgentSpec {
         self.command.first().map(String::as_str).unwrap_or_default()
     }
 
+    /// Whether the agent takes the prompt as a command-line argument, where
+    /// other local users can read it while the agent runs, rather than on stdin.
+    pub fn prompt_in_args(&self) -> bool {
+        self.command.iter().any(|arg| arg.contains("{prompt}"))
+    }
+
     /// Whether the agent can receive an attached image.
     pub fn takes_images(&self) -> bool {
         self.format == AgentFormat::ClaudeStreamJson
@@ -213,6 +219,20 @@ mod tests {
                 "agent '{id}' ignores the model"
             );
         }
+    }
+
+    /// The Omarchy plugin offers only agents that read the prompt from stdin,
+    /// because a prompt in the arguments is readable by other local users.
+    /// The flag must match where each built-in agent really takes it.
+    #[test]
+    fn prompt_in_args_marks_the_argument_agents() {
+        let agents = builtin_agents();
+        let in_args: Vec<&str> = agents
+            .iter()
+            .filter(|(_, spec)| spec.prompt_in_args())
+            .map(|(id, _)| id.as_str())
+            .collect();
+        assert_eq!(in_args, ["copilot", "grok", "cursor"]);
     }
 
     #[test]

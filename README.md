@@ -113,7 +113,7 @@ Other programs can rely on:
 - **Errors** on stderr, starting with `Error: ` and followed by the causes (`Caused by:`); a command line that cannot be parsed starts with `error: ` instead.
 - **JSON lists** with `--format json`, an empty list when there is nothing to list:
   - `ostt process list`: `id`, `name`, `description`, `images` (whether `--attach` works with the action), and `error` when the action's agent is unknown or not valid.
-  - `ostt agent list`: `id`, `name`, `installed`, `path`, `images`, `builtin`; an agent defined but not valid has `id`, `name` and `error`.
+  - `ostt agent list`: `id`, `name`, `installed`, `path`, `images`, `prompt_in_args`, `builtin`; an agent defined but not valid has `id`, `name` and `error`.
 - **`ostt agent models <id>`:** the models an agent offers, one per line; nothing for an agent with no list, and an error when its models command fails.
 
 ## Common Commands
