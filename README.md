@@ -145,7 +145,7 @@ Common aliases: `r` for `record`, `t` for `transcribe`, `l` for `launch`, `p` fo
 
 ## Providers
 
-OSTT is bring-your-own-API-key and currently supports OpenAI, Deepgram, DeepInfra, Groq, AssemblyAI, Berget, ElevenLabs, and Mistral transcription models.
+OSTT is bring-your-own-API-key and supports OpenAI, Deepgram, DeepInfra, Groq, AssemblyAI, Berget, ElevenLabs, and Mistral transcription models.
 
 Run `ostt auth` to select your provider/model and save credentials securely.
 
@@ -170,7 +170,7 @@ ostt transcribe audio.mp3 --model berget/klang/pianissimo
 
 This is [KlangAI/pianissimo-sv](https://huggingface.co/KlangAI/pianissimo-sv), served through [Berget's realtime WebSocket API](https://api.berget.ai/#tag/audio/GET/v1/realtime). OSTT converts the recording to 24 kHz mono PCM using ffmpeg, sends it as one turn, and returns the final transcript.
 
-Transcription starts **after recording stops**. OSTT does not send microphone audio or display partial transcripts during recording. See the [Pianissimo overview](https://ostt.ai/lp/klang-pianissimo-svenska) and [Berget reference](https://ostt.ai/reference/providers/berget#pianissimo-params) for setup and limitations. Available since OSTT 0.0.27.
+Transcription starts **after recording stops**. OSTT does not send microphone audio or display partial transcripts during recording. See the [Pianissimo overview](https://ostt.ai/lp/klang-pianissimo-svenska) and [Berget reference](https://ostt.ai/reference/providers/berget#pianissimo-params) for setup and limitations.
 
 Supported params are `language` (default `sv`) and positive `chunk_seconds` (default `3`, the server's target segment length). For example:
 
@@ -181,8 +181,6 @@ chunk_seconds = 3
 ```
 
 Pianissimo does not support keyword boosting, prompts, or temperature. OSTT does not send saved keywords to it. Unsupported params in its own config section are ignored with a log warning; in `[berget.params]` or `--param` they are rejected. Keep Whisper-specific params in model-specific sections rather than `[berget.params]` when switching between these models.
-
-Deprecated config shapes such as `[providers]`, `[model_options]`, `[audio].sample_rate`, `[[process.actions]]`, and `provider = "local"` fail loudly. Update local model IDs from `local/<model>` to `whisper/<model>`.
 
 ## Platform Setup
 
