@@ -164,12 +164,14 @@ command = [
   "--ignore-rules", "--source", "tool", "-m", "{model}",
 ]
 
-# Checked against the docs (docs.github.com Copilot CLI reference and "Allowing
-# tools") and the --help of 1.0.103; it accepted these arguments. `--available-tools` leaves the model only
-# the listed tools ("won't be able to use it at all" otherwise), and the only
-# one listed, ask_user, is then disabled. Deny rules cover the rest and win
-# over `--allow-all-tools`, which non-interactive mode requires. --attachment
-# is documented for -p, hence the prompt as an argument.
+# Ran it with 1.0.103: text, image, and a touch/read attempt that found no
+# tools; checked against the docs (docs.github.com Copilot CLI reference and
+# "Allowing tools"). `--available-tools` leaves the model only the listed tools
+# ("won't be able to use it at all" otherwise), and the only one listed,
+# ask_user, is then disabled. Deny rules cover the rest and win over
+# `--allow-all-tools`, which non-interactive mode requires. The prompt is an
+# argument: Copilot reads a piped prompt only without -p, and then -s is
+# refused, so its answer comes after a list of the disabled tools.
 [copilot]
 name = "GitHub Copilot"
 command = [
