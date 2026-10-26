@@ -178,22 +178,23 @@ command = [
 ]
 image_args = ["--attachment={image}"]
 
-# Checked against the docs bundled with Grok CLI (headless mode, permissions
-# and sandbox) and the --help of 1.0.70, which parsed these arguments. "A bare
-# `*` rule matches every tool" and deny rules always win; the strict sandbox
-# limits reads to the working directory and system paths. Text only: images
-# can only be passed as base64 in an argument.
+# Ran it (1.0.70), and checked against the docs bundled with Grok CLI
+# (headless mode, permissions and sandbox). "A bare `*` rule matches every
+# tool" and deny rules always win; the strict sandbox limits reads to the
+# working directory and system paths. --prompt-file reads the prompt from
+# stdin. Text only: images can only be passed as base64 in an argument.
 [grok]
 name = "Grok"
 command = [
-  "grok", "-p", "{prompt}", "-m", "{model}", "--output-format", "plain",
+  "grok", "--prompt-file", "/dev/stdin", "-m", "{model}", "--output-format", "plain",
   "--no-auto-update", "--deny", "*", "--disallowed-tools", "Agent",
   "--disable-web-search", "--no-subagents", "--no-plan", "--sandbox", "strict",
 ]
 
-# Checked against cursor.com/docs/cli (headless, permissions, parameters) and
-# the --help of 2026.10.22, which accepted these arguments and this project
-# config (it validates the file, so `allow` must be present). Without --force nothing is applied; ask mode is
+# Ran it (2026.10.22), and checked against cursor.com/docs/cli (headless,
+# permissions, parameters). It validates the project config, so `allow` must
+# be present. With -p and no prompt argument it reads the prompt from stdin.
+# Without --force nothing is applied; ask mode is
 # read-only; the project permissions deny every tool kind, MCP included, and
 # MCP servers are not approved. Text only: Cursor reads images through its
 # file tool, which is denied.
@@ -202,7 +203,7 @@ name = "Cursor"
 command = [
   "cursor-agent", "-p", "--output-format", "text", "--mode", "ask",
   "--sandbox", "enabled", "--trust", "--workspace", "{workdir}",
-  "--model", "{model}", "{prompt}",
+  "--model", "{model}",
 ]
 
 [cursor.files]

@@ -938,18 +938,18 @@ mod tests {
     async fn prompt_too_long_for_an_argument_names_the_agent() {
         let messages = vec![msg(InputRole::User, &"word ".repeat(30_000))];
         let err = execute_ai_action(
-            &agent("grok"),
+            &agent("copilot"),
             "m",
             &messages,
             RunOptions {
-                tool_binary: Some("/nonexistent/grok"),
+                tool_binary: Some("/nonexistent/copilot"),
                 ..RunOptions::default()
             },
         )
         .await
         .unwrap_err()
         .to_string();
-        assert!(err.contains("too long for Grok"), "{err}");
+        assert!(err.contains("too long for GitHub Copilot"), "{err}");
     }
 
     #[test]

@@ -232,7 +232,7 @@ mod tests {
             .filter(|(_, spec)| spec.prompt_in_args())
             .map(|(id, _)| id.as_str())
             .collect();
-        assert_eq!(in_args, ["copilot", "grok", "cursor"]);
+        assert_eq!(in_args, ["copilot"]);
     }
 
     #[test]
