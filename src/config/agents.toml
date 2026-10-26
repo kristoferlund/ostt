@@ -30,6 +30,9 @@
 #   models           Models to offer when setting up an action (`ostt agent
 #                    models <id>`), for agents with a short fixed list.
 #   models_command   Command that prints the agent's models, one per line.
+#   models_pattern   Regex for models_command's output, for an agent that
+#                    prints more than its models: each line it matches gives
+#                    the model in its first group.
 #
 # Agents marked "ran it" were run through ostt with these settings: a text
 # prompt, an image, and an attempt to make them create a file and read
@@ -161,12 +164,14 @@ command = [
   "--ignore-rules", "--source", "tool", "-m", "{model}",
 ]
 
-# Checked against the docs (docs.github.com Copilot CLI reference and "Allowing
-# tools") and the --help of 1.0.103; it accepted these arguments. `--available-tools` leaves the model only
-# the listed tools ("won't be able to use it at all" otherwise), and the only
-# one listed, ask_user, is then disabled. Deny rules cover the rest and win
-# over `--allow-all-tools`, which non-interactive mode requires. --attachment
-# is documented for -p, hence the prompt as an argument.
+# Ran it with 1.0.103: text, image, and a touch/read attempt that found no
+# tools; checked against the docs (docs.github.com Copilot CLI reference and
+# "Allowing tools"). `--available-tools` leaves the model only the listed tools
+# ("won't be able to use it at all" otherwise), and the only one listed,
+# ask_user, is then disabled. Deny rules cover the rest and win over
+# `--allow-all-tools`, which non-interactive mode requires. The prompt is an
+# argument: Copilot reads a piped prompt only without -p, and then -s is
+# refused, so its answer comes after a list of the disabled tools.
 [copilot]
 name = "GitHub Copilot"
 command = [
@@ -178,22 +183,25 @@ command = [
 ]
 image_args = ["--attachment={image}"]
 
-# Checked against the docs bundled with Grok CLI (headless mode, permissions
-# and sandbox) and the --help of 1.0.70, which parsed these arguments. "A bare
-# `*` rule matches every tool" and deny rules always win; the strict sandbox
-# limits reads to the working directory and system paths. Text only: images
-# can only be passed as base64 in an argument.
+# Ran it (1.0.70), and checked against the docs bundled with Grok CLI
+# (headless mode, permissions and sandbox). "A bare `*` rule matches every
+# tool" and deny rules always win; the strict sandbox limits reads to the
+# working directory and system paths. --prompt-file reads the prompt from
+# stdin. Text only: images can only be passed as base64 in an argument.
 [grok]
 name = "Grok"
 command = [
-  "grok", "-p", "{prompt}", "-m", "{model}", "--output-format", "plain",
+  "grok", "--prompt-file", "/dev/stdin", "-m", "{model}", "--output-format", "plain",
   "--no-auto-update", "--deny", "*", "--disallowed-tools", "Agent",
   "--disable-web-search", "--no-subagents", "--no-plan", "--sandbox", "strict",
 ]
+models_command = ["grok", "models"]
+models_pattern = '^\s+[*-] (\S+)'
 
-# Checked against cursor.com/docs/cli (headless, permissions, parameters) and
-# the --help of 2026.10.22, which accepted these arguments and this project
-# config (it validates the file, so `allow` must be present). Without --force nothing is applied; ask mode is
+# Ran it (2026.10.22), and checked against cursor.com/docs/cli (headless,
+# permissions, parameters). It validates the project config, so `allow` must
+# be present. With -p and no prompt argument it reads the prompt from stdin.
+# Without --force nothing is applied; ask mode is
 # read-only; the project permissions deny every tool kind, MCP included, and
 # MCP servers are not approved. Text only: Cursor reads images through its
 # file tool, which is denied.
@@ -202,8 +210,10 @@ name = "Cursor"
 command = [
   "cursor-agent", "-p", "--output-format", "text", "--mode", "ask",
   "--sandbox", "enabled", "--trust", "--workspace", "{workdir}",
-  "--model", "{model}", "{prompt}",
+  "--model", "{model}",
 ]
+models_command = ["cursor-agent", "models"]
+models_pattern = '^(\S+) - '
 
 [cursor.files]
 ".cursor/cli.json" = '{"permissions":{"allow":[],"deny":["Shell(*)","Read(**)","Read(/**)","Write(**)","Write(/**)","WebFetch(*)","Mcp(*:*)"]}}'

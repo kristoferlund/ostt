@@ -27,6 +27,7 @@ pub fn handle_agent_list(config_data: &config::OsttConfig, json: bool) -> anyhow
                         "installed": path.is_some(),
                         "path": path,
                         "images": agent.takes_images(),
+                        "prompt_in_args": agent.prompt_in_args(),
                         "builtin": listed.builtin,
                     })
                 }
@@ -53,6 +54,9 @@ pub fn handle_agent_list(config_data: &config::OsttConfig, json: bool) -> anyhow
         }
         if !agent.takes_images() {
             notes.push("no images");
+        }
+        if agent.prompt_in_args() {
+            notes.push("prompt visible to other users");
         }
         let notes = if notes.is_empty() {
             String::new()
@@ -99,6 +103,9 @@ pub async fn handle_agent_models(config_data: &config::OsttConfig, id: &str) -> 
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    print!("{}", String::from_utf8_lossy(&output.stdout));
+    let models = agent.parse_models(&String::from_utf8_lossy(&output.stdout));
+    if !models.is_empty() {
+        println!("{}", models.join("\n"));
+    }
     Ok(())
 }

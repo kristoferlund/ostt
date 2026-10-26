@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ostt agent list` shows which agents take the prompt as a command-line argument, which other local users can read while the agent runs (GitHub Copilot), and its JSON has `prompt_in_args`.
+- `ostt agent models grok` and `ostt agent models cursor` list the models Grok and Cursor offer, so the Omarchy setup lets you pick one instead of typing it. An agent's `models_pattern` picks the models out of what its `models_command` prints.
+
+### Changed
+
+- Grok and Cursor read the prompt from stdin instead of a command-line argument, so other local users cannot read it and it is no longer limited to 128 KB.
+
+### Fixed
+
+- The credentials file is created readable only by you. Saving a key could leave a new file readable by other local users for a moment, until its permissions were set.
+
 ## 0.0.31 - 2026-10-26
 
 ### Added

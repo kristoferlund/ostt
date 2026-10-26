@@ -113,10 +113,6 @@ impl Placeholders<'_> {
 
 /// Whether the agent takes the prompt as an argument (`{prompt}`) rather
 /// than on stdin.
-fn prompt_in_args(agent: &AgentSpec) -> bool {
-    agent.command.iter().any(|arg| arg.contains("{prompt}"))
-}
-
 /// Builds the arguments after the program: the agent's own, the image
 /// arguments when an image is attached, then the user's `tool_args`.
 fn command_args(
@@ -453,7 +449,7 @@ pub async fn execute_ai_action(
     if let (Some(_), Some(reference)) = (&image, &agent.image_prompt) {
         prompt = format!("{prompt}\n\n{}", placeholders.fill(reference));
     }
-    let in_args = prompt_in_args(agent);
+    let in_args = agent.prompt_in_args();
     if in_args && prompt.len() > MAX_PROMPT_ARG {
         bail!(
             "The text is too long for {}, which takes it as a command-line argument (at most 128 KB). Use an agent that reads it from stdin.",
@@ -920,7 +916,7 @@ mod tests {
             command_args(&spec, &placeholders, None),
             ["-m", "m1 {prompt}", "-p", "say {model} {image}"]
         );
-        assert!(prompt_in_args(&spec));
+        assert!(spec.prompt_in_args());
     }
 
     /// An agent that takes the prompt as an argument gets it there, with
@@ -942,18 +938,18 @@ mod tests {
     async fn prompt_too_long_for_an_argument_names_the_agent() {
         let messages = vec![msg(InputRole::User, &"word ".repeat(30_000))];
         let err = execute_ai_action(
-            &agent("grok"),
+            &agent("copilot"),
             "m",
             &messages,
             RunOptions {
-                tool_binary: Some("/nonexistent/grok"),
+                tool_binary: Some("/nonexistent/copilot"),
                 ..RunOptions::default()
             },
         )
         .await
         .unwrap_err()
         .to_string();
-        assert!(err.contains("too long for Grok"), "{err}");
+        assert!(err.contains("too long for GitHub Copilot"), "{err}");
     }
 
     #[test]
