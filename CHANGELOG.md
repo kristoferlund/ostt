@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.34 - 2026-10-30
+
 ### Fixed
 
 - Everything ostt keeps is readable only by you, from the moment it starts. Every command sets a private umask, so whatever it creates is mode 0600, and makes the data, config and log directories private before it reads or writes anything. Before, a custom model URL, which can be a signed download link, was saved in `models.json` readable by other local users when the model picker ran before anything else had made the data directory private.
