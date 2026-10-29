@@ -729,12 +729,13 @@ fn bytes_to_mb(bytes: u64) -> u32 {
 }
 
 pub fn save_state(state: &LocalModelState) -> anyhow::Result<()> {
+    // Custom model URLs can be signed, so the state is the user's alone.
     let path = state_path();
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        crate::app_dirs::private_dir(parent)?;
     }
     let content = serde_json::to_string_pretty(state)?;
-    fs::write(path, content)?;
+    crate::app_dirs::write_private(&path, content.as_bytes())?;
     Ok(())
 }
 
@@ -1402,6 +1403,38 @@ mod tests {
 
             assert_eq!(loaded.custom_models.len(), 1);
             assert_eq!(loaded.custom_models[0].id, "my-custom-model");
+        });
+    }
+
+    // A custom model URL can be signed: another local account must not read
+    // it, even where the umask makes new files readable, nor through a state
+    // file an older ostt left readable.
+    #[cfg(unix)]
+    #[test]
+    fn model_state_is_private_to_its_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        with_isolated_data_dir(|dir| {
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(state_path(), "{}").unwrap();
+            for path in [dir.as_path(), state_path().as_path()] {
+                fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            // SAFETY: umask has no preconditions.
+            let previous = unsafe { libc::umask(0o022) };
+            let state = LocalModelState {
+                version: 1,
+                custom_models: vec![registry_entry_with_url(
+                    "signed",
+                    "https://example.com/model.bin?signature=secret",
+                )],
+            };
+            let saved = save_state(&state);
+            unsafe { libc::umask(previous) };
+            saved.expect("save state");
+
+            assert_eq!(mode(&dir), 0o700);
+            assert_eq!(mode(&state_path()), 0o600);
         });
     }
 

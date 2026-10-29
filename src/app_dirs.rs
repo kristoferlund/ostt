@@ -67,6 +67,52 @@ pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Writes `path` readable only by its owner: the content goes to a new 0600
+/// file beside it, which then replaces it in one rename. It is never readable
+/// by others whatever the umask, and someone who opened an older, readable
+/// file does not see it through that.
+pub(crate) fn write_private(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(content)?;
+    file.as_file().sync_all()?;
+    file.persist(path).map_err(|err| err.error)?;
+    Ok(())
+}
+
+/// Makes everything ostt creates from here on readable only by this user,
+/// whatever the umask it was started with, and makes the data and config
+/// directories private before any command reads or writes them, tightening
+/// ones that older versions left open. Every file ostt keeps, such as model
+/// URLs that can be signed, is then out of other users' reach.
+///
+/// # Errors
+/// - If a directory cannot be created or made private, or is another user's
+pub(crate) fn make_private() -> std::io::Result<()> {
+    // SAFETY: umask has no preconditions and cannot fail.
+    #[cfg(unix)]
+    unsafe {
+        libc::umask(0o077);
+    }
+    private_dir(&data_dir())?;
+    private_dir(&config_dir())?;
+    // The config can hold API keys. It can be a link into a dotfiles folder
+    // others can enter, so its own mode matters too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let config = config_dir().join("ostt.toml");
+        if let Ok(metadata) = std::fs::metadata(&config) {
+            // SAFETY: geteuid has no preconditions and cannot fail.
+            if metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & 0o077 != 0 {
+                std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Returns the data directory and ensures it exists, private to this user.
 pub(crate) fn private_data_dir() -> std::io::Result<PathBuf> {
     let dir = data_dir();

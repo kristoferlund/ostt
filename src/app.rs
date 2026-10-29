@@ -667,6 +667,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
         _ => None,
     };
     if let Some(helper) = helper {
+        crate::app_dirs::make_private()?;
         logging::init_logging()?;
         check_and_run_setup().await?;
         let config_data = load_config()?;
@@ -675,6 +676,7 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
     let cli = Cli::parse();
     check_top_level_attach(&cli)?;
+    crate::app_dirs::make_private()?;
 
     // Handle commands that don't need logging or config setup
     // The `daemon run` subcommand is the long-running daemon process itself.

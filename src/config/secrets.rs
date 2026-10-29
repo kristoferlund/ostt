@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// Returns the path to the secrets directory (~/.local/share/ostt).
 ///
@@ -16,20 +16,6 @@ use std::path::{Path, PathBuf};
 /// - If the secrets directory cannot be created or made private
 fn get_secrets_dir() -> anyhow::Result<PathBuf> {
     Ok(crate::app_dirs::private_data_dir()?)
-}
-
-/// Writes the credentials file readable only by its owner: the keys go to a
-/// new 0600 file beside it, which then replaces it in one rename. They are
-/// never readable by others whatever the umask, and someone who opened an
-/// older, readable file does not see them through it.
-fn write_private(path: &Path, content: &str) -> anyhow::Result<()> {
-    use std::io::Write;
-    let dir = path.parent().unwrap_or(Path::new("."));
-    let mut file = tempfile::NamedTempFile::new_in(dir)?;
-    file.write_all(content.as_bytes())?;
-    file.as_file().sync_all()?;
-    file.persist(path)?;
-    Ok(())
 }
 
 /// Saves an API key for the specified provider.
@@ -54,7 +40,7 @@ pub fn save_api_key(provider_id: &str, api_key: &str) -> anyhow::Result<()> {
     credentials.insert(provider_id.to_string(), api_key.to_string());
 
     let content = toml::to_string(&credentials)?;
-    write_private(&credentials_file, &content)?;
+    crate::app_dirs::write_private(&credentials_file, content.as_bytes())?;
 
     tracing::info!("API key saved for provider: {}", provider_id);
     Ok(())
@@ -119,7 +105,7 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
 
     if credentials.remove(provider_id).is_some() {
         let content = toml::to_string(&credentials)?;
-        write_private(&credentials_file, &content)?;
+        crate::app_dirs::write_private(&credentials_file, content.as_bytes())?;
         tracing::info!("API key cleared for provider: {}", provider_id);
     }
 
@@ -130,6 +116,7 @@ pub fn clear_api_key(provider_id: &str) -> anyhow::Result<()> {
 mod tests {
     use super::*;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
 
     fn mode(path: &Path) -> u32 {
         fs::metadata(path).unwrap().permissions().mode() & 0o777
@@ -142,7 +129,7 @@ mod tests {
     fn new_credentials_file_is_owner_only() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("credentials");
-        write_private(&path, "openai = \"sk-1\"\n").unwrap();
+        crate::app_dirs::write_private(&path, b"openai = \"sk-1\"\n").unwrap();
         assert_eq!(mode(&path), 0o600);
         assert_eq!(fs::read_to_string(&path).unwrap(), "openai = \"sk-1\"\n");
     }
@@ -156,7 +143,7 @@ mod tests {
         let path = dir.path().join("credentials");
         fs::write(&path, "openai = \"sk-long-old-key\"\ngroq = \"gsk\"\n").unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        write_private(&path, "groq = \"gsk\"\n").unwrap();
+        crate::app_dirs::write_private(&path, b"groq = \"gsk\"\n").unwrap();
         assert_eq!(mode(&path), 0o600);
         assert_eq!(fs::read_to_string(&path).unwrap(), "groq = \"gsk\"\n");
     }
@@ -170,7 +157,7 @@ mod tests {
         let path = dir.path().join("credentials");
         fs::write(&path, "openai = \"sk-1\"\n").unwrap();
         let mut opened = fs::File::open(&path).unwrap();
-        write_private(&path, "openai = \"sk-2\"\n").unwrap();
+        crate::app_dirs::write_private(&path, b"openai = \"sk-2\"\n").unwrap();
         let mut seen = String::new();
         opened.rewind().unwrap();
         opened.read_to_string(&mut seen).unwrap();
