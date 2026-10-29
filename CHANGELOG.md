@@ -9,8 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Every file ostt creates is readable only by you, whatever your umask, and the data and config directories are made private when ostt starts, before any command reads or writes them. Custom model URLs, which can be signed download links, were saved in `models.json` readable by other local users when the model picker ran before anything else had made the data directory private. That file is now written with mode 0600.
-- An `ostt.toml` that other local users can read is restricted to mode 0600 when ostt starts, including one linked from a dotfiles folder.
+- Everything ostt keeps is readable only by you, from the moment it starts. Every command sets a private umask, so whatever it creates is mode 0600, and makes the data, config and log directories private before it reads or writes anything. Before, a custom model URL, which can be a signed download link, was saved in `models.json` readable by other local users when the model picker ran before anything else had made the data directory private.
+- Files an earlier version left readable, such as `models.json`, recordings, logs and `ostt.toml`, are restricted when ostt next starts, including an `ostt.toml` linked from a dotfiles folder.
 
 ## 0.0.33 - 2026-10-29
 
