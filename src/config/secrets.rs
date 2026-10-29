@@ -9,37 +9,26 @@ use std::path::{Path, PathBuf};
 
 /// Returns the path to the secrets directory (~/.local/share/ostt).
 ///
-/// Creates the directory if it doesn't exist.
+/// Creates the directory if it doesn't exist, private to this user.
 ///
 /// # Errors
 /// - If the local data directory cannot be determined
-/// - If the secrets directory cannot be created
+/// - If the secrets directory cannot be created or made private
 fn get_secrets_dir() -> anyhow::Result<PathBuf> {
-    let secrets_dir = crate::app_dirs::data_dir();
-    fs::create_dir_all(&secrets_dir)?;
-    Ok(secrets_dir)
+    Ok(crate::app_dirs::private_data_dir()?)
 }
 
-/// Writes the credentials file readable only by its owner. A new file is
-/// created with mode 0600, and an existing one is restricted before the keys
-/// are written, so they are never readable by others, whatever the umask.
+/// Writes the credentials file readable only by its owner: the keys go to a
+/// new 0600 file beside it, which then replaces it in one rename. They are
+/// never readable by others whatever the umask, and someone who opened an
+/// older, readable file does not see them through it.
 fn write_private(path: &Path, content: &str) -> anyhow::Result<()> {
     use std::io::Write;
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.set_permissions(fs::Permissions::from_mode(0o600))?;
-    }
-    file.set_len(0)?;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
     file.write_all(content.as_bytes())?;
+    file.as_file().sync_all()?;
+    file.persist(path)?;
     Ok(())
 }
 
@@ -170,5 +159,22 @@ mod tests {
         write_private(&path, "groq = \"gsk\"\n").unwrap();
         assert_eq!(mode(&path), 0o600);
         assert_eq!(fs::read_to_string(&path).unwrap(), "groq = \"gsk\"\n");
+    }
+
+    /// Restricting a file does not close what others already opened, so new
+    /// keys go to a new file, not into one that may be open elsewhere.
+    #[test]
+    fn keys_written_later_are_not_seen_through_an_old_open_file() {
+        use std::io::{Read, Seek};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials");
+        fs::write(&path, "openai = \"sk-1\"\n").unwrap();
+        let mut opened = fs::File::open(&path).unwrap();
+        write_private(&path, "openai = \"sk-2\"\n").unwrap();
+        let mut seen = String::new();
+        opened.rewind().unwrap();
+        opened.read_to_string(&mut seen).unwrap();
+        assert_eq!(seen, "openai = \"sk-1\"\n");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "openai = \"sk-2\"\n");
     }
 }

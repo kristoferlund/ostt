@@ -579,9 +579,11 @@ fn check_exit_status(binary: &str, output: &std::process::Output) -> anyhow::Res
             stderr.trim(),
             stdout.trim()
         );
-        // Prefer stderr for error message, fall back to stdout if stderr is empty
+        // Not stdout, which can be the processed dictation: the error ends up
+        // in notifications, sent with their text as command-line arguments.
+        // The log, which only this user can read, has it.
         let error_output = if stderr.trim().is_empty() {
-            stdout.trim().to_string()
+            "It printed no error; its output is in the log (ostt logs).".to_string()
         } else {
             stderr.trim().to_string()
         };

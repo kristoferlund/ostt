@@ -14,7 +14,7 @@ const DEFAULT_CONFIG: &str = include_str!("default-config.toml");
 pub fn run_setup() -> anyhow::Result<()> {
     // Create config directory
     let config_dir = crate::app_dirs::config_dir();
-    std::fs::create_dir_all(&config_dir)?;
+    crate::app_dirs::private_dir(&config_dir)?;
 
     std::fs::write(config_dir.join("ostt.toml"), DEFAULT_CONFIG)?;
 

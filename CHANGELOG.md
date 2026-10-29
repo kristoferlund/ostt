@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `ostt process list --format json` says for each action whether its agent takes the prompt as a command-line argument (`prompt_in_args`), with `process.default_tool` applied, so a program can avoid such actions without reading `ostt.toml`.
+
+### Fixed
+
+- Transcription history, recordings, logs, credentials and the config are kept where only you can read them. ostt's data, config and log directories are created readable only by you, and existing ones are restricted when ostt next uses them. The history database is created with mode 0600, and an existing one, with its journal, is restricted before it is opened. Under the usual umask they were readable by other local users. If others have accounts on your computer, consider replacing the API keys saved with `ostt auth`.
+- A recording is converted from a temporary file in the recordings directory, readable only by you, instead of one in the shared temporary folder that other local users could read or replace.
+- Saving an API key writes a new credentials file and renames it into place, so a copy of the old file opened earlier does not show the new key.
+- When an agent fails without an error message, the error no longer includes its output, which can be your processed words; the log still has it.
+- Without `XDG_RUNTIME_DIR`, ostt refuses a runtime directory in the temporary folder that is not yours, or a link to one another user made, instead of writing into it or trusting the recording PID file in it. The daemon's socket is in the private data directory, so only you can connect to it.
+
 ## 0.0.32 - 2026-10-26
 
 ### Added

@@ -195,16 +195,17 @@ impl AudioRecorder {
 
         // Save and convert to desired format
         if let Some(output_file) = output_path {
-            let temp_wav = self.create_temp_wav_path();
+            // Next to the recording, in the private recordings directory, as
+            // a new file only this user can read; removed when dropped.
+            let temp_wav = tempfile::Builder::new()
+                .prefix(".ostt-")
+                .suffix(".wav")
+                .tempfile_in(output_file.parent().unwrap_or(Path::new(".")))
+                .context("failed to create the temporary recording")?
+                .into_temp_path();
 
             self.save_wav(&samples, &temp_wav)?;
-            let conversion_result = self.convert_with_ffmpeg(&temp_wav, &output_file, format);
-
-            if let Err(e) = std::fs::remove_file(&temp_wav) {
-                tracing::debug!("Failed to remove temp file: {}", e);
-            }
-
-            conversion_result?;
+            self.convert_with_ffmpeg(&temp_wav, &output_file, format)?;
 
             // Log final file info
             let file_size = std::fs::metadata(&output_file)?.len();
@@ -334,11 +335,6 @@ impl AudioRecorder {
             tracing::error!("ffmpeg conversion failed: {}", error_msg);
             Err(anyhow!("Audio encoding failed: {error_msg}"))
         }
-    }
-
-    /// Creates a path for the temporary WAV file.
-    fn create_temp_wav_path(&self) -> PathBuf {
-        std::env::temp_dir().join(format!("ostt_{}.wav", std::process::id()))
     }
 
     // Getters for recorded data
