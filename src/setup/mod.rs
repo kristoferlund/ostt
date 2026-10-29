@@ -16,7 +16,8 @@ pub fn run_setup() -> anyhow::Result<()> {
     let config_dir = crate::app_dirs::config_dir();
     crate::app_dirs::private_dir(&config_dir)?;
 
-    std::fs::write(config_dir.join("ostt.toml"), DEFAULT_CONFIG)?;
+    // The config can come to hold API keys and keywords.
+    crate::app_dirs::write_private(&config_dir.join("ostt.toml"), DEFAULT_CONFIG.as_bytes())?;
 
     Ok(())
 }

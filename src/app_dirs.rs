@@ -67,6 +67,100 @@ pub(crate) fn private_dir(dir: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Writes `path` readable only by its owner: the content goes to a new 0600
+/// file beside it, which then replaces it in one rename. It is never readable
+/// by others whatever the umask, and someone who opened an older, readable
+/// file does not see it through that.
+pub(crate) fn write_private(path: &Path, content: &[u8]) -> std::io::Result<()> {
+    use std::io::Write;
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let mut file = tempfile::NamedTempFile::new_in(dir)?;
+    file.write_all(content)?;
+    file.as_file().sync_all()?;
+    file.persist(path).map_err(|err| err.error)?;
+    Ok(())
+}
+
+/// Makes everything ostt creates from here on readable only by this user,
+/// whatever the umask it was started with, and makes the data, config and log
+/// directories private before any command reads or writes them. What older
+/// versions left readable there, such as model URLs that can be signed,
+/// recordings and logs, is restricted too.
+///
+/// # Errors
+/// - If a directory cannot be created or made private, or is another user's
+/// - If something in one, of this user's, cannot be restricted
+pub(crate) fn make_private() -> anyhow::Result<()> {
+    // SAFETY: umask has no preconditions and cannot fail.
+    #[cfg(unix)]
+    unsafe {
+        libc::umask(0o077);
+    }
+    let data = data_dir();
+    private_dir(&data)?;
+    let config = config_dir();
+    private_dir(&config)?;
+    for dir in [data, config, log_dir()?] {
+        restrict_contents(&dir)?;
+    }
+    // The config can hold API keys. It can be a link into a dotfiles folder
+    // others can enter, so the file it leads to is restricted too.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
+        let config = config_dir().join("ostt.toml");
+        if let Ok(metadata) = std::fs::metadata(&config) {
+            // SAFETY: geteuid has no preconditions and cannot fail.
+            if metadata.uid() == unsafe { libc::geteuid() } && metadata.mode() & 0o077 != 0 {
+                std::fs::set_permissions(&config, std::fs::Permissions::from_mode(0o600))?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Removes group and other access from everything of this user's inside
+/// `dir`, at any depth. Links are left alone, and not followed: what they lead
+/// to is not ostt's. Something removed meanwhile, such as an old recording,
+/// is skipped.
+#[cfg(unix)]
+fn restrict_contents(dir: &Path) -> std::io::Result<()> {
+    use std::io::ErrorKind::NotFound;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    let euid = unsafe { libc::geteuid() };
+    let entries = match std::fs::read_dir(dir) {
+        Err(err) if err.kind() == NotFound => return Ok(()),
+        entries => entries?,
+    };
+    for entry in entries {
+        let path = entry?.path();
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Err(err) if err.kind() == NotFound => continue,
+            metadata => metadata?,
+        };
+        if metadata.file_type().is_symlink() || metadata.uid() != euid {
+            continue;
+        }
+        if metadata.mode() & 0o077 != 0 {
+            let mode = std::fs::Permissions::from_mode(metadata.mode() & 0o700);
+            match std::fs::set_permissions(&path, mode) {
+                Err(err) if err.kind() == NotFound => continue,
+                result => result?,
+            }
+        }
+        if metadata.is_dir() {
+            restrict_contents(&path)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn restrict_contents(_dir: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
 /// Returns the data directory and ensures it exists, private to this user.
 pub(crate) fn private_data_dir() -> std::io::Result<PathBuf> {
     let dir = data_dir();
@@ -163,6 +257,32 @@ mod tests {
 
     fn mode(path: &Path) -> u32 {
         std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    // Recordings, logs and model URLs an older ostt left readable are
+    // restricted, at any depth; what a link leads to is not ostt's to change.
+    #[test]
+    fn contents_left_readable_are_restricted_but_links_are_not_followed() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("ostt");
+        let models = dir.join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        let state = models.join("models.json");
+        let recording = dir.join("recording.mp3");
+        let elsewhere = root.path().join("elsewhere.txt");
+        for file in [&state, &recording, &elsewhere] {
+            std::fs::write(file, b"x").unwrap();
+            std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        std::fs::set_permissions(&models, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, dir.join("link")).unwrap();
+
+        restrict_contents(&dir).unwrap();
+
+        assert_eq!(mode(&models), 0o700);
+        assert_eq!(mode(&state), 0o600);
+        assert_eq!(mode(&recording), 0o600);
+        assert_eq!(mode(&elsewhere), 0o644);
     }
 
     #[test]
