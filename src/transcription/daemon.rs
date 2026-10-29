@@ -85,9 +85,10 @@ pub async fn run(model_id: &str, idle_timeout_secs: Option<u64>) -> anyhow::Resu
     // Remove any stale socket from a previous unclean exit.
     let _ = std::fs::remove_file(&socket_path);
 
-    // Ensure the parent directory exists.
+    // The socket is in the private data directory, so only this user can
+    // connect and have the daemon transcribe.
     if let Some(parent) = socket_path.parent() {
-        std::fs::create_dir_all(parent)?;
+        crate::app_dirs::private_dir(parent)?;
     }
 
     // Load the model (expensive — this is the whole point of the daemon).

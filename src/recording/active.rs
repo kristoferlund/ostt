@@ -42,6 +42,9 @@ impl Drop for SignalGuard {
 
 pub(crate) fn find_running_recorder() -> Option<u32> {
     let pid_path = crate::app_dirs::recording_pid_path();
+    // Only a PID file this user wrote: one planted by another user would
+    // have ostt signal, and so stop, a process of the planter's choosing.
+    crate::app_dirs::private_dir(pid_path.parent()?).ok()?;
     let pid = std::fs::read_to_string(&pid_path)
         .ok()
         .and_then(|raw| raw.trim().parse::<u32>().ok())?;
@@ -73,7 +76,7 @@ pub(crate) fn signal_running_recorder(pid: u32) -> anyhow::Result<()> {
 fn write_recording_pid_file() -> anyhow::Result<RecordingPidGuard> {
     let path = crate::app_dirs::recording_pid_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| {
+        crate::app_dirs::private_dir(parent).with_context(|| {
             format!(
                 "failed to create recording PID directory: {}",
                 parent.display()

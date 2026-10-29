@@ -28,6 +28,33 @@ pub struct HistoryManager {
     connection: Option<Connection>,
 }
 
+/// Makes the database readable only by this user before it is opened: its
+/// directory private, and the database, with any journal SQLite left, mode
+/// 0600. SQLite gives the journals it creates the database's mode.
+fn protect(database_path: &Path) -> Result<()> {
+    if let Some(dir) = database_path.parent() {
+        crate::app_dirs::private_dir(dir)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        std::fs::OpenOptions::new()
+            .append(true)
+            .create(true)
+            .mode(0o600)
+            .open(database_path)?;
+        for suffix in ["", "-journal", "-wal", "-shm"] {
+            let mut path = database_path.as_os_str().to_owned();
+            path.push(suffix);
+            match std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)) {
+                Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err.into()),
+                _ => {}
+            }
+        }
+    }
+    Ok(())
+}
+
 impl HistoryManager {
     /// Creates a new history manager for the given data directory.
     ///
@@ -52,6 +79,7 @@ impl HistoryManager {
     /// - If table creation fails
     fn get_connection(&mut self) -> Result<&Connection> {
         if self.connection.is_none() {
+            protect(&self.database_path)?;
             let connection = Connection::open(&self.database_path)?;
 
             connection.execute("PRAGMA foreign_keys = ON", [])?;
@@ -212,5 +240,58 @@ impl HistoryManager {
             .optional()?;
 
         Ok(entry)
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(path: &Path) -> u32 {
+        std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    // Dictations are private: another local account must not be able to read
+    // the history, even when the umask would make new files readable.
+    #[test]
+    fn new_history_is_private_to_its_owner() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("ostt");
+        // The usual umask, under which new files are readable by others.
+        // SAFETY: umask has no preconditions.
+        let previous = unsafe { libc::umask(0o022) };
+        let mut history = HistoryManager::new(&data).unwrap();
+        history.save_transcription("my private words").unwrap();
+        unsafe { libc::umask(previous) };
+
+        assert_eq!(mode(&data), 0o700);
+        assert_eq!(mode(&data.join("transcription_history.db")), 0o600);
+    }
+
+    // History written by an older ostt is tightened the next time it is used.
+    #[test]
+    fn existing_history_is_tightened() {
+        let home = tempfile::tempdir().unwrap();
+        let data = home.path().join("ostt");
+        HistoryManager::new(&data)
+            .unwrap()
+            .save_transcription("old words")
+            .unwrap();
+        let database = data.join("transcription_history.db");
+        let journal = data.join("transcription_history.db-journal");
+        std::fs::write(&journal, b"").unwrap();
+        for path in [&data, &database, &journal] {
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let entries = HistoryManager::new(&data)
+            .unwrap()
+            .get_all_transcriptions()
+            .unwrap();
+        assert_eq!(entries[0].text, "old words");
+        assert_eq!(mode(&data), 0o700);
+        assert_eq!(mode(&database), 0o600);
+        assert_eq!(mode(&journal), 0o600);
     }
 }

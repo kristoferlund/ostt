@@ -143,13 +143,17 @@ pub fn handle_process_list(
                     "name": action.name,
                     "description": action.description,
                     "images": process.takes_images(action),
+                    "prompt_in_args": false,
                 });
                 if let crate::config::ActionDetails::Ai {
                     tool: Some(tool), ..
                 } = &action.details
                 {
-                    if let Err(error) = process.agents.resolve(tool) {
-                        entry["error"] = error.to_string().into();
+                    // The agent as ostt runs it, with process.default_tool
+                    // applied, so callers need not read the config.
+                    match process.agents.resolve(tool) {
+                        Ok(agent) => entry["prompt_in_args"] = agent.prompt_in_args().into(),
+                        Err(error) => entry["error"] = error.to_string().into(),
                     }
                 }
                 entry
