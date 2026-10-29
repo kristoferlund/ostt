@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.33 - 2026-10-29
+
 ### Added
 
 - `ostt process list --format json` says for each action whether its agent takes the prompt as a command-line argument (`prompt_in_args`), with `process.default_tool` applied, so a program can avoid such actions without reading `ostt.toml`.
