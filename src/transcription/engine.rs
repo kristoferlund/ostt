@@ -215,6 +215,19 @@ mod tests {
     }
 
     #[test]
+    fn pianissimo_language_hint_is_sent_without_whisper_decode_settings() {
+        for language in ["da", "sv"] {
+            let config = LocalTranscriptionConfig {
+                language: language.to_string(),
+                ..Default::default()
+            };
+            let options = run_options("parakeet", |_| false, &config);
+            assert_eq!(options.language.as_deref(), Some(language));
+            assert!(options.family.is_none());
+        }
+    }
+
+    #[test]
     fn user_decoding_params_keep_their_whisper_meaning() {
         let config = LocalTranscriptionConfig {
             no_context: true,

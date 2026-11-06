@@ -310,6 +310,51 @@ mod tests {
     }
 
     #[test]
+    fn pianissimo_language_survives_saved_config_and_per_run_overrides() {
+        // Klang's GGUF models require a language hint. It must not be dropped
+        // when loading the config or rejected by --param before transcription.
+        let config: OsttConfig = toml::from_str(
+            r#"
+            [audio]
+            device = "default"
+
+            [parakeet.pianissimo-da.params]
+            language = "da"
+
+            [parakeet.pianissimo-sv.params]
+            language = "sv"
+            "#,
+        )
+        .unwrap();
+        for language in ["da", "sv"] {
+            let model = selected_model("parakeet", &format!("pianissimo-{language}"));
+            let saved = config_for_selected_model(&config, &model, Vec::new(), &[]).unwrap();
+            assert_eq!(saved.option_string("language"), Some(language));
+
+            let overridden = config_for_selected_model(
+                &config,
+                &model,
+                Vec::new(),
+                &["language=auto".to_string()],
+            )
+            .unwrap();
+            assert_eq!(overridden.option_string("language"), Some("auto"));
+        }
+    }
+
+    #[test]
+    fn parakeet_language_support_does_not_enable_whisper_only_controls() {
+        let model = selected_model("parakeet", "pianissimo-sv");
+        for param in ["temperature=0.2", "no_context=false", "prompt=OSTT"] {
+            let error = parse_param_overrides(&model, &[param.to_string()])
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("Supported params: language"), "{error}");
+        }
+        assert!(parse_param_overrides(&model, &["language=".to_string()]).is_err());
+    }
+
+    #[test]
     fn param_overrides_parse_bool_or_string_list_bool() {
         let model = selected_model("deepgram", "nova-3");
         let options =
