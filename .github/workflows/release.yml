@@ -73,12 +73,17 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Install dist
-        # Use GitHub's asset API: the public installer URL can return a 504
-        # while the asset remains available through authenticated downloads.
+        # Use GitHub's asset API: public download URLs can return 503/504
+        # while the same pinned assets remain available through the API.
         shell: bash
         run: |
-          gh release download v0.30.2 --repo axodotdev/cargo-dist --pattern cargo-dist-installer.sh --output "$RUNNER_TEMP/cargo-dist-installer.sh"
-          sh "$RUNNER_TEMP/cargo-dist-installer.sh"
+          archive=cargo-dist-x86_64-unknown-linux-gnu.tar.xz
+          mkdir -p "$RUNNER_TEMP/cargo-dist" "$HOME/.cargo/bin"
+          gh release download v0.30.2 --repo axodotdev/cargo-dist --pattern "$archive" --pattern "$archive.sha256" --dir "$RUNNER_TEMP/cargo-dist"
+          cd "$RUNNER_TEMP/cargo-dist"
+          shasum -a 256 -c "$archive.sha256"
+          tar -xf "$archive"
+          install -m 755 "${archive%.tar.xz}/dist" "$HOME/.cargo/bin/dist"
       - name: Cache dist
         uses: actions/upload-artifact@v4
         with:
@@ -144,8 +149,13 @@ jobs:
       - name: Install dist
         shell: bash
         run: |
-          gh release download v0.30.2 --repo axodotdev/cargo-dist --pattern cargo-dist-installer.sh --output "$RUNNER_TEMP/cargo-dist-installer.sh"
-          sh "$RUNNER_TEMP/cargo-dist-installer.sh"
+          archive="cargo-dist-${{ matrix.host }}.tar.xz"
+          mkdir -p "$RUNNER_TEMP/cargo-dist" "$HOME/.cargo/bin"
+          gh release download v0.30.2 --repo axodotdev/cargo-dist --pattern "$archive" --pattern "$archive.sha256" --dir "$RUNNER_TEMP/cargo-dist"
+          cd "$RUNNER_TEMP/cargo-dist"
+          shasum -a 256 -c "$archive.sha256"
+          tar -xf "$archive"
+          install -m 755 "${archive%.tar.xz}/dist" "$HOME/.cargo/bin/dist"
       # Get the dist-manifest
       - name: Fetch local artifacts
         uses: actions/download-artifact@v4
