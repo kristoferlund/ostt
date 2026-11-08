@@ -169,7 +169,7 @@ ostt model params openai/gpt-transcribe
 | Swedish | `parakeet/pianissimo-sv` | [Pianissimo for Swedish](https://klang.ai/pianissimo-sv/) | [Model card](https://huggingface.co/KlangAI/pianissimo-sv) | [GGUF](https://huggingface.co/KlangAI/pianissimo-sv-gguf) |
 | Danish | `parakeet/pianissimo-da` | [Pianissimo for Danish](https://klang.ai/pianissimo-da/) | [Model card](https://huggingface.co/KlangAI/pianissimo-da) | [GGUF](https://huggingface.co/KlangAI/pianissimo-da-gguf) |
 
-Klang releases both under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Use `ostt model` to download them. Their GGUF instructions require `language=sv` or `language=da`; this needs the currently unreleased Parakeet language-param fix. See [Pianissimo setup](https://ostt.ai/guide/pianissimo#set-up-local-transcription) for commands, saved settings, compatibility checks, attributed accuracy reports, and OSTT-specific limitations.
+Klang releases both under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Use `ostt model` to download them. Their GGUF instructions require `language=sv` or `language=da`; local Parakeet language settings require OSTT 0.0.35 or newer. See [Pianissimo setup](https://ostt.ai/guide/pianissimo#set-up-local-transcription) for commands, saved settings, compatibility checks, attributed accuracy reports, and OSTT-specific limitations.
 
 ### Berget Pianissimo (Swedish)
 

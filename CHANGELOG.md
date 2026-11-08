@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.0.35 - 2026-11-08
+
 ### Fixed
 
 - Local Parakeet models accept a `language` param in the config and with `--param`. Klang Pianissimo's Danish and Swedish GGUF models require `language=da` and `language=sv`; previously OSTT dropped these settings from the config and rejected them on the command line.
+- macOS checks and release builds use supported macOS 15 runners instead of the retired macOS 14 runner configuration.
 
 ## 0.0.34 - 2026-10-30
 
