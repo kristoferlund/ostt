@@ -37,8 +37,17 @@ const OPTIONS: &[ModelOptionSpec] = &[
     },
 ];
 
+const PARAKEET_OPTIONS: &[ModelOptionSpec] = &[ModelOptionSpec {
+    name: "language",
+    kind: ModelOptionKind::String,
+}];
+
 pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
     (!model_id.is_empty()).then(|| ModelOptionSchema::new(OPTIONS))
+}
+
+pub(super) fn parakeet_option_schema(model_id: &str) -> Option<ModelOptionSchema> {
+    (!model_id.is_empty()).then(|| ModelOptionSchema::new(PARAKEET_OPTIONS))
 }
 
 pub(super) fn validate_options(
@@ -217,6 +226,24 @@ mod tests {
         // has no entropy check for entropy_thold to control.
         assert!(schema.option("no_timestamps").is_none());
         assert!(schema.option("entropy_thold").is_none());
+    }
+
+    #[test]
+    fn pianissimo_language_hint_reaches_the_local_engine() {
+        for language in ["da", "sv"] {
+            let config = TranscriptionConfig::new_local(
+                crate::transcription::TranscriptionProvider::Parakeet,
+                format!("pianissimo-{language}"),
+                Vec::new(),
+                IndexMap::from([(
+                    "language".to_string(),
+                    ModelOptionValue::String(language.to_string()),
+                )]),
+            );
+            let mut local_config = LocalTranscriptionConfig::default();
+            apply_params(&config, &mut local_config);
+            assert_eq!(local_config.language, language);
+        }
     }
 
     /// Saved `ostt keyword` terms used to be dropped for local models; they

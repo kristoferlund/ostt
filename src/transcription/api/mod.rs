@@ -205,6 +205,7 @@ pub(crate) fn option_schema(provider_id: &str, model_id: &str) -> Option<ModelOp
         "elevenlabs" => elevenlabs::option_schema(model_id),
         "mistral" => mistral::option_schema(model_id),
         "whisper" => local::option_schema(model_id),
+        "parakeet" => local::parakeet_option_schema(model_id),
         "http" => http::option_schema(model_id),
         _ => None,
     }

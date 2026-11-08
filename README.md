@@ -38,7 +38,7 @@ OSTT is built for people who treat the terminal as a normal place for voice inpu
 - **Linux-first voice input** - Global hotkey setup for Omarchy/Hyprland, GNOME, KDE, and other Linux desktops, with macOS support too.
 - **Provider choice** - Bring your own API key and switch between OpenAI, Deepgram, Groq, DeepInfra, AssemblyAI, Berget, ElevenLabs, Mistral, and local Parakeet and Whisper models.
 - **Model-scoped params** - Tune supported provider/model request params persistently or per run with `--param key=value`.
-- **Local transcription models** - Download curated Parakeet and Whisper models or add custom Hugging Face/direct model files for offline transcription.
+- **Local transcription models** - Download curated Parakeet and Whisper models, including [Klang Pianissimo for Swedish and Danish](https://ostt.ai/guide/pianissimo), or add custom Hugging Face/direct model files for offline transcription.
 - **Terminal-native workflow** - Use stdout, clipboard, files, aliases, shell completions, logs, and pipes.
 - **Scriptable post-processing** - Transform transcripts with AI prompts or bash commands using `ostt -p` and `ostt process`.
 - **Retry without re-recording** - Save recordings locally, then re-transcribe them with a different provider or model.
@@ -160,6 +160,17 @@ ostt transcribe audio.wav -m openai/gpt-transcribe --param languages=en,fr --par
 ostt model params openai/gpt-transcribe
 ```
 
+### Local Klang Pianissimo (Swedish and Danish)
+
+[Klang AI](https://klang.ai/)'s Pianissimo models are approximately 600M-parameter Parakeet v3 fine-tunes trained specifically for Swedish and Danish speech, with punctuation and capitalization. OSTT's curated Q8_0 GGUF files are 706 MiB each, run offline on CPU or GPU, and need no Python runtime or API key.
+
+| Language | Model ID | Klang's model page | Hugging Face | GGUF downloads |
+| --- | --- | --- | --- | --- |
+| Swedish | `parakeet/pianissimo-sv` | [Pianissimo for Swedish](https://klang.ai/pianissimo-sv/) | [Model card](https://huggingface.co/KlangAI/pianissimo-sv) | [GGUF](https://huggingface.co/KlangAI/pianissimo-sv-gguf) |
+| Danish | `parakeet/pianissimo-da` | [Pianissimo for Danish](https://klang.ai/pianissimo-da/) | [Model card](https://huggingface.co/KlangAI/pianissimo-da) | [GGUF](https://huggingface.co/KlangAI/pianissimo-da-gguf) |
+
+Klang releases both under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Use `ostt model` to download them. Their GGUF instructions require `language=sv` or `language=da`; this needs the currently unreleased Parakeet language-param fix. See [Pianissimo setup](https://ostt.ai/guide/pianissimo#set-up-local-transcription) for commands, saved settings, compatibility checks, attributed accuracy reports, and OSTT-specific limitations.
+
 ### Berget Pianissimo (Swedish)
 
 Select `berget/klang/pianissimo` with `ostt model`, or transcribe a file:
@@ -168,7 +179,7 @@ Select `berget/klang/pianissimo` with `ostt model`, or transcribe a file:
 ostt transcribe audio.mp3 --model berget/klang/pianissimo
 ```
 
-This is [KlangAI/pianissimo-sv](https://huggingface.co/KlangAI/pianissimo-sv), served through [Berget's realtime WebSocket API](https://api.berget.ai/#tag/audio/GET/v1/realtime). OSTT converts the recording to 24 kHz mono PCM using ffmpeg, sends it as one turn, and returns the final transcript.
+This is [Klang's Swedish Pianissimo](https://klang.ai/pianissimo-sv/) ([KlangAI/pianissimo-sv](https://huggingface.co/KlangAI/pianissimo-sv)), served through [Berget's realtime WebSocket API](https://api.berget.ai/#tag/audio/GET/v1/realtime). It is separate from the local Swedish and Danish GGUF models above. OSTT converts the recording to 24 kHz mono PCM using ffmpeg, sends it as one turn, and returns the final transcript.
 
 Transcription starts **after recording stops**. OSTT does not send microphone audio or display partial transcripts during recording. See the [Pianissimo overview](https://ostt.ai/lp/klang-pianissimo-svenska) and [Berget reference](https://ostt.ai/reference/providers/berget#pianissimo-params) for setup and limitations.
 
@@ -180,7 +191,7 @@ language = "sv"
 chunk_seconds = 3
 ```
 
-Pianissimo does not support keyword boosting, prompts, or temperature. OSTT does not send saved keywords to it. Unsupported params in its own config section are ignored with a log warning; in `[berget.params]` or `--param` they are rejected. Keep Whisper-specific params in model-specific sections rather than `[berget.params]` when switching between these models.
+Berget's Pianissimo route does not support keyword boosting, prompts, or temperature. OSTT does not send saved keywords to it. Unsupported params in its own config section are ignored with a log warning; in `[berget.params]` or `--param` they are rejected. Keep Whisper-specific params in model-specific sections rather than `[berget.params]` when switching between these models.
 
 ## Platform Setup
 
