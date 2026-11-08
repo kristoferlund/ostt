@@ -24,6 +24,11 @@ allow-dirty = ["ci"]
 [dist.publish]
 homebrew = ["kristoferlund/ostt"]
 
+# Pin supported macOS runners instead of cargo-dist's older defaults.
+[dist.github-custom-runners]
+aarch64-apple-darwin = "macos-15"
+x86_64-apple-darwin = "macos-15-intel"
+
 # System dependencies for Homebrew
 [dist.dependencies.homebrew]
 ffmpeg = "*"
