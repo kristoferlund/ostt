@@ -73,10 +73,12 @@ jobs:
           persist-credentials: false
           submodules: recursive
       - name: Install dist
-        # we specify bash to get pipefail; it guards against the `curl` command
-        # failing. otherwise `sh` won't catch that `curl` returned non-0
+        # Use GitHub's asset API: the public installer URL can return a 504
+        # while the asset remains available through authenticated downloads.
         shell: bash
-        run: "curl --proto '=https' --tlsv1.2 -LsSf https://github.com/axodotdev/cargo-dist/releases/download/v0.30.2/cargo-dist-installer.sh | sh"
+        run: |
+          gh release download v0.30.2 --repo axodotdev/cargo-dist --pattern cargo-dist-installer.sh --output "$RUNNER_TEMP/cargo-dist-installer.sh"
+          sh "$RUNNER_TEMP/cargo-dist-installer.sh"
       - name: Cache dist
         uses: actions/upload-artifact@v4
         with:
@@ -140,7 +142,10 @@ jobs:
             echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           fi
       - name: Install dist
-        run: ${{ matrix.install_dist.run }}
+        shell: bash
+        run: |
+          gh release download v0.30.2 --repo axodotdev/cargo-dist --pattern cargo-dist-installer.sh --output "$RUNNER_TEMP/cargo-dist-installer.sh"
+          sh "$RUNNER_TEMP/cargo-dist-installer.sh"
       # Get the dist-manifest
       - name: Fetch local artifacts
         uses: actions/download-artifact@v4
