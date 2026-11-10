@@ -64,3 +64,8 @@ jobs:
         # Hosted runners are VMs without a GPU, so inference above runs on CPU.
         # Real Metal execution has to be verified on a physical Mac.
         run: otool -L target/release/ostt | grep Metal.framework
+      - name: Upload the binary for testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: ostt-${{ matrix.target }}
+          path: target/release/ostt

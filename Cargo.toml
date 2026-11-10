@@ -28,7 +28,7 @@ whisper-vulkan = ["vulkan"]
 [dependencies]
 # Terminal UI
 ratatui = { version = "0.30.2", default-features = false, features = ["layout-cache", "std"] }
-ratcn = { version = "0.0.6", features = ["termina"] }
+ratcn = { git = "https://github.com/kristoferlund/ratcn", branch = "fix/color-depth", features = ["termina"] }
 cliclack = "0.3.0"
 console = "0.15.8"
 
