@@ -624,6 +624,7 @@ mod tests {
         assert!(validate_options("elevenlabs/scribe_v3", &options).is_ok());
     }
 
+    /// A value ElevenLabs does not know must fail before the recording is uploaded.
     #[test]
     fn numbers_format_accepts_only_digits_or_words() {
         for (value, valid) in [("digits", true), ("words", true), ("roman", false)] {
