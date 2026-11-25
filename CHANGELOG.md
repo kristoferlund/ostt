@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Cloud model: ElevenLabs `scribe_v3`, the successor to Scribe v2. It takes every Scribe v2 param, plus `numbers_format` (`digits` or `words`) and `secondary_language_codes` for audio with more than one language, which needs `language_code` set. Scribe v2 stays available and no default changes.
+
 ## 0.0.35 - 2026-11-08
 
 ### Fixed
