@@ -91,6 +91,8 @@ fn config_for_selected_model(
         &selected_model.model_id,
         &params,
     )?;
+    let full_model_id = format!("{}/{}", selected_model.provider_id, selected_model.model_id);
+    super::api::validate_merged_params(&selected_model.provider_id, &full_model_id, &params)?;
 
     super::config_for_selected_model(ostt_config, selected_model, keywords, params)
 }

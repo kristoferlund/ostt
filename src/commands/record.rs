@@ -863,6 +863,48 @@ mod tests {
         assert!(err.contains("ostt model"));
     }
 
+    /// Scribe v3's secondary language codes need a primary `language_code`,
+    /// which may be set once for all ElevenLabs models or per run. Each config
+    /// section is incomplete on its own, so the rule only holds once the
+    /// provider section, model section and `--param` overrides are combined.
+    #[test]
+    fn record_preflight_checks_scribe_v3_primary_language_across_config_sections() {
+        let _guard = crate::transcription::local_models::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let _env = isolated_env();
+        crate::config::save_api_key("elevenlabs", "test-key").expect("save elevenlabs key");
+        let split_config = r#"
+            [audio]
+            device = "default"
+
+            [transcription]
+            provider = "elevenlabs"
+            model = "scribe_v3"
+
+            [elevenlabs.params]
+            language_code = "en"
+
+            [elevenlabs.scribe_v3.params]
+            secondary_language_codes = ["de"]
+            "#;
+
+        let config: OsttConfig = toml::from_str(split_config).unwrap();
+        run_record_preflight_with_ffmpeg_check(&config, None, &[], ffmpeg_ok)
+            .expect("provider language_code should cover the model's secondary codes");
+
+        let without_primary = split_config.replace("language_code = \"en\"", "");
+        let config: OsttConfig = toml::from_str(&without_primary).unwrap();
+        let err = run_record_preflight_with_ffmpeg_check(&config, None, &[], ffmpeg_ok)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("secondary_language_codes requires language_code"));
+
+        let per_run = ["language_code=en".to_string()];
+        run_record_preflight_with_ffmpeg_check(&config, None, &per_run, ffmpeg_ok)
+            .expect("--param language_code should cover the model's secondary codes");
+    }
+
     #[test]
     fn record_preflight_reports_missing_local_model_file() {
         let _guard = crate::transcription::local_models::TEST_ENV_LOCK

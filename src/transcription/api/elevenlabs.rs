@@ -284,13 +284,6 @@ pub(super) fn validate_options(
         super::validate_string_value(full_model_id, "numbers_format", value, &["digits", "words"])?;
     }
 
-    if options.contains_key("secondary_language_codes") && !options.contains_key("language_code") {
-        anyhow::bail!(
-            "Invalid params for '{}'. ElevenLabs secondary_language_codes requires language_code.",
-            full_model_id
-        );
-    }
-
     if options.contains_key("diarization_threshold") {
         if matches!(options.get("diarize"), Some(ModelOptionValue::Bool(false))) {
             anyhow::bail!(
@@ -325,6 +318,26 @@ pub(super) fn validate_options(
                 full_model_id
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Checks the provider, model and `--param` options once they are combined:
+/// `language_code` may come from a different section than the secondary codes.
+pub(super) fn validate_merged_options(
+    full_model_id: &str,
+    options: &IndexMap<String, ModelOptionValue>,
+) -> anyhow::Result<()> {
+    let has_secondary_codes = matches!(
+        options.get("secondary_language_codes"),
+        Some(ModelOptionValue::StringList(codes)) if !codes.is_empty()
+    );
+    if has_secondary_codes && !options.contains_key("language_code") {
+        anyhow::bail!(
+            "Invalid params for '{}'. ElevenLabs secondary_language_codes requires language_code.",
+            full_model_id
+        );
     }
 
     Ok(())
@@ -607,13 +620,19 @@ mod tests {
 
     /// ElevenLabs answers a request that has secondary language codes but no
     /// primary `language_code` with a server error, so it is refused up front.
+    /// An empty list sends no field, so it needs no primary language.
     #[test]
     fn secondary_language_codes_require_a_primary_language_code() {
         let mut options = IndexMap::from([(
             "secondary_language_codes".to_string(),
-            ModelOptionValue::StringList(vec!["de".into()]),
+            ModelOptionValue::StringList(vec![]),
         )]);
-        assert!(validate_options("elevenlabs/scribe_v3", &options)
+        assert!(validate_merged_options("elevenlabs/scribe_v3", &options).is_ok());
+        options.insert(
+            "secondary_language_codes".to_string(),
+            ModelOptionValue::StringList(vec!["de".into()]),
+        );
+        assert!(validate_merged_options("elevenlabs/scribe_v3", &options)
             .unwrap_err()
             .to_string()
             .contains("secondary_language_codes requires language_code"));
@@ -621,7 +640,7 @@ mod tests {
             "language_code".to_string(),
             ModelOptionValue::String("en".into()),
         );
-        assert!(validate_options("elevenlabs/scribe_v3", &options).is_ok());
+        assert!(validate_merged_options("elevenlabs/scribe_v3", &options).is_ok());
     }
 
     /// A value ElevenLabs does not know must fail before the recording is uploaded.
