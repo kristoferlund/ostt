@@ -230,6 +230,19 @@ pub(crate) fn validate_params(
     }
 }
 
+/// Checks that span params, run on the combined provider, model and `--param`
+/// options rather than on one config section.
+pub(crate) fn validate_merged_params(
+    provider_id: &str,
+    full_model_id: &str,
+    options: &IndexMap<String, ModelOptionValue>,
+) -> anyhow::Result<()> {
+    match provider_id {
+        "elevenlabs" => elevenlabs::validate_merged_options(full_model_id, options),
+        _ => Ok(()),
+    }
+}
+
 pub(super) fn validate_string_value(
     full_model_id: &str,
     option_name: &str,

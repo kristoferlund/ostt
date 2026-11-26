@@ -1,7 +1,7 @@
 //! ElevenLabs Scribe API implementation.
 //!
 //! Handles transcription requests to ElevenLabs' speech-to-text API using
-//! multipart form data. Supports the Scribe v2, Medical and legacy v1 models.
+//! multipart form data. Supports the Scribe v3, v2, Medical and legacy v1 models.
 
 use serde::Deserialize;
 use std::path::Path;
@@ -14,10 +14,18 @@ use indexmap::IndexMap;
 pub(super) const MODELS: &[ModelSpec] = &[
     ModelSpec {
         provider_id: "elevenlabs",
+        model_id: "scribe_v3",
+        endpoint: "https://api.elevenlabs.io/v1/speech-to-text",
+        display_name: "Scribe v3 (general purpose)",
+        description: "ElevenLabs' most accurate Scribe speech-to-text model for recorded audio, the successor to Scribe v2. Adds number formatting and secondary language hints.",
+        languages: &["Multilingual", "90+ languages"],
+    },
+    ModelSpec {
+        provider_id: "elevenlabs",
         model_id: "scribe_v2",
         endpoint: "https://api.elevenlabs.io/v1/speech-to-text",
-        display_name: "Scribe v2 (general purpose)",
-        description: "ElevenLabs' latest Scribe speech-to-text model for high-accuracy transcription with broad multilingual support, including support for many languages beyond English.",
+        display_name: "Scribe v2 (previous generation)",
+        description: "ElevenLabs' previous Scribe speech-to-text model for high-accuracy transcription with broad multilingual support, including support for many languages beyond English.",
         languages: &["Multilingual", "90+ languages"],
     },
     ModelSpec {
@@ -152,8 +160,84 @@ const SCRIBE_V2_OPTIONS: &[ModelOptionSpec] = &[
     },
 ];
 
+const SCRIBE_V3_OPTIONS: &[ModelOptionSpec] = &[
+    ModelOptionSpec {
+        name: "language_code",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "tag_audio_events",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "timestamps_granularity",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "diarize",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "detect_speaker_roles",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "num_speakers",
+        kind: ModelOptionKind::Integer,
+    },
+    ModelOptionSpec {
+        name: "diarization_threshold",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "temperature",
+        kind: ModelOptionKind::Number,
+    },
+    ModelOptionSpec {
+        name: "file_format",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "seed",
+        kind: ModelOptionKind::Integer,
+    },
+    ModelOptionSpec {
+        name: "use_multi_channel",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "keyterms",
+        kind: ModelOptionKind::StringList,
+    },
+    ModelOptionSpec {
+        name: "no_verbatim",
+        kind: ModelOptionKind::Bool,
+    },
+    ModelOptionSpec {
+        name: "entity_detection",
+        kind: ModelOptionKind::StringOrStringList,
+    },
+    ModelOptionSpec {
+        name: "entity_redaction",
+        kind: ModelOptionKind::StringOrStringList,
+    },
+    ModelOptionSpec {
+        name: "entity_redaction_mode",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "numbers_format",
+        kind: ModelOptionKind::String,
+    },
+    ModelOptionSpec {
+        name: "secondary_language_codes",
+        kind: ModelOptionKind::StringList,
+    },
+];
+
 pub(super) fn option_schema(model_id: &str) -> Option<ModelOptionSchema> {
     match model_id {
+        "scribe_v3" => Some(ModelOptionSchema::new(SCRIBE_V3_OPTIONS)),
         "scribe_v2" | "scribe_v2_medical" => Some(ModelOptionSchema::new(SCRIBE_V2_OPTIONS)),
         "scribe_v1" => Some(ModelOptionSchema::new(SCRIBE_V1_OPTIONS)),
         _ => None,
@@ -196,6 +280,10 @@ pub(super) fn validate_options(
         )?;
     }
 
+    if let Some(value) = options.get("numbers_format") {
+        super::validate_string_value(full_model_id, "numbers_format", value, &["digits", "words"])?;
+    }
+
     if options.contains_key("diarization_threshold") {
         if matches!(options.get("diarize"), Some(ModelOptionValue::Bool(false))) {
             anyhow::bail!(
@@ -230,6 +318,26 @@ pub(super) fn validate_options(
                 full_model_id
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Checks the provider, model and `--param` options once they are combined:
+/// `language_code` may come from a different section than the secondary codes.
+pub(super) fn validate_merged_options(
+    full_model_id: &str,
+    options: &IndexMap<String, ModelOptionValue>,
+) -> anyhow::Result<()> {
+    let has_secondary_codes = matches!(
+        options.get("secondary_language_codes"),
+        Some(ModelOptionValue::StringList(codes)) if !codes.is_empty()
+    );
+    if has_secondary_codes && !options.contains_key("language_code") {
+        anyhow::bail!(
+            "Invalid params for '{}'. ElevenLabs secondary_language_codes requires language_code.",
+            full_model_id
+        );
     }
 
     Ok(())
@@ -306,6 +414,15 @@ pub(super) async fn transcribe(
     }
     if let Some(no_verbatim) = config.option_bool("no_verbatim") {
         form = form.text("no_verbatim", no_verbatim.to_string());
+    }
+    if let Some(numbers_format) = config.option_string("numbers_format") {
+        form = form.text("numbers_format", numbers_format.to_string());
+    }
+    // Each secondary language code is passed as a separate form field.
+    if let Some(codes) = config.option_string_list("secondary_language_codes") {
+        for code in codes {
+            form = form.text("secondary_language_codes", code.clone());
+        }
     }
     form = add_string_or_string_list_fields(form, config, "entity_detection");
     form = add_string_or_string_list_fields(form, config, "entity_redaction");
@@ -438,5 +555,107 @@ mod tests {
             option_schema("scribe_v2"),
             option_schema("scribe_v2_medical")
         );
+    }
+
+    /// ElevenLabs rejects a JSON array sent as one field, so every secondary
+    /// language code must be its own `secondary_language_codes` form field.
+    #[tokio::test]
+    async fn scribe_v3_sends_number_format_and_one_field_per_secondary_language() {
+        let mut server = mock_server(
+            TranscriptionProvider::ElevenLabs,
+            "scribe_v3",
+            &[(200, r#"{"text":" 42 kronor. "}"#)],
+        )
+        .await;
+        server.config.params.insert(
+            "numbers_format".into(),
+            ModelOptionValue::String("digits".into()),
+        );
+        server.config.params.insert(
+            "language_code".into(),
+            ModelOptionValue::String("en".into()),
+        );
+        server.config.params.insert(
+            "secondary_language_codes".into(),
+            ModelOptionValue::StringList(vec!["sv".into(), "de".into()]),
+        );
+        server
+            .config
+            .params
+            .insert("no_verbatim".into(), ModelOptionValue::Bool(true));
+        assert_eq!(
+            transcribe(&server.config, &server.audio_path)
+                .await
+                .unwrap(),
+            "42 kronor."
+        );
+        let requests = (&mut server.task).await.unwrap();
+        assert!(requests[0].contains("name=\"model_id\"\r\n\r\nscribe_v3\r\n"));
+        assert!(requests[0].contains("name=\"numbers_format\"\r\n\r\ndigits\r\n"));
+        assert!(requests[0].contains("name=\"secondary_language_codes\"\r\n\r\nsv\r\n"));
+        assert!(requests[0].contains("name=\"secondary_language_codes\"\r\n\r\nde\r\n"));
+        assert!(requests[0].contains("name=\"no_verbatim\"\r\n\r\ntrue\r\n"));
+    }
+
+    /// Scribe v3 takes every Scribe v2 param unchanged, and ElevenLabs returns
+    /// `invalid_parameters` when the two v3-only params are sent to another
+    /// model, so they must not be offered for Scribe v2.
+    #[test]
+    fn v3_only_params_extend_the_v2_schema_and_stay_off_older_models() {
+        let v3 = option_schema("scribe_v3").unwrap();
+        let v2 = option_schema("scribe_v2").unwrap();
+        for option in v2.options() {
+            assert_eq!(v3.option(option.name), Some(option), "{}", option.name);
+        }
+        for name in ["numbers_format", "secondary_language_codes"] {
+            assert!(v3.option(name).is_some(), "{name}");
+            for older in ["scribe_v2", "scribe_v2_medical", "scribe_v1"] {
+                assert!(
+                    option_schema(older).unwrap().option(name).is_none(),
+                    "{older} {name}"
+                );
+            }
+        }
+    }
+
+    /// ElevenLabs answers a request that has secondary language codes but no
+    /// primary `language_code` with a server error, so it is refused up front.
+    /// An empty list sends no field, so it needs no primary language.
+    #[test]
+    fn secondary_language_codes_require_a_primary_language_code() {
+        let mut options = IndexMap::from([(
+            "secondary_language_codes".to_string(),
+            ModelOptionValue::StringList(vec![]),
+        )]);
+        assert!(validate_merged_options("elevenlabs/scribe_v3", &options).is_ok());
+        options.insert(
+            "secondary_language_codes".to_string(),
+            ModelOptionValue::StringList(vec!["de".into()]),
+        );
+        assert!(validate_merged_options("elevenlabs/scribe_v3", &options)
+            .unwrap_err()
+            .to_string()
+            .contains("secondary_language_codes requires language_code"));
+        options.insert(
+            "language_code".to_string(),
+            ModelOptionValue::String("en".into()),
+        );
+        assert!(validate_merged_options("elevenlabs/scribe_v3", &options).is_ok());
+    }
+
+    /// A value ElevenLabs does not know must fail before the recording is uploaded.
+    #[test]
+    fn numbers_format_accepts_only_digits_or_words() {
+        for (value, valid) in [("digits", true), ("words", true), ("roman", false)] {
+            let options = IndexMap::from([(
+                "numbers_format".to_string(),
+                ModelOptionValue::String(value.into()),
+            )]);
+            assert_eq!(
+                validate_options("elevenlabs/scribe_v3", &options).is_ok(),
+                valid,
+                "{value}"
+            );
+        }
     }
 }
