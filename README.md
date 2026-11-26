@@ -277,6 +277,13 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and testing requirements
                 </a>
             </td>
             <td align="center">
+                <a href="https://github.com/cheese-cracker">
+                    <img src="https://avatars.githubusercontent.com/u/30256734?v=4" width="100;" alt="cheese-cracker"/>
+                    <br />
+                    <sub><b>Chinmay Hebbar</b></sub>
+                </a>
+            </td>
+            <td align="center">
                 <a href="https://github.com/axo-bot">
                     <img src="https://avatars.githubusercontent.com/u/142847116?v=4" width="100;" alt="axo-bot"/>
                     <br />
